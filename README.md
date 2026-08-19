@@ -24,12 +24,15 @@ The library is a self-contained folder, normally on an external drive:
   reels/
 ```
 
-Create it once by hand — the app never creates it, so a missing drive is an
-error instead of a silent second library on internal storage.
+Create it once with `bootleg init` — the app never creates it implicitly, so
+a missing or unmounted drive (or a leftover empty mountpoint from an unclean
+eject) is an error instead of a silent second library on internal storage.
 
 ```bash
-mkdir -p /Volumes/BootlegVision/{_inbox,sessions,reels}
+bootleg --library /Volumes/BootlegVision init
 ```
+
+`init` refuses if a library already exists at that path.
 
 ## Use
 

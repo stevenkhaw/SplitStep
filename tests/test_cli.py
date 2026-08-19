@@ -89,6 +89,51 @@ def test_doctor_on_missing_library_returns_2_and_does_not_raise(tmp_path, capsys
     assert "Is the drive plugged in?" in err
 
 
+def test_doctor_on_an_uninitialized_directory_returns_2(tmp_path, capsys):
+    """A directory that exists but was never `bootleg init`-ed (the leftover
+    mountpoint case) must not be silently treated as a fresh empty library.
+    """
+    tmp_path.mkdir(exist_ok=True)  # tmp_path already exists; this is a no-op
+    rc = main(["--library", str(tmp_path), "doctor"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "library.db" in err
+    assert not (tmp_path / "library.db").exists()
+
+
+# -- init --------------------------------------------------------------------
+
+def test_init_creates_the_tree_and_database(tmp_path, capsys):
+    rc = main(["--library", str(tmp_path), "init"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "initialized library" in out
+    assert (tmp_path / "library.db").exists()
+    assert (tmp_path / "_inbox").is_dir()
+    assert (tmp_path / "sessions").is_dir()
+    assert (tmp_path / "reels").is_dir()
+
+    # And the library it just created is now usable.
+    rc = main(["--library", str(tmp_path), "doctor"])
+    assert rc == 0
+
+
+def test_init_refuses_to_clobber_an_existing_library(library, capsys):
+    rc = main(["--library", str(library.root), "init"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "already initialized" in err
+
+
+def test_init_on_an_unmounted_path_returns_2(tmp_path, capsys):
+    missing = tmp_path / "not-plugged-in"
+    rc = main(["--library", str(missing), "init"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Is the drive plugged in?" in err
+    assert not missing.exists()
+
+
 # -- segment ---------------------------------------------------------------
 
 def test_segment_unknown_source_returns_1(library, capsys):

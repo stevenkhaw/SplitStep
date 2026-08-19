@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from bootleg.config import Library, LibraryNotMounted
+from bootleg.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from bootleg.db import jobs as jobq
 from bootleg.db.rallies import list_rallies, replace_rallies
 from bootleg.db.schema import connect, migrate
@@ -39,6 +39,17 @@ def _format_ts(ms: int) -> str:
     if h:
         return f"{h}:{m:02d}:{s:02d}.{ds}"
     return f"{m}:{s:02d}.{ds}"
+
+
+def cmd_init(args) -> int:
+    # Deliberately not _library(args): that requires library.db to already
+    # exist, which is exactly what this command creates.
+    lib = Library.create(Path(args.library).expanduser())
+    print(f"initialized library at {lib.root}")
+    for sub in (lib.inbox, lib.sessions_dir, lib.reels_dir):
+        print(f"  {sub}")
+    print(f"  {lib.db_path}")
+    return 0
 
 
 def cmd_doctor(args) -> int:
@@ -138,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--library", required=True, help="path to the library root")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p = sub.add_parser("init", help="create a new library tree and database")
+    p.set_defaults(func=cmd_init)
+
     p = sub.add_parser("doctor", help="show detected hardware and library state")
     p.set_defaults(func=cmd_doctor)
 
@@ -168,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except LibraryNotMounted as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except LibraryAlreadyInitialized as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

@@ -86,7 +86,10 @@ class InboxWatcher:
             self._stop.wait(SCAN_INTERVAL_S)
 
     def start(self) -> None:
-        self.library.inbox.mkdir(exist_ok=True)
+        # No mkdir here: `bootleg init` owns creating the tree. Auto-creating
+        # part of it would recreate the exact hazard Finding 3 closed --
+        # this thread starting happily against a library that was never
+        # actually initialized.
         self._thread = threading.Thread(target=self._loop, daemon=True, name="inbox")
         self._thread.start()
 
