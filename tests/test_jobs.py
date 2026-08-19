@@ -130,6 +130,50 @@ def test_worker_fails_unknown_job_types(library, conn):
     assert "mystery" in row["error"]
 
 
+def test_worker_heartbeats_a_running_job_on_a_timer(library, conn):
+    """Before this fix, heartbeat_at froze at claim time -- reclaim_stale()
+    could not tell an abandoned job from one partway through a long-running
+    handler, so a second `bootleg serve` instance against the same library
+    would requeue and double-run still-live work. This drives a handler that
+    outlives several heartbeat ticks and asserts heartbeat_at actually
+    advances while it runs, and that the heartbeat thread is gone once the
+    handler returns.
+    """
+    job_id = enqueue(conn, "ingest", {})
+    seen: list[str | None] = []
+
+    def slow_handler(_lib, _payload):
+        for _ in range(4):
+            time.sleep(0.03)
+            row = conn.execute(
+                "SELECT heartbeat_at FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            seen.append(row["heartbeat_at"])
+
+    worker = Worker(library, {"ingest": slow_handler}, heartbeat_interval_s=0.01)
+    assert worker.run_once() is True
+
+    assert len(set(seen)) > 1, f"heartbeat_at never advanced during the job: {seen}"
+    assert not any(
+        t.name == "heartbeat" and t.is_alive() for t in threading.enumerate()
+    ), "heartbeat thread leaked past the end of run_once()"
+
+
+def test_heartbeat_thread_stops_when_the_handler_raises(library, conn):
+    """The heartbeat timer must not leak a thread on the failure path either."""
+    def boom(_lib, _payload):
+        time.sleep(0.03)
+        raise ValueError("boom")
+
+    worker = Worker(library, {"ingest": boom}, heartbeat_interval_s=0.01)
+    enqueue(conn, "ingest", {})
+    assert worker.run_once() is True
+
+    assert not any(
+        t.name == "heartbeat" and t.is_alive() for t in threading.enumerate()
+    )
+
+
 def test_heartbeat_advances_heartbeat_at(conn):
     job_id = enqueue(conn, "ingest", {})
     claim(conn)
