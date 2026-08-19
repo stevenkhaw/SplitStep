@@ -1,0 +1,29 @@
+# brainstorming companion artifacts
+.superpowers/
+
+# local library / media (never commit video)
+library/
+_inbox/
+*.mov
+*.mp4
+*.MOV
+*.MP4
+*.jsonl
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# os
+.DS_Store
+
+# ...but golden test fixtures are source
+!tests/fixtures/**/*.jsonl
