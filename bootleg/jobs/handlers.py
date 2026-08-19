@@ -1,6 +1,7 @@
 import logging
 import shutil
 import sqlite3
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from bootleg.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     get_source,
+    get_source_by_original_name,
     set_session_status,
     set_source_status,
 )
@@ -47,35 +49,82 @@ def _played_on(recorded_at: str | None, fallback: Path) -> str:
     return ts.date().isoformat()
 
 
+def _move_to_failed(library: Library, src: Path, message: str) -> None:
+    """Quarantine a file that failed ingest so the watcher stops re-queuing
+    it every scan. A silent skip is invisible; a file sitting in
+    `_inbox/failed/` next to the error that killed it is the first thing a
+    human finds.
+    """
+    if not src.exists():
+        # Already moved into place (failure happened after the final move,
+        # e.g. a trivial DB error) or already quarantined by an earlier
+        # attempt -- nothing left in the inbox to move.
+        return
+    failed_dir = library.inbox / "failed"
+    failed_dir.mkdir(parents=True, exist_ok=True)
+    dest = failed_dir / src.name
+    if dest.exists():
+        dest = failed_dir / f"{src.stem}.{uuid.uuid4().hex[:8]}{src.suffix}"
+    shutil.move(str(src), dest)
+    (failed_dir / f"{dest.name}.error.txt").write_text(message)
+
+
 def handle_ingest(library: Library, payload: dict) -> None:
     src = Path(payload["path"])
     conn = _open(library)
+    session_id: str | None = None
+    source_id: str | None = None
 
-    info = probe(src)
-    # Proxy plus sprite sheet run roughly 1.5x the source in the worst case.
-    library.require_free(int(src.stat().st_size * 1.5))
-    played_on = _played_on(info.recorded_at, src)
-    session_id = find_or_create_session_for_date(conn, played_on)
+    try:
+        info = probe(src)
+        # Proxy plus sprite sheet run roughly 1.5x the source in the worst case.
+        library.require_free(int(src.stat().st_size * 1.5))
+        played_on = _played_on(info.recorded_at, src)
+        session_id = find_or_create_session_for_date(conn, played_on)
 
-    source_id, idx = add_source(
-        conn, session_id,
-        recorded_at=info.recorded_at or played_on,
-        duration_ms=info.duration_ms,
-        width=info.width, height=info.height, fps=info.fps,
-        original_name=src.name,
-    )
+        # A retry (this job's payload names the same inbox path again, after
+        # a worker crash and reclaim_stale requeue) must reuse the source
+        # row add_source already committed rather than adding a duplicate.
+        existing = get_source_by_original_name(conn, session_id, src.name)
+        if existing is not None:
+            source_id, idx = existing["id"], existing["idx"]
+        else:
+            source_id, idx = add_source(
+                conn, session_id,
+                recorded_at=info.recorded_at or played_on,
+                duration_ms=info.duration_ms,
+                width=info.width, height=info.height, fps=info.fps,
+                original_name=src.name,
+            )
 
-    dest_dir = library.source_dir(session_id, idx)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    original = dest_dir / f"original{src.suffix.lower()}"
-    shutil.move(str(src), original)
+        dest_dir = library.source_dir(session_id, idx)
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
-    make_proxy(original, dest_dir / "proxy.mp4")
-    make_thumbs(dest_dir / "proxy.mp4", dest_dir / "thumbs.jpg")
+        # Encode from the inbox copy and move it into place only once ingest
+        # has fully succeeded. Moving first (the old order) and encoding
+        # second stranded a retry: the payload names this exact inbox path,
+        # and after a crash mid-encode that path would no longer exist for
+        # probe() to find on the next attempt, wedging the source at
+        # 'ingesting' forever.
+        make_proxy(src, dest_dir / "proxy.mp4")
+        make_thumbs(dest_dir / "proxy.mp4", dest_dir / "thumbs.jpg")
 
-    set_source_status(conn, source_id, "ingested")
-    set_session_status(conn, session_id, "detecting")
-    jobq.enqueue(conn, "detect", {"source_id": source_id})
+        original = dest_dir / f"original{src.suffix.lower()}"
+        shutil.move(str(src), original)
+
+        set_source_status(conn, source_id, "ingested")
+        set_session_status(conn, session_id, "detecting")
+        jobq.enqueue(conn, "detect", {"source_id": source_id})
+    except Exception as exc:
+        # A failed ingest must not sit in the inbox to be re-queued on every
+        # 5-second scan, and must not leave sources/sessions status frozen
+        # at 'ingesting' with no record that anything went wrong.
+        if source_id is not None:
+            set_source_status(conn, source_id, "failed")
+        if session_id is not None:
+            set_session_status(conn, session_id, "failed")
+        _move_to_failed(library, src, f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def _quad_for(conn: sqlite3.Connection, source: sqlite3.Row) -> Quad:

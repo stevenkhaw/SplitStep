@@ -78,6 +78,19 @@ def get_source(conn: sqlite3.Connection, source_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
 
 
+def get_source_by_original_name(
+    conn: sqlite3.Connection, session_id: str, original_name: str
+) -> sqlite3.Row | None:
+    """Find an existing source row for a file already ingested into this
+    session, so a retried ingest reuses it instead of adding a duplicate.
+    """
+    return conn.execute(
+        "SELECT * FROM sources WHERE session_id = ? AND original_name = ?"
+        " ORDER BY idx LIMIT 1",
+        (session_id, original_name),
+    ).fetchone()
+
+
 def set_source_status(conn: sqlite3.Connection, source_id: str, status: str) -> None:
     conn.execute("UPDATE sources SET status = ? WHERE id = ?", (status, source_id))
     conn.commit()
