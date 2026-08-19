@@ -5,9 +5,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
+from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies, replace_rallies, set_star
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
+from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import Interval
 
 
@@ -82,6 +84,32 @@ def test_bounds_rejects_inverted_range(client, conn, seeded):
     r = client.post(f"/api/rallies/{rally_id}/bounds",
                     json={"start_ms": 5000, "end_ms": 1000})
     assert r.status_code == 422
+
+
+def test_preset_endpoint_assigns_the_preset_to_the_source(client, conn, seeded):
+    quad = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
+    preset_id = create_preset(conn, "backyard", quad)
+
+    r = client.post(f"/api/sources/{seeded['source_id']}/preset",
+                    json={"preset_id": preset_id})
+    assert r.status_code == 200
+    row = conn.execute(
+        "SELECT court_preset_id FROM sources WHERE id = ?", (seeded["source_id"],)
+    ).fetchone()
+    assert row["court_preset_id"] == preset_id
+
+
+def test_preset_endpoint_unknown_source_is_404(client, conn):
+    preset_id = create_preset(conn, "backyard",
+                              Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3))))
+    r = client.post("/api/sources/no-such-source/preset", json={"preset_id": preset_id})
+    assert r.status_code == 404
+
+
+def test_preset_endpoint_unknown_preset_is_404(client, seeded):
+    r = client.post(f"/api/sources/{seeded['source_id']}/preset",
+                    json={"preset_id": "no-such-preset"})
+    assert r.status_code == 404
 
 
 def test_jobs_endpoint_returns_a_list(client):

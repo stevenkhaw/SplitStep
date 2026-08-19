@@ -99,3 +99,13 @@ def set_source_status(conn: sqlite3.Connection, source_id: str, status: str) -> 
 def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -> None:
     conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
     conn.commit()
+
+
+def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) -> None:
+    """Assign a court preset to a source, so the next `detect` uses it
+    instead of `DEFAULT_QUAD` (the whole frame) -- see handlers._quad_for.
+    """
+    conn.execute(
+        "UPDATE sources SET court_preset_id = ? WHERE id = ?", (preset_id, source_id)
+    )
+    conn.commit()

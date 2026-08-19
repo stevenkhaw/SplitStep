@@ -3,10 +3,12 @@ import subprocess
 
 import pytest
 
+from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies
 from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import list_sessions, list_sources
+from bootleg.db.sessions import get_source, list_sessions, list_sources, set_source_preset
 from bootleg.detect.features import FeatureFrame, Player, write_features
+from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
 from bootleg.jobs.handlers import handle_detect, handle_ingest
 from bootleg.media.probe import ProbeError
@@ -97,6 +99,31 @@ def test_detect_segments_from_cached_features(library, conn, dropped_video, monk
     rallies = list_rallies(conn, session_id)
     assert len(rallies) == 1
     assert rallies[0]["det_start_ms"] == rallies[0]["start_ms"]
+
+
+# -- court presets: _quad_for -------------------------------------------------
+
+def test_quad_for_returns_default_quad_when_no_preset_is_assigned(
+    library, conn, dropped_video
+):
+    handle_ingest(library, {"path": str(dropped_video)})
+    session_id = list_sessions(conn)[0]["id"]
+    source = list_sources(conn, session_id)[0]
+    assert handlers._quad_for(conn, source) == handlers.DEFAULT_QUAD
+
+
+def test_quad_for_returns_the_assigned_preset_quad(library, conn, dropped_video):
+    handle_ingest(library, {"path": str(dropped_video)})
+    session_id = list_sessions(conn)[0]["id"]
+    source = list_sources(conn, session_id)[0]
+
+    quad = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
+    preset_id = create_preset(conn, "backyard", quad)
+    set_source_preset(conn, source["id"], preset_id)
+
+    refreshed = get_source(conn, source["id"])
+    assert handlers._quad_for(conn, refreshed) == quad
+    assert handlers._quad_for(conn, refreshed) != handlers.DEFAULT_QUAD
 
 
 def test_detect_is_idempotent(library, conn, dropped_video):

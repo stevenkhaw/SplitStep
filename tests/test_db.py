@@ -1,5 +1,6 @@
 import pytest
 
+from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     list_rallies,
     replace_rallies,
@@ -12,8 +13,12 @@ from bootleg.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     list_sources,
+    set_source_preset,
 )
+from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import Interval
+
+SAMPLE_QUAD = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
 
 
 def test_connect_sets_wal_and_full_sync(library):
@@ -225,3 +230,34 @@ def test_set_rejected_hides_nothing_but_flags_the_row(conn):
     rally_id = list_rallies(conn, s)[0]["id"]
     set_rejected(conn, rally_id, True)
     assert list_rallies(conn, s)[0]["rejected"] == 1
+
+
+# -- court presets ------------------------------------------------------------
+
+def test_create_preset_round_trips_through_the_database(conn):
+    preset_id = create_preset(conn, "backyard", SAMPLE_QUAD)
+    row = get_preset(conn, preset_id)
+    assert row["name"] == "backyard"
+    assert Quad.from_json(row["quad"]) == SAMPLE_QUAD
+
+
+def test_list_presets_returns_every_preset(conn):
+    create_preset(conn, "backyard", SAMPLE_QUAD)
+    create_preset(conn, "park court 3", SAMPLE_QUAD)
+    names = {r["name"] for r in list_presets(conn)}
+    assert names == {"backyard", "park court 3"}
+
+
+def test_get_preset_returns_none_for_an_unknown_id(conn):
+    assert get_preset(conn, "no-such-preset") is None
+
+
+def test_set_source_preset_assigns_the_preset_to_the_source(conn):
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    preset_id = create_preset(conn, "backyard", SAMPLE_QUAD)
+
+    set_source_preset(conn, src, preset_id)
+
+    row = conn.execute("SELECT court_preset_id FROM sources WHERE id = ?", (src,)).fetchone()
+    assert row["court_preset_id"] == preset_id

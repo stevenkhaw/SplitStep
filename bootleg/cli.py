@@ -6,10 +6,12 @@ from pathlib import Path
 
 from bootleg.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from bootleg.db import jobs as jobq
+from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import list_rallies, replace_rallies
 from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import get_source
+from bootleg.db.sessions import get_source, set_source_preset
 from bootleg.detect.features import read_features
+from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, segment
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
@@ -39,6 +41,26 @@ def _format_ts(ms: int) -> str:
     if h:
         return f"{h}:{m:02d}:{s:02d}.{ds}"
     return f"{m}:{s:02d}.{ds}"
+
+
+def _parse_quad(raw: str) -> Quad:
+    """Parse '--quad "x1,y1 x2,y2 x3,y3 x4,y4"' into a validated Quad.
+
+    Raises ValueError with a message naming the offending point on any
+    malformed input -- wrong point count, a missing comma, or a non-numeric
+    coordinate. Quad.__post_init__ does the rest of the validation (exactly
+    4 points, each coercible to a float pair).
+    """
+    points = []
+    for chunk in raw.split():
+        parts = chunk.split(",")
+        if len(parts) != 2:
+            raise ValueError(f"malformed quad point {chunk!r}: expected 'x,y'")
+        try:
+            points.append((float(parts[0]), float(parts[1])))
+        except ValueError as exc:
+            raise ValueError(f"malformed quad point {chunk!r}: {exc}") from exc
+    return Quad(tuple(points))
 
 
 def cmd_init(args) -> int:
@@ -142,6 +164,53 @@ def cmd_segment(args) -> int:
     return 0
 
 
+def cmd_preset_add(args) -> int:
+    """Create a court preset from four normalized 0-1 points.
+
+    Spec Stage 0.5: the user drags four corners over frame 1, extended to
+    the bottom of frame so the near player's feet stay inside the region.
+    This one manual step is what makes adjacent courts disappear from
+    detection -- without a preset, `_quad_for` always falls back to
+    DEFAULT_QUAD (the whole frame).
+    """
+    lib = _library(args)
+    conn = connect(lib.db_path)
+    migrate(conn)
+    try:
+        quad = _parse_quad(args.quad)
+    except ValueError as exc:
+        print(f"error: invalid --quad: {exc}", file=sys.stderr)
+        return 2
+    preset_id = create_preset(conn, args.name, quad)
+    print(preset_id)
+    return 0
+
+
+def cmd_preset_list(args) -> int:
+    lib = _library(args)
+    conn = connect(lib.db_path)
+    migrate(conn)
+    for row in list_presets(conn):
+        points = " ".join(f"{x:.4f},{y:.4f}" for x, y in Quad.from_json(row["quad"]).points)
+        print(f"{row['id']}  {row['name']}  {points}")
+    return 0
+
+
+def cmd_source_set_preset(args) -> int:
+    lib = _library(args)
+    conn = connect(lib.db_path)
+    migrate(conn)
+    if get_source(conn, args.source_id) is None:
+        print(f"no such source: {args.source_id}", file=sys.stderr)
+        return 1
+    if get_preset(conn, args.preset_id) is None:
+        print(f"no such preset: {args.preset_id}", file=sys.stderr)
+        return 1
+    set_source_preset(conn, args.source_id, args.preset_id)
+    print(f"source {args.source_id} now uses preset {args.preset_id}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -177,6 +246,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true",
                    help="print intervals without writing rallies")
     p.set_defaults(func=cmd_segment)
+
+    p = sub.add_parser("preset", help="manage court presets")
+    preset_sub = p.add_subparsers(dest="preset_command", required=True)
+
+    pp = preset_sub.add_parser("add", help="create a court preset from four points")
+    pp.add_argument("--name", required=True)
+    pp.add_argument("--quad", required=True,
+                    help="four normalized 0-1 points: 'x1,y1 x2,y2 x3,y3 x4,y4'")
+    pp.set_defaults(func=cmd_preset_add)
+
+    pl = preset_sub.add_parser("list", help="list court presets")
+    pl.set_defaults(func=cmd_preset_list)
+
+    p = sub.add_parser("source", help="manage sources")
+    source_sub = p.add_subparsers(dest="source_command", required=True)
+
+    sp = source_sub.add_parser("set-preset", help="assign a court preset to a source")
+    sp.add_argument("source_id")
+    sp.add_argument("preset_id")
+    sp.set_defaults(func=cmd_source_set_preset)
 
     args = parser.parse_args(argv)
     try:

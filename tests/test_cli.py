@@ -215,3 +215,78 @@ def test_serve_subcommand_routes_to_cmd_serve(library, monkeypatch):
     rc = main(["--library", str(library.root), "serve", "--port", "9000"])
     assert rc == 0
     assert calls == {"host": "127.0.0.1", "port": 9000}
+
+
+# -- preset / source set-preset ---------------------------------------------
+
+QUAD_ARG = "0.1,0.9 0.9,0.9 0.7,0.3 0.3,0.3"
+
+
+def test_preset_add_creates_a_row_and_prints_its_id(library, conn, capsys):
+    rc = main(["--library", str(library.root), "preset", "add",
+               "--name", "backyard", "--quad", QUAD_ARG])
+    assert rc == 0
+    preset_id = capsys.readouterr().out.strip()
+    row = conn.execute("SELECT * FROM court_presets WHERE id = ?", (preset_id,)).fetchone()
+    assert row is not None
+    assert row["name"] == "backyard"
+
+
+def test_preset_add_rejects_a_malformed_quad(library, conn, capsys):
+    rc = main(["--library", str(library.root), "preset", "add",
+               "--name", "bad", "--quad", "0.1,0.9 0.9,0.9 0.7,0.3"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "invalid --quad" in err
+    assert conn.execute("SELECT COUNT(*) AS n FROM court_presets").fetchone()["n"] == 0
+
+
+def test_preset_add_rejects_a_non_numeric_point(library, capsys):
+    rc = main(["--library", str(library.root), "preset", "add",
+               "--name", "bad", "--quad", "x,0.9 0.9,0.9 0.7,0.3 0.3,0.3"])
+    assert rc == 2
+    assert "invalid --quad" in capsys.readouterr().err
+
+
+def test_preset_list_prints_id_name_and_points(library, capsys):
+    main(["--library", str(library.root), "preset", "add",
+         "--name", "backyard", "--quad", QUAD_ARG])
+    capsys.readouterr()
+
+    rc = main(["--library", str(library.root), "preset", "list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "backyard" in out
+    assert "0.1000,0.9000" in out
+
+
+def test_source_set_preset_assigns_the_preset_to_the_source(library, conn, seeded_source, capsys):
+    main(["--library", str(library.root), "preset", "add",
+         "--name", "backyard", "--quad", QUAD_ARG])
+    preset_id = capsys.readouterr().out.strip()
+
+    rc = main(["--library", str(library.root), "source", "set-preset",
+               seeded_source["source_id"], preset_id])
+    assert rc == 0
+    row = conn.execute(
+        "SELECT court_preset_id FROM sources WHERE id = ?", (seeded_source["source_id"],)
+    ).fetchone()
+    assert row["court_preset_id"] == preset_id
+
+
+def test_source_set_preset_unknown_source_returns_1(library, capsys):
+    main(["--library", str(library.root), "preset", "add",
+         "--name", "backyard", "--quad", QUAD_ARG])
+    preset_id = capsys.readouterr().out.strip()
+
+    rc = main(["--library", str(library.root), "source", "set-preset",
+               "no-such-source", preset_id])
+    assert rc == 1
+    assert "no such source" in capsys.readouterr().err
+
+
+def test_source_set_preset_unknown_preset_returns_1(library, seeded_source, capsys):
+    rc = main(["--library", str(library.root), "source", "set-preset",
+               seeded_source["source_id"], "no-such-preset"])
+    assert rc == 1
+    assert "no such preset" in capsys.readouterr().err

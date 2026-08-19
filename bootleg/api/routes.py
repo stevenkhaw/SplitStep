@@ -3,8 +3,15 @@ import sqlite3
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
+from bootleg.db.presets import get_preset
 from bootleg.db.rallies import list_rallies, replace_rallies, set_bounds, set_rejected, set_star
-from bootleg.db.sessions import get_session, get_source, list_sessions, list_sources
+from bootleg.db.sessions import (
+    get_session,
+    get_source,
+    list_sessions,
+    list_sources,
+    set_source_preset,
+)
 from bootleg.detect.features import read_features
 from bootleg.detect.segment import SegmentParams, segment
 
@@ -34,6 +41,10 @@ class BoundsBody(BaseModel):
 
 class ResegmentBody(BaseModel):
     threshold: float = SegmentParams().threshold
+
+
+class PresetBody(BaseModel):
+    preset_id: str
 
 
 def _conn(request: Request) -> sqlite3.Connection:
@@ -108,6 +119,17 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
     intervals = segment(read_features(path), SegmentParams(threshold=body.threshold))
     count = replace_rallies(conn, source["session_id"], source_id, intervals)
     return {"count": count}
+
+
+@router.post("/api/sources/{source_id}/preset")
+def api_set_preset(source_id: str, body: PresetBody, request: Request):
+    conn = _conn(request)
+    if get_source(conn, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if get_preset(conn, body.preset_id) is None:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    set_source_preset(conn, source_id, body.preset_id)
+    return {"ok": True}
 
 
 @router.get("/api/jobs")
