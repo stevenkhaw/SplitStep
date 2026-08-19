@@ -102,24 +102,53 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
 
 
 def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> str:
-    """Flip a session to 'reviewed' once no rally in it is unseen.
+    """Flip a session to 'reviewed' once no rally in it is unseen, without
+    disturbing a status this pass does not own.
 
     Spec 6: every exit path from a rally sets reviewed_at -- starring,
     rejecting, skipping, and auto-advance all count as seen.
-    """
-    row = conn.execute(
-        "SELECT COUNT(*) AS unseen FROM rallies"
-        " WHERE session_id = ? AND reviewed_at IS NULL",
-        (session_id,),
-    ).fetchone()
-    total = conn.execute(
-        "SELECT COUNT(*) AS total FROM rallies WHERE session_id = ?", (session_id,)
-    ).fetchone()["total"]
 
-    status = "reviewed" if total > 0 and row["unseen"] == 0 else "ready"
-    conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
+    This is one guarded UPDATE, not a read-then-write. Every HTTP request
+    runs on its own thread with its own connection (see
+    ThreadLocalConnections in bootleg/api/app.py), so two review actions on
+    the last two rallies in a session -- the normal way every session ends
+    -- can land on separate connections at the same instant. A separate
+    SELECT-then-UPDATE could let both read a stale "still unseen" count and
+    both write 'ready'; once every rally is reviewed there is nothing left
+    to click, so nothing would ever retrigger the refresh and the session
+    would never reach 'reviewed'. Computing the verdict inside the UPDATE's
+    own CASE makes SQLite evaluate and apply it as a single statement,
+    closing that window.
+
+    The `status IN ('ready', 'reviewed')` guard confines this to the review
+    pass. Rally rows are addressable before a session reaches 'ready' --
+    handlers.py calls replace_rallies before marking a source ready, and a
+    multi-source session stays 'detecting' while a sibling source is still
+    processing -- and a session can also be 'failed'. A review action must
+    not silently overwrite any of those with 'ready'/'reviewed'; that
+    belongs to the job pipeline alone.
+
+    A session with zero rallies stays 'ready' forever rather than becoming
+    'reviewed': detection finding nothing means the threshold needs
+    lowering, not that review is done.
+    """
+    conn.execute(
+        """
+        UPDATE sessions
+           SET status = CASE
+                 WHEN (SELECT COUNT(*) FROM rallies WHERE session_id = :sid) > 0
+                  AND NOT EXISTS (SELECT 1 FROM rallies
+                                   WHERE session_id = :sid AND reviewed_at IS NULL)
+                 THEN 'reviewed' ELSE 'ready' END
+         WHERE id = :sid
+           AND status IN ('ready', 'reviewed')
+        """,
+        {"sid": session_id},
+    )
     conn.commit()
-    return status
+    return conn.execute(
+        "SELECT status FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()["status"]
 
 
 def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) -> None:
