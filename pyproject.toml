@@ -24,6 +24,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # starlette.testclient prefers an httpx2 package that we do not install
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
