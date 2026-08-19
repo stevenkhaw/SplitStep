@@ -46,6 +46,10 @@ def test_probe_reads_dimensions_and_duration(sample_video):
     assert info.has_audio is True
 
 
+def test_probe_reads_codec_name(sample_video):
+    assert probe(sample_video).codec_name == "h264"
+
+
 def test_probe_raises_on_non_media(tmp_path):
     junk = tmp_path / "notavideo.mp4"
     junk.write_bytes(b"this is not a video")

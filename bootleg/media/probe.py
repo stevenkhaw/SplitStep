@@ -17,6 +17,7 @@ class MediaInfo:
     fps: float
     recorded_at: str | None
     has_audio: bool
+    codec_name: str  # e.g. "h264", "hevc" -- ffprobe's video stream codec_name
 
 
 def _pick_fps(*rates: str | None) -> float:
@@ -77,4 +78,5 @@ def probe(path: Path) -> MediaInfo:
         fps=fps,
         recorded_at=recorded_at,
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        codec_name=video.get("codec_name", ""),
     )

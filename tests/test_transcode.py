@@ -25,6 +25,12 @@ def test_make_proxy_outputs_1080p_h264(big_video, tmp_path):
     assert dst.exists()
     info = probe(dst)
     assert info.height == 1080
+    # The actual constraint this test exists to guard: browser HEVC support
+    # is a coin flip (see make_proxy's docstring). Height and duration alone
+    # cannot tell H.264 from HEVC -- swapping the encoder passes both of
+    # those unchanged while producing exactly the black-rectangle-in-Chrome
+    # failure this constraint prevents.
+    assert info.codec_name == "h264"
     assert 2900 <= info.duration_ms <= 3100
 
 
