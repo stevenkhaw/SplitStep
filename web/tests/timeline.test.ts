@@ -1,0 +1,152 @@
+import { describe, expect, it } from 'vitest'
+import {
+  fractionToMs,
+  msToFraction,
+  nearestHandle,
+  sessionTimeline,
+  toSessionMs,
+  zoomWindow,
+} from '../src/lib/timeline'
+import type { Source } from '../src/lib/types'
+
+function source(idx: number, offsetMs: number, durationMs: number, recordedAt: string): Source {
+  return {
+    id: `src${idx}`,
+    session_id: 's',
+    idx,
+    recorded_at: recordedAt,
+    offset_ms: offsetMs,
+    duration_ms: durationMs,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    has_original: 1,
+    court_preset_id: null,
+    status: 'ready',
+  }
+}
+
+describe('sessionTimeline', () => {
+  it('sums durations for the virtual timeline', () => {
+    const t = sessionTimeline([
+      source(1, 0, 600000, '2026-08-19T10:00:00Z'),
+      source(2, 600000, 300000, '2026-08-19T10:32:00Z'),
+    ])
+    expect(t.totalMs).toBe(900000)
+  })
+
+  it('marks each source boundary with the real elapsed gap', () => {
+    const t = sessionTimeline([
+      source(1, 0, 600000, '2026-08-19T10:00:00Z'),
+      source(2, 600000, 300000, '2026-08-19T10:32:00Z'),
+    ])
+    // source 1 ran 10:00 -> 10:10; source 2 started 10:32, so a 22 minute gap
+    expect(t.marks[1].gapMs).toBe(22 * 60 * 1000)
+    expect(t.marks[1].offsetMs).toBe(600000)
+  })
+
+  it('reports no gap before the first source', () => {
+    const t = sessionTimeline([source(1, 0, 600000, '2026-08-19T10:00:00Z')])
+    expect(t.marks[0].gapMs).toBe(0)
+  })
+
+  it('lays sources out contiguously, not to real elapsed time', () => {
+    // a 22 minute break must not consume timeline width
+    const t = sessionTimeline([
+      source(1, 0, 600000, '2026-08-19T10:00:00Z'),
+      source(2, 600000, 300000, '2026-08-19T10:32:00Z'),
+    ])
+    expect(t.totalMs).toBe(900000) // not 900000 + 22 minutes
+  })
+
+  it('handles an empty source list', () => {
+    expect(sessionTimeline([]).totalMs).toBe(0)
+  })
+
+  it('clamps a negative gap from out-of-order timestamps to zero', () => {
+    const t = sessionTimeline([
+      source(1, 0, 600000, '2026-08-19T10:00:00Z'),
+      source(2, 600000, 300000, '2026-08-19T09:00:00Z'),
+    ])
+    expect(t.marks[1].gapMs).toBe(0)
+  })
+})
+
+describe('toSessionMs', () => {
+  const sources = [
+    source(1, 0, 600000, '2026-08-19T10:00:00Z'),
+    source(2, 600000, 300000, '2026-08-19T10:32:00Z'),
+  ]
+
+  it('passes through for the first source', () => {
+    expect(toSessionMs(sources, 'src1', 5000)).toBe(5000)
+  })
+
+  it('offsets later sources', () => {
+    expect(toSessionMs(sources, 'src2', 5000)).toBe(605000)
+  })
+
+  it('returns the local value for an unknown source', () => {
+    expect(toSessionMs(sources, 'nope', 5000)).toBe(5000)
+  })
+})
+
+describe('msToFraction / fractionToMs', () => {
+  it('round-trips', () => {
+    expect(msToFraction(450000, 900000)).toBe(0.5)
+    expect(fractionToMs(0.5, 900000)).toBe(450000)
+  })
+
+  it('clamps out-of-range input', () => {
+    expect(msToFraction(-100, 900000)).toBe(0)
+    expect(msToFraction(9000000, 900000)).toBe(1)
+    expect(fractionToMs(-0.5, 900000)).toBe(0)
+    expect(fractionToMs(1.5, 900000)).toBe(900000)
+  })
+
+  it('returns zero rather than dividing by a zero total', () => {
+    expect(msToFraction(1000, 0)).toBe(0)
+  })
+})
+
+describe('zoomWindow', () => {
+  it('centres a window of the requested span', () => {
+    expect(zoomWindow(100000, 40000, 900000)).toEqual({ startMs: 80000, endMs: 120000 })
+  })
+
+  it('shifts rather than shrinks at the start', () => {
+    expect(zoomWindow(5000, 40000, 900000)).toEqual({ startMs: 0, endMs: 40000 })
+  })
+
+  it('shifts rather than shrinks at the end', () => {
+    expect(zoomWindow(895000, 40000, 900000)).toEqual({ startMs: 860000, endMs: 900000 })
+  })
+
+  it('caps the span at the session length', () => {
+    expect(zoomWindow(5000, 40000, 20000)).toEqual({ startMs: 0, endMs: 20000 })
+  })
+})
+
+describe('nearestHandle', () => {
+  // a 1000px band, handles need to be within 10px to grab
+  it('grabs the start handle', () => {
+    expect(nearestHandle(0.302, 0.3, 0.7, 10, 1000)).toBe('start')
+  })
+
+  it('grabs the end handle', () => {
+    expect(nearestHandle(0.698, 0.3, 0.7, 10, 1000)).toBe('end')
+  })
+
+  it('returns null in the middle', () => {
+    expect(nearestHandle(0.5, 0.3, 0.7, 10, 1000)).toBeNull()
+  })
+
+  it('returns null outside the segment', () => {
+    expect(nearestHandle(0.05, 0.3, 0.7, 10, 1000)).toBeNull()
+  })
+
+  it('picks the closer handle when the segment is very short', () => {
+    expect(nearestHandle(0.5005, 0.5, 0.502, 10, 1000)).toBe('start')
+    expect(nearestHandle(0.5018, 0.5, 0.502, 10, 1000)).toBe('end')
+  })
+})
