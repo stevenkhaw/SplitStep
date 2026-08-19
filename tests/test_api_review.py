@@ -483,3 +483,44 @@ def test_frame_endpoint_422s_when_extraction_fails(client, library, seeded, monk
 
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r.status_code == 422
+
+
+def test_index_is_served_when_the_spa_is_built(library, tmp_path):
+    dist = library.root / "webdist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>BootlegVision</title>")
+    (dist / "assets" / "app.js").write_text("console.log('hi')")
+
+    from bootleg.api.app import create_app
+    from bootleg.api.spa import mount_spa
+
+    app = create_app(library)
+    mount_spa(app, dist)
+    with TestClient(app) as c:
+        assert "BootlegVision" in c.get("/").text
+        assert c.get("/assets/app.js").status_code == 200
+
+
+def test_api_routes_still_work_with_the_spa_mounted(library):
+    dist = library.root / "webdist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html>")
+
+    from bootleg.api.app import create_app
+    from bootleg.api.spa import mount_spa
+
+    app = create_app(library)
+    mount_spa(app, dist)
+    with TestClient(app) as c:
+        assert c.get("/api/sessions").status_code == 200
+
+
+def test_missing_dist_is_tolerated(library):
+    """Running `bootleg serve` before the UI is built must not crash."""
+    from bootleg.api.app import create_app
+    from bootleg.api.spa import mount_spa
+
+    app = create_app(library)
+    mount_spa(app, library.root / "does-not-exist")
+    with TestClient(app) as c:
+        assert c.get("/api/sessions").status_code == 200

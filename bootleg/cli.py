@@ -94,7 +94,7 @@ def cmd_serve(args) -> int:
     from bootleg.api.app import create_app
 
     lib = _library(args)
-    app = create_app(lib)
+    app = create_app(lib, spa_dist=Path(__file__).parent.parent / "web" / "dist")
 
     worker = Worker(lib, HANDLERS)
     watcher = InboxWatcher(lib)

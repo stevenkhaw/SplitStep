@@ -9,6 +9,7 @@ from bootleg.config import Library
 from bootleg.db.schema import connect, migrate
 
 from .routes import router
+from .spa import mount_spa
 
 
 class ThreadLocalConnections:
@@ -61,7 +62,7 @@ class ThreadLocalConnections:
             conn.close()
 
 
-def create_app(library: Library) -> FastAPI:
+def create_app(library: Library, spa_dist: Path | None = None) -> FastAPI:
     # Migrate once at startup on a throwaway connection, then close it --
     # requests get their own connections from ThreadLocalConnections below.
     conn = connect(library.db_path)
@@ -79,4 +80,6 @@ def create_app(library: Library) -> FastAPI:
     app.state.library = library
     app.state.conns = conns
     app.include_router(router)
+    if spa_dist is not None:
+        mount_spa(app, spa_dist)
     return app
