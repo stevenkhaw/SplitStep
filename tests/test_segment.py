@@ -111,12 +111,45 @@ def test_lower_threshold_finds_more(params):
 
 
 def test_audio_only_does_not_create_a_rally(params):
-    """Hits with no player activity — an adjacent court — must not segment."""
+    """Hits with no player activity — an adjacent court — must not segment.
+
+    Documentation test only: at default weights, audio-only contribution is
+    (w_hits + w_regularity) / weight_total = 1.1 / 3.3 = 0.333, already below
+    the 0.45 threshold, so this passes whether or not the `if not both` guard
+    in `_raw_score` exists. It records the intended behavior at default
+    params but cannot detect a regression that deletes the guard — see
+    `test_audio_only_does_not_create_a_rally_with_audio_heavy_weights` below
+    for the test that actually protects it.
+    """
     stream = [
         FeatureFrame(i * SAMPLE_MS, 0, None, None, hits=2, hit_reg=1.0)
         for i in range(60)
     ]
     assert segment(stream, params) == []
+
+
+def test_audio_only_does_not_create_a_rally_with_audio_heavy_weights():
+    """Mutation-effective version of the guard test above.
+
+    Raised w_hits/w_regularity are what make this test capable of failing:
+    with weight_total = 1.0 + 0.9 + 0.3 + 3.0 + 2.0 = 7.2, an audio-only
+    frame scores (3.0 + 2.0) / 7.2 = 0.694 without the `if not both` guard in
+    `_raw_score` — well past the 0.45 threshold — versus 0.0 with it. Delete
+    the guard and this test fails; the default-weight test above does not.
+
+    Audio-heavy weights are not a contrived edge case: they are exactly what
+    a user reaches for once they confirm ball contact is audible on their
+    footage and want the audio channel to carry more of the score. That is
+    precisely when the guard becomes load-bearing — without it, ball impacts
+    carrying from an adjacent public court would manufacture rallies on an
+    empty court.
+    """
+    tuned = SegmentParams(w_hits=3.0, w_regularity=2.0)
+    stream = [
+        FeatureFrame(i * SAMPLE_MS, 0, None, None, hits=2, hit_reg=1.0)
+        for i in range(60)
+    ]
+    assert segment(stream, tuned) == []
 
 
 def test_score_series_length_matches_input(params):
