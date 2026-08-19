@@ -101,6 +101,27 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
     conn.commit()
 
 
+def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> str:
+    """Flip a session to 'reviewed' once no rally in it is unseen.
+
+    Spec 6: every exit path from a rally sets reviewed_at -- starring,
+    rejecting, skipping, and auto-advance all count as seen.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS unseen FROM rallies"
+        " WHERE session_id = ? AND reviewed_at IS NULL",
+        (session_id,),
+    ).fetchone()
+    total = conn.execute(
+        "SELECT COUNT(*) AS total FROM rallies WHERE session_id = ?", (session_id,)
+    ).fetchone()["total"]
+
+    status = "reviewed" if total > 0 and row["unseen"] == 0 else "ready"
+    conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
+    conn.commit()
+    return status
+
+
 def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) -> None:
     """Assign a court preset to a source, so the next `detect` uses it
     instead of `DEFAULT_QUAD` (the whole frame) -- see handlers._quad_for.

@@ -4,12 +4,20 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
 from bootleg.db.presets import get_preset
-from bootleg.db.rallies import list_rallies, replace_rallies, set_bounds, set_rejected, set_star
+from bootleg.db.rallies import (
+    list_rallies,
+    mark_reviewed,
+    replace_rallies,
+    set_bounds,
+    set_rejected,
+    set_star,
+)
 from bootleg.db.sessions import (
     get_session,
     get_source,
     list_sessions,
     list_sources,
+    refresh_session_review_status,
     set_source_preset,
 )
 from bootleg.detect.features import read_features
@@ -86,16 +94,37 @@ def api_get_session(session_id: str, request: Request):
     }
 
 
+def _session_id_for_rally(conn, rally_id: str) -> str:
+    row = conn.execute(
+        "SELECT session_id FROM rallies WHERE id = ?", (rally_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rally not found")
+    return row["session_id"]
+
+
 @router.post("/api/rallies/{rally_id}/star")
 def api_star(rally_id: str, body: StarBody, request: Request):
-    set_star(_conn(request), rally_id, body.starred)
-    return {"ok": True}
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    set_star(conn, rally_id, body.starred)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 
 @router.post("/api/rallies/{rally_id}/reject")
 def api_reject(rally_id: str, body: RejectBody, request: Request):
-    set_rejected(_conn(request), rally_id, body.rejected)
-    return {"ok": True}
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    set_rejected(conn, rally_id, body.rejected)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/reviewed")
+def api_reviewed(rally_id: str, request: Request):
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    mark_reviewed(conn, rally_id)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 
 @router.post("/api/rallies/{rally_id}/bounds")
