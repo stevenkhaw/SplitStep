@@ -3,7 +3,7 @@ import json
 import pytest
 
 from bootleg import cli
-from bootleg.cli import main
+from bootleg.cli import _format_ts, main
 from bootleg.db.rallies import list_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
@@ -37,6 +37,35 @@ def seeded_source(library, conn):
     ]
     write_features(library.source_dir(session_id, idx) / "features.jsonl", frames)
     return {"session_id": session_id, "source_id": source_id, "idx": idx}
+
+
+# -- _format_ts --------------------------------------------------------------
+
+def test_format_ts_sub_minute():
+    assert _format_ts(12_400) == "0:12.4"
+
+
+def test_format_ts_past_one_minute():
+    assert _format_ts(75_300) == "1:15.3"
+
+
+def test_format_ts_past_one_hour():
+    assert _format_ts(3_661_200) == "1:01:01.2"
+
+
+def test_format_ts_zero():
+    assert _format_ts(0) == "0:00.0"
+
+
+def test_format_ts_rounds_up_seconds_into_the_next_minute():
+    """59.95s must carry into the minute, not print an invalid '0:60.0'.
+
+    This is the boundary the module docstring calls out: naive float
+    formatting of seconds to one decimal place can round 59.95 up to
+    "60.0" instead of rolling over -- exactly the kind of thing that
+    silently breaks at the hour boundary if reintroduced.
+    """
+    assert _format_ts(59_950) == "1:00.0"
 
 
 # -- doctor --------------------------------------------------------------
@@ -76,6 +105,11 @@ def test_segment_dry_run_prints_intervals_and_writes_no_rallies(
                seeded_source["source_id"], "--dry-run"])
     assert rc == 0
     out = capsys.readouterr().out
+    # The fixture's one interval spans 0 -- 8000 ms; printed as M:SS.s timestamps,
+    # not raw seconds -- this is what a user reads against their memory of the match.
+    assert "0:00.0" in out
+    assert "0:08.0" in out
+    assert "8.0s" in out  # duration column stays plain seconds
     assert "conf" in out
     assert "1 rallies at threshold 0.45" in out
     assert list_rallies(conn, seeded_source["session_id"]) == []

@@ -20,6 +20,27 @@ def _library(args) -> Library:
     return Library.open(Path(args.library).expanduser())
 
 
+def _format_ts(ms: int) -> str:
+    """Format milliseconds as M:SS.s, or H:MM:SS.s once past one hour.
+
+    Integer deciseconds throughout, not float division -- a real session
+    runs past the one-hour mark and rounding a float seconds value to one
+    decimal place can round 59.95 up to "60.0" instead of carrying into the
+    next minute. Working in integer deciseconds and letting // and % do the
+    carry means 59.95s prints as "1:00.0", never "0:60.0".
+    """
+    total_ds = round(ms / 100)
+    ds = total_ds % 10
+    total_s = total_ds // 10
+    s = total_s % 60
+    total_m = total_s // 60
+    m = total_m % 60
+    h = total_m // 60
+    if h:
+        return f"{h}:{m:02d}:{s:02d}.{ds}"
+    return f"{m}:{s:02d}.{ds}"
+
+
 def cmd_doctor(args) -> int:
     from bootleg.accel import detect_accel
 
@@ -98,7 +119,7 @@ def cmd_segment(args) -> int:
 
     if args.dry_run:
         for i, iv in enumerate(intervals, 1):
-            print(f"{i:3d}  {iv.start_ms/1000:8.2f}s → {iv.end_ms/1000:8.2f}s"
+            print(f"{i:3d}  {_format_ts(iv.start_ms):>9} → {_format_ts(iv.end_ms):>9}"
                   f"  ({(iv.end_ms-iv.start_ms)/1000:5.1f}s)  conf {iv.confidence:.2f}")
         print(f"\n{len(intervals)} rallies at threshold {args.threshold}")
         return 0
