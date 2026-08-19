@@ -1,7 +1,10 @@
 import sqlite3
+import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel, model_validator
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, field_validator, model_validator
 
 from bootleg.db.presets import get_preset
 from bootleg.db.rallies import (
@@ -21,7 +24,9 @@ from bootleg.db.sessions import (
     set_source_preset,
 )
 from bootleg.detect.features import read_features
+from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
+from bootleg.media.frames import extract_frame
 
 from .media import range_response
 
@@ -53,6 +58,23 @@ class ResegmentBody(BaseModel):
 
 class PresetBody(BaseModel):
     preset_id: str
+
+
+class PresetCreateBody(BaseModel):
+    name: str
+    points: list[list[float]]
+
+    @field_validator("points")
+    @classmethod
+    def check_points(cls, v: list[list[float]]) -> list[list[float]]:
+        if len(v) != 4:
+            raise ValueError("a play region needs exactly 4 points")
+        for point in v:
+            if len(point) != 2:
+                raise ValueError("each point must be an [x, y] pair")
+            if not all(0.0 <= c <= 1.0 for c in point):
+                raise ValueError("points are normalized and must be within 0-1")
+        return v
 
 
 def _conn(request: Request) -> sqlite3.Connection:
@@ -198,3 +220,42 @@ def api_proxy(session_id: str, idx: int, request: Request,
               range: str | None = Header(default=None)):
     path = _library(request).source_dir(session_id, idx) / "proxy.mp4"
     return range_response(path, range)
+
+
+@router.get("/api/court_presets")
+def api_list_presets(request: Request):
+    rows = _conn(request).execute(
+        "SELECT id, name, quad, created_at FROM court_presets ORDER BY created_at DESC"
+    ).fetchall()
+    return [
+        {"id": r["id"], "name": r["name"],
+         "points": [list(p) for p in Quad.from_json(r["quad"]).points],
+         "created_at": r["created_at"]}
+        for r in rows
+    ]
+
+
+@router.post("/api/court_presets")
+def api_create_preset(body: PresetCreateBody, request: Request):
+    quad = Quad(tuple((x, y) for x, y in body.points))
+    preset_id = uuid.uuid4().hex
+    _conn(request).execute(
+        "INSERT INTO court_presets (id, name, quad, created_at) VALUES (?,?,?,?)",
+        (preset_id, body.name, quad.to_json(), datetime.now(UTC).isoformat()),
+    )
+    _conn(request).commit()
+    return {"id": preset_id}
+
+
+@router.get("/media/{session_id}/{idx}/frame.jpg")
+def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
+    library = _library(request)
+    src_dir = library.source_dir(session_id, idx)
+    proxy = src_dir / "proxy.mp4"
+    if not proxy.is_file():
+        raise HTTPException(status_code=404, detail="Proxy not found")
+
+    dst = src_dir / f"frame-{at_ms}.jpg"
+    if not dst.exists():
+        extract_frame(proxy, dst, at_ms=at_ms)
+    return FileResponse(dst, media_type="image/jpeg")

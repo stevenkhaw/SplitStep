@@ -260,3 +260,43 @@ def test_scores_clamps_step_ms_to_one_for_duplicate_leading_timestamps(client, l
     ])
     body = client.get(f"/api/sources/{seeded['source_id']}/scores").json()
     assert body["step_ms"] == 1
+
+
+def test_create_preset_returns_an_id(client):
+    r = client.post("/api/court_presets", json={
+        "name": "Memorial court 3",
+        "points": [[0.30, 0.32], [0.70, 0.32], [0.98, 1.0], [0.02, 1.0]],
+    })
+    assert r.status_code == 200
+    assert r.json()["id"]
+
+
+def test_created_preset_appears_in_the_list(client):
+    client.post("/api/court_presets", json={
+        "name": "Memorial court 3",
+        "points": [[0.30, 0.32], [0.70, 0.32], [0.98, 1.0], [0.02, 1.0]],
+    })
+    body = client.get("/api/court_presets").json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Memorial court 3"
+    assert body[0]["points"][0] == [0.30, 0.32]
+
+
+def test_preset_with_three_points_is_422(client):
+    r = client.post("/api/court_presets", json={
+        "name": "bad", "points": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+    })
+    assert r.status_code == 422
+
+
+def test_preset_with_out_of_range_point_is_422(client):
+    r = client.post("/api/court_presets", json={
+        "name": "bad",
+        "points": [[0.0, 0.0], [1.4, 0.0], [1.0, 1.0], [0.0, 1.0]],
+    })
+    assert r.status_code == 422
+
+
+def test_frame_endpoint_404s_when_the_proxy_is_missing(client, seeded):
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r.status_code == 404
