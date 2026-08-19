@@ -9,8 +9,19 @@ class Quad:
     points: tuple[tuple[float, float], ...]
 
     def __post_init__(self) -> None:
-        if len(self.points) != 4:
-            raise ValueError(f"Quad needs exactly 4 points, got {len(self.points)}")
+        points = tuple(self.points)
+        if len(points) != 4:
+            raise ValueError(f"Quad needs exactly 4 points, got {len(points)}")
+        coerced = []
+        for p in points:
+            try:
+                px, py = p
+                coerced.append((float(px), float(py)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Quad point must be an (x, y) pair, got {p!r}") from exc
+        # dataclass is frozen: bypass __setattr__ to store the validated,
+        # immutable representation instead of whatever was passed in.
+        object.__setattr__(self, "points", tuple(coerced))
 
     def contains(self, x: float, y: float) -> bool:
         """Ray-casting point-in-polygon."""

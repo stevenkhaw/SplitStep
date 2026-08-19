@@ -22,6 +22,18 @@ class FeatureFrame:
     hit_reg: float          # 0-1 regularity of the last 4 inter-hit intervals
 
     def to_json_line(self) -> str:
+        """Serialize this frame to one JSON line.
+
+        Float fields are quantized to 4 decimal places. This is intentional,
+        not a precision bug: an hour of footage is ~18,000 rows, and 4dp on
+        a normalized 0-1 coordinate is far below detector noise, so the
+        rounding keeps output files small. Quantization is idempotent -
+        rounding an already-4dp value to 4dp is a no-op - so re-reading a
+        written line and writing it again reproduces the same bytes, and
+        repeated read/write cycles (e.g. re-segmentation) never drift.
+        High-precision inputs (e.g. cx=1/3) are therefore NOT preserved
+        exactly; only the quantized value round-trips.
+        """
         d: dict = {"t": self.t_ms, "n": self.n, "hits": self.hits,
                    "hit_reg": round(self.hit_reg, 4)}
         if self.near is not None:
