@@ -52,12 +52,12 @@ def test_drop_file_then_serve_it_over_the_api(library, conn):
     HANDLERS["detect"](library, {"source_id": source["id"], "reuse_features": True})
 
     # 5. the API exposes the result
-    client = TestClient(create_app(library))
-    body = client.get(f"/api/sessions/{session['id']}").json()
-    assert len(body["rallies"]) == 1
+    with TestClient(create_app(library)) as client:
+        body = client.get(f"/api/sessions/{session['id']}").json()
+        assert len(body["rallies"]) == 1
 
-    # 6. and the proxy streams with range support
-    r = client.get(f"/media/{session['id']}/{source['idx']}/proxy.mp4",
-                   headers={"Range": "bytes=0-99"})
-    assert r.status_code == 206
-    assert len(r.content) == 100
+        # 6. and the proxy streams with range support
+        r = client.get(f"/media/{session['id']}/{source['idx']}/proxy.mp4",
+                       headers={"Range": "bytes=0-99"})
+        assert r.status_code == 206
+        assert len(r.content) == 100

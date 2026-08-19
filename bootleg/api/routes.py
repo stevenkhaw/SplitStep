@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
@@ -34,8 +36,8 @@ class ResegmentBody(BaseModel):
     threshold: float = SegmentParams().threshold
 
 
-def _conn(request: Request):
-    return request.app.state.conn
+def _conn(request: Request) -> sqlite3.Connection:
+    return request.app.state.conns.get()
 
 
 def _library(request: Request):

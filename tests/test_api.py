@@ -1,8 +1,11 @@
+import sqlite3
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
-from bootleg.db.rallies import list_rallies, replace_rallies
+from bootleg.db.rallies import list_rallies, replace_rallies, set_star
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
@@ -17,7 +20,11 @@ def conn(library):
 
 @pytest.fixture
 def client(library, conn):
-    return TestClient(create_app(library))
+    # A plain `with` block, not a bare TestClient(...): lifespan startup and
+    # shutdown only run inside the context manager, and shutdown is what
+    # closes the per-thread connection pool -- see Finding 7.
+    with TestClient(create_app(library)) as c:
+        yield c
 
 
 @pytest.fixture
@@ -148,3 +155,100 @@ def test_resegment_rewrites_rallies_from_cached_features(client, library, conn, 
                     json={"threshold": 0.45})
     assert r.status_code == 200
     assert r.json()["count"] == 1
+
+
+# -- Finding 7: each request gets its own sqlite connection -----------------
+
+def test_two_concurrent_requests_do_not_share_a_connection(library):
+    """Every route is `def`, not `async def`, so Starlette runs each one on
+    an anyio worker thread. A single `app.state.conn` shared by every thread
+    is what let a concurrent `set_star` commit() finalize a `replace_rallies`
+    transaction another thread had open and had not committed yet. Getting
+    the connection the same way a route does -- `app.state.conns.get()` --
+    from two different threads must return two different connection objects.
+    """
+    app = create_app(library)
+    barrier = threading.Barrier(2)
+    conns: dict[str, object] = {}
+
+    def hit(name: str) -> None:
+        barrier.wait()
+        conns[name] = app.state.conns.get()
+
+    t1 = threading.Thread(target=hit, args=("a",))
+    t2 = threading.Thread(target=hit, args=("b",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert conns["a"] is not conns["b"]
+    # Same thread, called again, reuses its own connection rather than
+    # opening a new one on every call.
+    assert app.state.conns.get() is app.state.conns.get()
+    app.state.conns.close_all()
+
+
+def test_connections_are_closed_on_app_shutdown(library):
+    """The pool must not leak connections -- close_all() (wired to the app's
+    lifespan shutdown) must leave every connection it handed out unusable.
+    """
+    app = create_app(library)
+    conn = app.state.conns.get()
+    app.state.conns.close_all()
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+    # And the pool recovers: a later .get() opens a fresh, working connection.
+    fresh = app.state.conns.get()
+    fresh.execute("SELECT 1")
+    app.state.conns.close_all()
+
+
+def test_sharing_one_connection_across_callers_finalizes_an_unrelated_open_transaction(
+    library, conn
+):
+    """Documents the actual mechanism Finding 7 describes: a sqlite3
+    transaction lives on the Connection *object*, not on the calling
+    thread. On the old design (one `app.state.conn` shared by every route),
+    `replace_rallies` holding an explicit `BEGIN IMMEDIATE` mid-rewrite and
+    a concurrent `set_star` call on that *same* connection object would
+    have set_star's `commit()` finalize replace_rallies's half-applied
+    write too -- there is only one transaction, because there is only one
+    connection. This is exactly the hazard request-scoped connections
+    (proven distinct in test_two_concurrent_requests_do_not_share_a_connection
+    above) eliminate structurally.
+    """
+    session_id = find_or_create_session_for_date(conn, "2026-08-19")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-19T10:00:00Z", duration_ms=10_000,
+        width=1920, height=1080, fps=30.0, original_name="a.mov",
+    )
+    conn.commit()
+
+    shared = connect(library.db_path)  # stands in for the old app.state.conn
+
+    # Something like replace_rallies: an explicit transaction with a write
+    # that has not been committed yet.
+    shared.execute("BEGIN IMMEDIATE")
+    shared.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("mid-flight", session_id, source_id, 999, 0, 100, 0, 100, 0.5),
+    )
+
+    # An unrelated set_star call on the *same shared connection* -- what
+    # every route did before this fix.
+    set_star(shared, "does-not-exist", True)
+
+    # set_star's commit() finalized the still-in-flight insert too: this is
+    # the bug. A different connection sees it as durably committed.
+    other = connect(library.db_path)
+    try:
+        assert other.execute(
+            "SELECT COUNT(*) AS n FROM rallies WHERE id = 'mid-flight'"
+        ).fetchone()["n"] == 1
+    finally:
+        other.close()
+        shared.close()
