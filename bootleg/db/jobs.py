@@ -20,16 +20,32 @@ def enqueue(conn: sqlite3.Connection, job_type: str, payload: dict) -> str:
 
 
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    with conn:  # implicit transaction; SQLite serializes writers
+    # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
+    # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML
+    # statement, so the SELECT would run in autocommit mode and two connections
+    # could both read the same queued row before either UPDATEs it.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
         row = conn.execute(
             "SELECT * FROM jobs WHERE status='queued' ORDER BY created_at, id LIMIT 1"
         ).fetchone()
         if row is None:
+            conn.commit()
             return None
-        conn.execute(
-            "UPDATE jobs SET status='running', heartbeat_at=? WHERE id=?",
+        # Guard the UPDATE on status='queued' too: defence in depth in case the
+        # lock discipline above is ever weakened. If another worker already won,
+        # rowcount is 0 and we must not return a job we did not actually claim.
+        cur = conn.execute(
+            "UPDATE jobs SET status='running', heartbeat_at=?"
+            " WHERE id=? AND status='queued'",
             (_now(), row["id"]),
         )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    if cur.rowcount == 0:
+        return None
     return conn.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
 
 

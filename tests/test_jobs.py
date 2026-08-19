@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,6 +9,7 @@ from bootleg.db.jobs import (
     claim,
     enqueue,
     finish,
+    heartbeat,
     reclaim_stale,
     set_progress,
 )
@@ -125,3 +128,69 @@ def test_worker_fails_unknown_job_types(library, conn):
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     assert row["status"] == "failed"
     assert "mystery" in row["error"]
+
+
+def test_heartbeat_advances_heartbeat_at(conn):
+    job_id = enqueue(conn, "ingest", {})
+    claim(conn)
+    before = conn.execute(
+        "SELECT heartbeat_at FROM jobs WHERE id=?", (job_id,)
+    ).fetchone()["heartbeat_at"]
+
+    time.sleep(0.01)
+    heartbeat(conn, job_id)
+
+    after = conn.execute(
+        "SELECT heartbeat_at FROM jobs WHERE id=?", (job_id,)
+    ).fetchone()["heartbeat_at"]
+    assert after > before
+
+
+def _claim_after_barrier(db_path, idx, barrier, results):
+    """Race helper for test_claim_is_atomic_across_connections.
+
+    Defined at module scope (not nested in the test's loop) so it never closes
+    over a loop variable -- every input it needs is an explicit argument.
+    """
+    worker_conn = connect(db_path)
+    try:
+        barrier.wait()
+        row = claim(worker_conn)
+        results[idx] = row["id"] if row else None
+    finally:
+        worker_conn.close()
+
+
+def test_claim_is_atomic_across_connections(library):
+    """A second machine running `bootleg worker` against the same library is an
+    explicitly designed-for deployment (see task-10-brief.md's discussion of
+    reclaim_stale and stale heartbeats) -- this is the code that breaks first.
+    Before claim() took the write lock with BEGIN IMMEDIATE, two connections
+    racing on a barrier reproduced a double-claim on 100% of trials; this
+    guards against that regressing.
+    """
+    setup_conn = connect(library.db_path)
+    migrate(setup_conn)
+    try:
+        for _ in range(30):
+            job_id = enqueue(setup_conn, "ingest", {})
+            barrier = threading.Barrier(2)
+            results = [None, None]
+
+            t1 = threading.Thread(
+                target=_claim_after_barrier, args=(library.db_path, 0, barrier, results)
+            )
+            t2 = threading.Thread(
+                target=_claim_after_barrier, args=(library.db_path, 1, barrier, results)
+            )
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            claimed_by = [r for r in results if r is not None]
+            assert len(claimed_by) <= 1, f"both connections claimed {job_id}: {results}"
+            if len(claimed_by) == 2:
+                assert claimed_by[0] != claimed_by[1]
+    finally:
+        setup_conn.close()
