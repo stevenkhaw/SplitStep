@@ -1,0 +1,237 @@
+<script lang="ts">
+  import { api } from '../lib/api'
+  import { describePersistFailure, persistAction } from '../lib/persist'
+  import { QueueController } from '../lib/queue'
+  import { createToaster } from '../lib/toaster.svelte'
+  import { formatDuration, formatTs } from '../lib/time'
+  import type { QueueAction } from '../lib/queue'
+  import type { SessionDetail, Source } from '../lib/types'
+  import VideoDeck from './VideoDeck.svelte'
+
+  interface Props {
+    detail: SessionDetail
+    onopen_timeline: (rallyId: string) => void
+  }
+
+  let { detail, onopen_timeline }: Props = $props()
+
+  // Deliberately a one-time snapshot, not a reactive read: the queue state
+  // machine is constructed once per mounted QueueMode and owns its own
+  // index/star/reject state thereafter (svelte-check's "referenced locally"
+  // warning here is expected). Session.svelte never remounts QueueMode
+  // across two different sessions without an intervening trip through the
+  // library list, which is the only route that currently produces a fresh
+  // `detail` -- so this is safe today, but it is a latent trap if a
+  // "next session" shortcut is ever added that swaps `detail` on a mounted
+  // instance without remounting it.
+  const queue = new QueueController(detail.rallies)
+  const toaster = createToaster()
+  let version = $state(0) // bumped to re-read the controller after a mutation
+  let speed = $state(1)
+  let deck = $state<VideoDeck>()
+  let progressBar = $state<HTMLDivElement>()
+
+  // `version` is the dependency that forces a re-read after a mutation --
+  // QueueController is a plain class, so Svelte cannot track it directly:
+  // reading a plain getter registers no signal, so an expression that reads
+  // only `queue.whatever` would render once and then freeze. Every value
+  // below that comes from the controller explicitly reads `version` (and,
+  // where relevant, `speed`) so it recomputes on every mutation.
+  const current = $derived.by(() => {
+    version
+    return queue.current
+  })
+  const next = $derived.by(() => {
+    version
+    return queue.nextRally
+  })
+  // Read via isStarred/isRejected (never `current.starred`/`.rejected` --
+  // those fields on the Rally the controller was constructed with are
+  // deliberately never mutated, so they would render whatever the server
+  // last saw, not this session's live toggles) so the indicator reflects
+  // the true live state after a star/reject/back sequence.
+  const currentStarred = $derived.by(() => {
+    version
+    return queue.currentIsStarred
+  })
+  const currentRejected = $derived.by(() => {
+    version
+    return queue.currentIsRejected
+  })
+  const stats = $derived.by(() => {
+    version
+    return {
+      index: queue.index,
+      total: queue.total,
+      starredCount: queue.starredCount,
+      rejectedCount: queue.rejectedCount,
+      remainingMs: queue.remainingMs(speed),
+    }
+  })
+
+  function sourceFor(sourceId: string): Source | undefined {
+    return detail.sources.find((s) => s.id === sourceId)
+  }
+
+  function srcFor(sourceId: string): string {
+    const s = sourceFor(sourceId)
+    return s ? api.proxyUrl(detail.session.id, s.idx) : ''
+  }
+
+  // The rally's 1-based, session-wide position (Rally.idx from the server),
+  // for a human-readable toast -- stable regardless of where the queue's
+  // cursor has since moved on to.
+  function rallyIdx(rallyId: string): number | undefined {
+    return detail.rallies.find((r) => r.id === rallyId)?.idx
+  }
+
+  async function apply(action: QueueAction | null): Promise<void> {
+    version += 1
+    if (!action) return
+    const outcome = await persistAction(action, api)
+    if (!outcome.ok) {
+      // A failed persist must not silently diverge local state from the
+      // server. For a PersistableAction (star/reject/skip), revert() undoes
+      // exactly this rally's flags without touching the index or the undo
+      // stack -- unlike undo(), which is user-facing, pops LIFO, and would
+      // walk back whichever action happens to be on top rather than the one
+      // that actually failed. An UndoAction has nothing to revert to
+      // (outcome.revert is null), so it can only be surfaced.
+      //
+      // The queue itself is never halted here -- this runs on a LAN box, a
+      // failure means the server died (which the jobs badge already
+      // surfaces), and stopping the review flow over a rare event punishes
+      // the user for it.
+      if (outcome.revert) {
+        queue.revert(outcome.revert)
+        version += 1
+      }
+      toaster.push(describePersistFailure(action, rallyIdx(action.rallyId)))
+    }
+  }
+
+  function onProgress(fraction: number) {
+    // Written straight to the DOM. Routing a 60Hz update through Svelte state
+    // would re-render the whole panel on every frame.
+    if (progressBar) progressBar.style.transform = `scaleX(${fraction})`
+  }
+
+  function onBlocked() {
+    // VideoDeck already renders its own click-to-play overlay for a blocked
+    // autoplay -- queue mode has nothing to add on top of that today. The
+    // handler is still wired up so a future global notice has a hook.
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    switch (e.key) {
+      case 's':
+      case 'S':
+        apply(queue.star())
+        break
+      case 'x':
+      case 'X':
+        apply(queue.reject())
+        break
+      case 'r':
+      case 'R':
+        deck?.replay()
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        apply(queue.skip())
+        break
+      case 'ArrowLeft':
+        e.preventDefault()
+        queue.back()
+        version += 1
+        break
+      case 'u':
+      case 'U':
+        apply(queue.undo())
+        break
+      case '1':
+        speed = 1
+        break
+      case '2':
+        speed = 1.5
+        break
+      case '3':
+        speed = 2
+        break
+      case ' ':
+        e.preventDefault()
+        if (deck?.paused()) deck?.play()
+        else deck?.pause()
+        break
+      case 't':
+      case 'T':
+        if (current) onopen_timeline(current.id)
+        break
+    }
+  }
+</script>
+
+<svelte:window onkeydown={onKey} />
+
+{#if !current}
+  <section class="rounded-lg border border-neutral-800 p-8 text-center">
+    <h2 class="text-lg font-semibold">Session reviewed</h2>
+    <p class="mt-2 font-mono text-sm text-neutral-400">
+      {queue.total} seen · ★{queue.starredCount} starred · ✕{queue.rejectedCount} rejected
+    </p>
+    <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
+         reel" here. Both need clip export, which is Plan 3. -->
+  </section>
+{:else}
+  <VideoDeck
+    bind:this={deck}
+    src={srcFor(current.source_id)}
+    startMs={current.start_ms}
+    endMs={current.end_ms}
+    nextSrc={next ? srcFor(next.source_id) : undefined}
+    nextStartMs={next?.start_ms}
+    {speed}
+    onended={() => apply(queue.skip())}
+    onprogress={onProgress}
+    onblocked={onBlocked}
+  />
+
+  <div class="mt-3 h-1 overflow-hidden rounded bg-neutral-800">
+    <div
+      bind:this={progressBar}
+      class="h-full origin-left bg-blue-500"
+      style="transform: scaleX(0)"
+    ></div>
+  </div>
+
+  <div class="mt-2 flex items-center justify-between font-mono text-xs text-neutral-400">
+    <span class="flex items-center gap-2">
+      <span
+        class="text-base leading-none {currentStarred ? 'text-yellow-400' : 'text-neutral-700'}"
+        title={currentStarred ? 'starred' : 'not starred'}
+      >★</span>
+      rally {stats.index + 1} / {stats.total} ·
+      {formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}
+      {#if currentRejected}<span class="text-red-400">· rejected</span>{/if}
+    </span>
+    <span>
+      ★{stats.starredCount} ✕{stats.rejectedCount} ·
+      ~{formatDuration(stats.remainingMs)} left at {speed}×
+    </span>
+  </div>
+
+  <p class="mt-4 font-mono text-xs text-neutral-500">
+    S star · X reject · R replay · ← back · → skip · U undo · 1/2/3 speed · T timeline
+  </p>
+{/if}
+
+{#if toaster.toasts.length > 0}
+  <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    {#each toaster.toasts as t (t.id)}
+      <div class="rounded bg-red-500/90 px-3 py-2 text-sm text-white shadow-lg">
+        {t.message}
+      </div>
+    {/each}
+  </div>
+{/if}
