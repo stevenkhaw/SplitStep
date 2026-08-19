@@ -36,17 +36,20 @@ def replace_rallies(
 
     conn.execute("DELETE FROM rallies WHERE source_id = ?", (source_id,))
 
-    for iv in intervals:
+    for placeholder_idx, iv in enumerate(intervals, start=1):
         starred = any(
             _overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
             >= STAR_OVERLAP_MIN
             for r in old
         )
+        # idx is a temporary, per-row-unique negative placeholder so a batch of
+        # several new rows never collides with itself under UNIQUE(session_id,
+        # idx) before _renumber() assigns the real sequential values below.
         conn.execute(
             "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-            "det_start_ms,det_end_ms,confidence,starred) VALUES (?,?,?,0,?,?,?,?,?,?)",
-            (uuid.uuid4().hex, session_id, source_id, iv.start_ms, iv.end_ms,
-             iv.start_ms, iv.end_ms, iv.confidence, int(starred)),
+            "det_start_ms,det_end_ms,confidence,starred) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (uuid.uuid4().hex, session_id, source_id, -placeholder_idx, iv.start_ms,
+             iv.end_ms, iv.start_ms, iv.end_ms, iv.confidence, int(starred)),
         )
 
     _renumber(conn, session_id)
