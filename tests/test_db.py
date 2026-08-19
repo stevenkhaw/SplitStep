@@ -143,6 +143,81 @@ def test_rallies_are_renumbered_across_sources(conn):
     assert [r["idx"] for r in list_rallies(conn, s)] == [1, 2]
 
 
+def test_renumber_is_collision_free_when_a_non_last_source_grows(conn):
+    # test_rallies_are_renumbered_across_sources gives each source exactly
+    # one rally -- the single arrangement where a straight 1..N renumbering
+    # pass can never walk into a sibling's still-live idx, because there is
+    # never more than one row ahead of any other. Here both sources start
+    # with three rallies each (idx 1-3, 4-6) and source 1 -- not the last
+    # source -- grows to five. Renumbering source 1's rows in place now has
+    # to pass through idx values 4 and beyond while source 2's rows still
+    # sit on their old idx 4-6, which is exactly what collides under
+    # UNIQUE(session_id, idx) unless _renumber offsets every row in the
+    # session first.
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src1, _ = _add(conn, s, 60_000)
+    src2, _ = _add(conn, s, 60_000)
+    three = [Interval(1000, 2000, 0.8), Interval(3000, 4000, 0.8), Interval(5000, 6000, 0.8)]
+    replace_rallies(conn, s, src1, three)
+    replace_rallies(conn, s, src2, three)
+
+    five = [
+        Interval(1000, 2000, 0.8), Interval(3000, 4000, 0.8), Interval(5000, 6000, 0.8),
+        Interval(7000, 8000, 0.8), Interval(9000, 10000, 0.8),
+    ]
+    replace_rallies(conn, s, src1, five)
+
+    idxs = [r["idx"] for r in list_rallies(conn, s)]
+    assert idxs == list(range(1, 9))
+    assert len(idxs) == len(set(idxs))
+    assert all(i > 0 for i in idxs)
+
+
+def test_replace_rallies_rolls_back_cleanly_on_failure(conn, monkeypatch):
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 4000, 0.8)])
+    rally_id = list_rallies(conn, s)[0]["id"]
+    set_star(conn, rally_id, True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("bootleg.db.rallies._renumber", boom)
+
+    with pytest.raises(RuntimeError):
+        replace_rallies(conn, s, src, [Interval(9000, 12000, 0.9)])
+
+    rows = list_rallies(conn, s)
+    assert len(rows) == 1
+    assert rows[0]["id"] == rally_id
+    assert rows[0]["starred"] == 1
+    assert (rows[0]["start_ms"], rows[0]["end_ms"]) == (1000, 4000)
+
+
+def test_replace_rallies_preserves_rejected_by_overlap(conn):
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    set_rejected(conn, list_rallies(conn, s)[0]["id"], True)
+
+    # re-segment produces a slightly different but heavily overlapping segment
+    replace_rallies(conn, s, src, [Interval(1200, 5200, 0.7)])
+    rows = list_rallies(conn, s)
+    assert len(rows) == 1
+    assert rows[0]["rejected"] == 1
+
+
+def test_replace_rallies_drops_rejected_when_overlap_is_small(conn):
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    set_rejected(conn, list_rallies(conn, s)[0]["id"], True)
+
+    replace_rallies(conn, s, src, [Interval(30_000, 34_000, 0.7)])
+    assert list_rallies(conn, s)[0]["rejected"] == 0
+
+
 def test_set_rejected_hides_nothing_but_flags_the_row(conn):
     s = find_or_create_session_for_date(conn, "2026-08-19")
     src, _ = _add(conn, s, 60_000)

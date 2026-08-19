@@ -111,3 +111,47 @@ def test_detect_is_idempotent(library, conn, dropped_video):
     handle_detect(library, {"source_id": source["id"], "reuse_features": True})
     handle_detect(library, {"source_id": source["id"], "reuse_features": True})
     assert len(list_rallies(conn, session_id)) == 1
+
+
+def test_detect_is_idempotent_with_two_sources(library, conn, dropped_video):
+    # A single-source session can never exercise a sibling's idx during
+    # renumbering -- there is nothing else in the session to collide with.
+    # This ingests two sources into one session and re-runs detect on the
+    # first one after both already have rallies, so the renumber has to
+    # pass over the second source's still-live idx values.
+    handle_ingest(library, {"path": str(dropped_video)})
+    second = library.inbox / "IMG_0002.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=640x360:rate=30:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(second)],
+        check=True, capture_output=True,
+    )
+    handle_ingest(library, {"path": str(second)})
+
+    session_id = list_sessions(conn)[0]["id"]
+    sources = list_sources(conn, session_id)
+    assert len(sources) == 2
+
+    frames = [
+        FeatureFrame(i * 200, 2,
+                     Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9)
+        for i in range(40)
+    ]
+    for source in sources:
+        write_features(
+            library.source_dir(session_id, source["idx"]) / "features.jsonl", frames
+        )
+
+    for source in sources:
+        handle_detect(library, {"source_id": source["id"], "reuse_features": True})
+    # Re-run detect on the first source again while the second source's
+    # rallies are still sitting on their previously assigned idx.
+    handle_detect(library, {"source_id": sources[0]["id"], "reuse_features": True})
+
+    rallies = list_rallies(conn, session_id)
+    assert len(rallies) == 2
+    idxs = [r["idx"] for r in rallies]
+    assert sorted(idxs) == [1, 2]
