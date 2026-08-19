@@ -30,10 +30,6 @@ SAMPLE_FPS = 5
 STEP_MS = 1000 // SAMPLE_FPS
 AUDIO_SR = 22050
 
-# Must match make_thumbs' own default cadence -- this is the ceiling we
-# scale down from for short clips, not an independent choice.
-THUMB_INTERVAL_S = 10
-
 # Whole frame. Replaced by a court preset once one exists for the source.
 DEFAULT_QUAD = Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
 
@@ -49,24 +45,6 @@ def _played_on(recorded_at: str | None, fallback: Path) -> str:
         return recorded_at[:10]
     ts = datetime.fromtimestamp(fallback.stat().st_mtime, tz=UTC)
     return ts.date().isoformat()
-
-
-def _thumb_interval_s(duration_ms: int) -> int:
-    """Seconds between sprite-sheet samples, scaled down for short clips.
-
-    make_thumbs samples at a fixed cadence with `fps=1/every_s`. On this
-    ffmpeg build (9.0.1), a clip much shorter than that interval forces the
-    `fps` filter to emit its single frame from an end-of-stream flush, and
-    that frame is tagged in a way the mjpeg encoder refuses ("Non
-    full-range YUV is non-standard") -- reproduced directly against ffmpeg
-    outside of bootleg, so it is not something make_thumbs' own args can
-    route around case by case. Sampling well inside the stream rather than
-    at its tail avoids the flush-frame path entirely. Long, real footage is
-    unaffected: this only lowers the interval when the clip is too short
-    for the default cadence to make sense anyway.
-    """
-    duration_s = max(1, duration_ms // 1000)
-    return max(1, min(THUMB_INTERVAL_S, duration_s // 4))
 
 
 def handle_ingest(library: Library, payload: dict) -> None:
@@ -93,8 +71,7 @@ def handle_ingest(library: Library, payload: dict) -> None:
     shutil.move(str(src), original)
 
     make_proxy(original, dest_dir / "proxy.mp4")
-    make_thumbs(dest_dir / "proxy.mp4", dest_dir / "thumbs.jpg",
-                every_s=_thumb_interval_s(info.duration_ms))
+    make_thumbs(dest_dir / "proxy.mp4", dest_dir / "thumbs.jpg")
 
     set_source_status(conn, source_id, "ingested")
     set_session_status(conn, session_id, "detecting")

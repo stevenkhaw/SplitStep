@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 
 from bootleg.accel import Accel, detect_accel
+from bootleg.media.probe import probe
 
 
 class TranscodeError(Exception):
@@ -49,10 +50,24 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None) -> None:
 def make_thumbs(
     src: Path, dst: Path, every_s: int = 10, cols: int = 10, tile_w: int = 160
 ) -> None:
+    """Write a COLS x COLS sprite sheet, sampling one frame every_s apart.
+
+    ffmpeg 9.0.1's `fps` filter feeding `tile` fails when the requested
+    interval exceeds the clip's own duration: with no real frame available
+    at that spacing, `fps` can only emit its one frame from an end-of-stream
+    flush, and that frame reaches the mjpeg encoder tagged in a way it
+    refuses -- surfacing as a misleading "Non full-range YUV is
+    non-standard" encoder error that has nothing to do with color range.
+    Clamp the actual sampling interval to at most half the clip's duration
+    (floor 0.5s) so `fps` always has a real mid-stream frame to sample,
+    regardless of what the caller asked for.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
+    duration_s = probe(src).duration_ms / 1000
+    effective_every_s = min(every_s, max(0.5, duration_s / 2))
     run_ffmpeg([
         "-i", str(src),
-        "-vf", f"fps=1/{every_s},scale={tile_w}:-2,tile={cols}x{cols}",
+        "-vf", f"fps=1/{effective_every_s},scale={tile_w}:-2,tile={cols}x{cols}",
         "-frames:v", "1",
         "-q:v", "4",
         str(dst),

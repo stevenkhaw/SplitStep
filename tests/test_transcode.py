@@ -47,6 +47,38 @@ def test_make_thumbs_writes_a_sprite_sheet(big_video, tmp_path):
     assert dst.stat().st_size > 0
 
 
+@pytest.fixture
+def short_video(tmp_path):
+    """2 second clip -- shorter than make_thumbs' 10s default sampling interval."""
+    out = tmp_path / "short.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=640x360:rate=30:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_make_thumbs_handles_a_clip_shorter_than_the_interval(short_video, tmp_path):
+    """A clip shorter than every_s must not crash make_thumbs.
+
+    On ffmpeg 9.0.1, asking the `fps` filter for one frame every 10s from a
+    2s clip forces it to emit its single frame from an end-of-stream flush.
+    That flush frame reaches the mjpeg encoder tagged in a way it refuses,
+    surfacing as "Non full-range YUV is non-standard" -- a color-range
+    message that is misleading; the real cause is the sampling interval
+    exceeding the clip's duration, not chroma range. make_thumbs clamps its
+    internal interval to the clip's own duration to route around this. Do
+    not "simplify" that clamp away -- it is load-bearing for any clip
+    shorter than the requested every_s, not just this test's fixture.
+    """
+    dst = tmp_path / "thumbs.jpg"
+    make_thumbs(short_video, dst, every_s=10)
+    assert dst.exists()
+    assert dst.stat().st_size > 0
+
+
 def test_run_ffmpeg_raises_with_stderr_on_failure(tmp_path):
     with pytest.raises(TranscodeError) as exc:
         run_ffmpeg(["-i", str(tmp_path / "nope.mp4"), str(tmp_path / "out.mp4")])
