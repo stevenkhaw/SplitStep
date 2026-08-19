@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Library from './routes/Library.svelte'
+  import Session from './routes/Session.svelte'
   import { createRouter } from './lib/router.svelte'
 
   const router = createRouter()
@@ -6,8 +8,8 @@
 
 <main class="mx-auto max-w-6xl p-6">
   {#if router.current.name === 'library'}
-    <h1 class="text-xl font-semibold">Library</h1>
+    <Library />
   {:else}
-    <h1 class="text-xl font-semibold">Session {router.current.id}</h1>
+    <Session id={router.current.id} />
   {/if}
 </main>
