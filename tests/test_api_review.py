@@ -524,3 +524,38 @@ def test_missing_dist_is_tolerated(library):
     mount_spa(app, library.root / "does-not-exist")
     with TestClient(app) as c:
         assert c.get("/api/sessions").status_code == 200
+
+
+def test_create_app_wires_the_spa_mount_after_the_api_routes(library, seeded):
+    """A `StaticFiles` mount at `/` swallows every unmatched path if it is
+    registered before the API router. The three tests above don't catch a
+    regression in that ordering: `test_api_routes_still_work_with_the_spa_mounted`
+    calls `create_app(library)` with no `spa_dist`, then mounts `mount_spa`
+    manually *after* `create_app` has already returned with the router
+    included -- so it never exercises `create_app`'s own internal ordering,
+    only that `mount_spa` doesn't shadow routes already present on the app.
+
+    This test goes through the real production entry point instead --
+    `create_app(library, spa_dist=dist)`, exactly how `cmd_serve` calls it --
+    so a regression in that internal ordering actually fails it. It also
+    checks a real `/media` route (not just `/api`), using the `seeded`
+    fixture for a real session/idx: a 404 with the route's own
+    `"Not found: proxy.mp4"` detail proves `api_proxy` ran and hit its own
+    file-existence check, whereas a bare generic `"Not Found"` would mean
+    the static mount swallowed the request before it ever reached the
+    router.
+    """
+    dist = library.root / "webdist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>BootlegVision</title>")
+    (dist / "assets" / "app.js").write_text("console.log('hi')")
+
+    app = create_app(library, spa_dist=dist)
+    with TestClient(app) as c:
+        assert "BootlegVision" in c.get("/").text
+        assert c.get("/assets/app.js").status_code == 200
+        assert c.get("/api/sessions").status_code == 200
+
+        r = c.get(f"/media/{seeded['session_id']}/{seeded['idx']}/proxy.mp4")
+        assert r.status_code == 404
+        assert r.json()["detail"] == "Not found: proxy.mp4"
