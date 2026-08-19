@@ -11,6 +11,7 @@ from bootleg.db.sessions import (
     refresh_session_review_status,
     set_session_status,
 )
+from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.segment import Interval
 
 
@@ -187,9 +188,6 @@ def test_refresh_uses_a_single_atomic_write(conn, seeded):
     assert len(writes) == 1
 
 
-from bootleg.detect.features import FeatureFrame, Player, write_features
-
-
 def _write_features(library, session_id, idx, n=40):
     frames = [
         FeatureFrame(i * 200, 2,
@@ -232,3 +230,33 @@ def test_scores_before_detection_is_409(client, seeded):
 
 def test_scores_unknown_source_is_404(client):
     assert client.get("/api/sources/nope/scores").status_code == 404
+
+
+def test_scores_for_a_single_frame_file_uses_the_default_step(client, library, seeded):
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    write_features(d / "features.jsonl", [
+        FeatureFrame(0, 2, Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9),
+    ])
+    body = client.get(f"/api/sources/{seeded['source_id']}/scores").json()
+    assert body["step_ms"] == 200
+    assert len(body["scores"]) == 1
+
+
+def test_scores_clamps_step_ms_to_one_for_duplicate_leading_timestamps(client, library, seeded):
+    """A malformed features.jsonl whose first two timestamps are equal (or
+    decreasing) must not produce step_ms: 0 -- the timeline places each
+    score point on the x-axis by dividing time by step_ms, so a zero step
+    would be a client-side division by zero, not just a cosmetic glitch.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    write_features(d / "features.jsonl", [
+        FeatureFrame(1000, 2, Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9),
+        FeatureFrame(1000, 2, Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9),
+    ])
+    body = client.get(f"/api/sources/{seeded['source_id']}/scores").json()
+    assert body["step_ms"] == 1

@@ -93,7 +93,7 @@ def _raw_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
     return _clamp01(score / p.weight_total)
 
 
-def _sample_interval_ms(frames: list[FeatureFrame]) -> int:
+def sample_interval_ms(frames: list[FeatureFrame]) -> int:
     if len(frames) < 2:
         return 200
     return max(1, frames[1].t_ms - frames[0].t_ms)
@@ -109,7 +109,7 @@ def score_series(frames: list[FeatureFrame], params: SegmentParams) -> list[floa
     if not raw:
         return []
 
-    step = _sample_interval_ms(frames)
+    step = sample_interval_ms(frames)
     half = max(0, int((params.smooth_window_s * 1000) / step) // 2)
     if half == 0:
         return raw
@@ -127,7 +127,7 @@ def segment(frames: list[FeatureFrame], params: SegmentParams) -> list[Interval]
         return []
 
     scores = score_series(frames, params)
-    step = _sample_interval_ms(frames)
+    step = sample_interval_ms(frames)
 
     # 1. threshold to runs of indices
     runs: list[list[int]] = []

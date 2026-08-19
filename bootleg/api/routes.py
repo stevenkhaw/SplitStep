@@ -21,7 +21,7 @@ from bootleg.db.sessions import (
     set_source_preset,
 )
 from bootleg.detect.features import read_features
-from bootleg.detect.segment import SegmentParams, score_series, segment
+from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
 
 from .media import range_response
 
@@ -165,7 +165,7 @@ def api_scores(source_id: str, request: Request,
 
     frames = read_features(path)
     params = SegmentParams(threshold=threshold)
-    step_ms = 200 if len(frames) < 2 else frames[1].t_ms - frames[0].t_ms
+    step_ms = sample_interval_ms(frames)
     return {
         "step_ms": step_ms,
         "threshold": threshold,
