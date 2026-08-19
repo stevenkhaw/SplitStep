@@ -94,7 +94,11 @@ The external drive *is* the library — a single self-contained portable folder.
   reels/<slug>.mp4
 ```
 
-The app refuses to start if the library path is not mounted and writable, naming the path in the error. It never auto-creates the tree — doing so would silently build a second empty library on internal storage.
+The app refuses to start unless `library.db` already exists at the path, naming it in the error. It never auto-creates the tree — doing so would silently build a second empty library on internal storage.
+
+Checking only that the directory exists and is writable is not enough, because that is exactly what a stale `/Volumes/BootlegVision` mountpoint looks like after an unclean eject: the app would start a clean empty library, report zero sessions, and ingest new footage to the internal SSD while the real drive remounted as `/Volumes/BootlegVision 1`. Requiring the database file distinguishes "the drive is here" from "something is mounted here."
+
+First-time creation is explicit: `bootleg --library /Volumes/BootlegVision init`.
 
 ### Retention
 
@@ -263,7 +267,9 @@ Ingest runs per source file. A new file is assigned to the session matching its 
 
 The user drags four corners over frame 1. Not the court lines — the region both players actually move in, extended down to the bottom of frame so the near player's feet stay inside when standing between the camera and the baseline.
 
-Stored as a `court_preset`, normalized 0-1, reusable across every session shot from the same spot. This one manual step is what makes adjacent courts disappear from detection.
+Stored as a `court_preset`, normalized 0-1, reusable across every session shot from the same spot. This one manual step is what makes adjacent courts disappear from detection — without it `w_outside`, the largest single weight, never fires.
+
+Until the visual editor exists, presets are created and assigned from the CLI: `bootleg preset add --name NAME --quad "x1,y1 x2,y2 x3,y3 x4,y4"`, then `bootleg source set-preset <source_id> <preset_id>`.
 
 Automatic court-line detection was rejected: it is a substantial project on its own, and at roughly 1 ft camera height the lines converge into a sliver.
 
@@ -336,11 +342,13 @@ One line per sampled frame into `features.jsonl`:
 ```
 score(t) = w1·both_present
          + w2·min(near_v, far_v)        both moving, not one player retrieving a ball
-         + w3·lateral_fraction(near)    rallies move you sideways; walking to the fence is longitudinal
+         + w3·lateral_fraction(near)    share of this frame's DISPLACEMENT that is horizontal
          + w5·hit_rate(t)               audio: ball contact
          + w6·hit_regularity(t)         audio: the metronome of a rally
          - w4·either_outside_region
 ```
+
+`lateral_fraction` is computed from consecutive frames as `dx / (dx + dy)`, where `dx`/`dy` are the near player's horizontal and vertical displacement since the previous sample; a player who did not move scores 0. It must be measured from *motion*, not position — an earlier draft used distance from frame centre, which scored a player standing still at the sideline 0.9 and a player rallying hard down the middle 0.0, exactly inverted for the commonest case.
 
 1. Rolling median, ~1 s window
 2. Threshold → binary
@@ -484,7 +492,9 @@ Ordered list, drag to reorder, remove. **Preview plays the reel in-browser** by 
 
 **Free space is checked before any job that writes.** A 4K clip that dies at 90% is worse than a job that refuses to start.
 
-**Bad input** — `ffprobe` failure marks the session `failed` and leaves the file untouched. Nothing is deleted.
+**Bad input** — `ffprobe` failure marks the source and session `failed` and moves the file to `<library>/_inbox/failed/`. Nothing is deleted.
+
+An earlier draft said the file was left in place. Implementation showed that is wrong: the inbox watcher only skips paths with a `queued` or `running` job, so a file that fails ingest is re-queued on every 5-second scan — measured at 720 failed job rows per hour, which also floods the jobs view. Quarantining preserves the actual intent (nothing destroyed, file recoverable and inspectable) while breaking the loop.
 
 ---
 
