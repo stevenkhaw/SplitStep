@@ -309,3 +309,53 @@ describe('QueueController remainingMs excludes rejected rallies (Fix 3)', () => 
     expect(q.remainingMs(1)).toBe(16000)
   })
 })
+
+describe('QueueController discriminated QueueAction (Fix pass 2)', () => {
+  it('runtime: PersistableAction carries previous* fields, UndoAction does not', () => {
+    const q = new QueueController([rally(1), rally(2), rally(3)])
+
+    const starAction = q.star()!
+    expect(starAction.kind).toBe('star')
+    expect('previousStarred' in starAction).toBe(true)
+    expect('previousRejected' in starAction).toBe(true)
+
+    const rejectAction = q.reject()!
+    expect(rejectAction.kind).toBe('reject')
+    expect('previousStarred' in rejectAction).toBe(true)
+
+    const skipAction = q.skip()!
+    expect(skipAction.kind).toBe('skip')
+    expect('previousRejected' in skipAction).toBe(true)
+
+    const undoAction = q.undo()!
+    expect(undoAction.kind).toBe('undo')
+    // UndoAction has no previous* state at all, not even set to undefined —
+    // this is what makes revert(undoAction) a compile error below rather
+    // than a silent "reads undefined as falsy" unstar at runtime.
+    expect('previousStarred' in undoAction).toBe(false)
+    expect('previousRejected' in undoAction).toBe(false)
+  })
+
+  it('compile-time: revert() rejects an UndoAction (would otherwise silently unstar)', () => {
+    const q = new QueueController([rally(1), rally(2), rally(3)])
+    q.star() // r1
+    const undoAction = q.undo()! // undoes the star; a plain UndoAction
+    expect(undoAction.kind).toBe('undo')
+
+    // @ts-expect-error revert() accepts PersistableAction only. PersistableAction
+    // requires previousStarred/previousRejected; UndoAction has neither, so
+    // passing the undo() result here must fail to type-check. Before the
+    // PersistableAction/UndoAction split this compiled cleanly and silently
+    // unstarred the rally (undefined read as falsy). If this stops being a
+    // type error, svelte-check will fail with "Unused '@ts-expect-error'
+    // directive", which is the guard this test relies on.
+    q.revert(undoAction)
+  })
+
+  it('still accepts a genuine PersistableAction in revert()', () => {
+    const q = new QueueController([rally(1), rally(2), rally(3)])
+    const starAction = q.star()! // PersistableAction, no ts-expect-error needed
+    q.revert(starAction)
+    expect(q.isStarred('r1')).toBe(false)
+  })
+})

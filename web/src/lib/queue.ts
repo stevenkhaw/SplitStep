@@ -1,17 +1,41 @@
 import { UndoStack } from './undo'
 import type { Rally } from './types'
 
-export interface QueueAction {
-  kind: 'star' | 'reject' | 'skip' | 'undo'
+/**
+ * An action that changed rally flags (star/reject/skip) and may need
+ * reverting if its POST to the server fails. Carries the pre-action flag
+ * state (previousStarred/previousRejected) so revert() can restore exactly
+ * this rally's flags without depending on undo-stack position.
+ */
+export interface PersistableAction {
+  kind: 'star' | 'reject' | 'skip'
   rallyId: string
   starred: boolean
   rejected: boolean
-  // Pre-action flag state for this rally, captured by star()/reject()/skip()
-  // so a failed persist can be correlated back to exactly the rally it
-  // touched (see revert()) instead of relying on undo-stack position.
-  previousStarred?: boolean
-  previousRejected?: boolean
+  previousStarred: boolean
+  previousRejected: boolean
 }
+
+/**
+ * The result of a user-invoked undo(). There is nothing to persist and
+ * nothing to revert for it, so it deliberately carries no previous* state
+ * and cannot be passed to revert() — see the QueueAction union below.
+ */
+export interface UndoAction {
+  kind: 'undo'
+  rallyId: string
+  starred: boolean
+  rejected: boolean
+}
+
+/**
+ * Discriminated on `kind`: 'star' | 'reject' | 'skip' narrow to
+ * PersistableAction (which has previousStarred/previousRejected and can be
+ * passed to revert()); 'undo' narrows to UndoAction (which cannot — passing
+ * an UndoAction to revert() is a compile error, not a silent no-op/bad
+ * write, because UndoAction has no previous* fields at all).
+ */
+export type QueueAction = PersistableAction | UndoAction
 
 interface HistoryEntry {
   index: number
@@ -107,7 +131,7 @@ export class QueueController {
     // without limit.
   }
 
-  star(): QueueAction | null {
+  star(): PersistableAction | null {
     const r = this.current
     if (!r) return null
     this.#record()
@@ -127,7 +151,7 @@ export class QueueController {
     }
   }
 
-  reject(): QueueAction | null {
+  reject(): PersistableAction | null {
     const r = this.current
     if (!r) return null
     this.#record()
@@ -146,7 +170,7 @@ export class QueueController {
     }
   }
 
-  skip(): QueueAction | null {
+  skip(): PersistableAction | null {
     const r = this.current
     if (!r) return null
     this.#record()
@@ -167,7 +191,7 @@ export class QueueController {
     if (this.#index > 0) this.#index -= 1
   }
 
-  undo(): QueueAction | null {
+  undo(): UndoAction | null {
     const entry = this.#history.pop()
     if (!entry) return null
     this.#index = entry.index
@@ -180,15 +204,20 @@ export class QueueController {
     return { kind: 'undo', rallyId: r.id, starred: entry.starred, rejected: entry.rejected }
   }
 
-  // Reverts a single previously-issued action (e.g. because its persist to
-  // the server failed) by restoring that rally's flags from the action's
-  // previous* state. Unlike undo(), this is action-correlated rather than
-  // position-correlated: it targets action.rallyId specifically, wherever
-  // (if anywhere) it sits in the undo history, so acting on a stale/failed
-  // action never reverts a different, more recent action instead. It never
-  // touches #index and never pops #history — a failed network call must not
-  // move the user's position or consume their undo.
-  revert(action: QueueAction): void {
+  // Reverts a single previously-issued PersistableAction (e.g. because its
+  // persist to the server failed) by restoring that rally's flags from the
+  // action's previous* state. Unlike undo(), this is action-correlated
+  // rather than position-correlated: it targets action.rallyId specifically,
+  // wherever (if anywhere) it sits in the undo history, so acting on a
+  // stale/failed action never reverts a different, more recent action
+  // instead. It never touches #index and never pops #history — a failed
+  // network call must not move the user's position or consume their undo.
+  //
+  // Takes PersistableAction, not the full QueueAction union: an UndoAction
+  // has no previous* state to revert to, so passing one is a compile error
+  // rather than a silent no-op or an accidental unstar from reading
+  // `undefined` as falsy.
+  revert(action: PersistableAction): void {
     if (action.previousStarred) this.#starred.add(action.rallyId)
     else this.#starred.delete(action.rallyId)
     if (action.previousRejected) this.#rejected.add(action.rallyId)
