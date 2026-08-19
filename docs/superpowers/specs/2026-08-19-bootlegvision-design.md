@@ -294,9 +294,15 @@ Ball contact is audible on this footage; it is noisy, not absent. Audio is there
 ffmpeg -vn -ac 1 -ar 22050 -f s16le      raw PCM, streamed
   → butterworth highpass @ 800 Hz        wind is low-frequency; ball contact is a broadband transient
   → 10 ms RMS envelope
-  → adaptive peak pick                   local max above median + k·MAD over a 2 s window
+  → peakiness gate                       p99.9/median ≥ 3.0, else the clip has no transients at all
+  → adaptive peak pick                   local max above median + k·MAD over a 2 s window (reflect-padded)
+  → prominence floor                     peak must clear 0.30 × (p99.9 − median)
   → hit timestamps + strengths           aggregated onto the same 5 Hz grid
 ```
+
+**The two global gates are not optional.** A purely local threshold — `median + k·MAD` over a sliding window and nothing else — is what the first draft specified, and it is wrong: in a quiet stretch both the baseline and the MAD collapse toward zero, so an arbitrarily small noise wiggle clears the bar. Measured on a synthetic 6-click track, that version returned 13 hits: the 6 real impacts at strength 0.15–0.22, plus 7 noise-floor artifacts at 0.0005–0.003. A ball strike is loud relative to *the recording*, not merely relative to its neighbours, and the peakiness gate plus prominence floor are what encode that. With them: 6 clicks → 6, pure noise → 0, wind buffets → 0.
+
+Reflect-padding the sliding window rather than edge-padding it matters too — edge-padding manufactured false hits in the first and last second of every clip.
 
 numpy and scipy only — no librosa. Seconds per hour of audio.
 
@@ -308,6 +314,8 @@ Two derived features:
 **Why this earns its place:** it is strongest exactly where the visual features are weakest — the *end* of a rally. Players keep moving for a second or two after a point dies, so visual activity decays slowly; the last ball contact followed by ~1 s of silence is a sharp boundary. Adjacent courts are farther from the mic and gate out on amplitude.
 
 **Downside is bounded.** If audio proves useless on real footage, its weights fit to zero and nothing is lost — the two-stage split means discovering that costs 200 ms, not a re-run.
+
+**Validation status: synthetic only.** Every threshold above was tuned against generated click tracks, noise, and simulated wind. Whether ball contact is separable from adjacent-court play on real windy public-court audio is genuinely unknown until the first session is ingested, and is the second thing to check after rally recall.
 
 ### Feature record
 
