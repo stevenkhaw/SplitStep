@@ -185,3 +185,50 @@ def test_refresh_uses_a_single_atomic_write(conn, seeded):
         if s.strip().upper().startswith(("UPDATE", "INSERT", "DELETE"))
     ]
     assert len(writes) == 1
+
+
+from bootleg.detect.features import FeatureFrame, Player, write_features
+
+
+def _write_features(library, session_id, idx, n=40):
+    frames = [
+        FeatureFrame(i * 200, 2,
+                     Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9)
+        for i in range(n)
+    ]
+    d = library.source_dir(session_id, idx)
+    d.mkdir(parents=True, exist_ok=True)
+    write_features(d / "features.jsonl", frames)
+
+
+def test_scores_returns_one_value_per_sampled_frame(client, library, seeded):
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["scores"]) == 40
+    assert body["step_ms"] == 200
+
+
+def test_scores_are_normalized_zero_to_one(client, library, seeded):
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    scores = client.get(f"/api/sources/{seeded['source_id']}/scores").json()["scores"]
+    assert all(0.0 <= s <= 1.0 for s in scores)
+
+
+def test_scores_echo_the_requested_threshold(client, library, seeded):
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    body = client.get(
+        f"/api/sources/{seeded['source_id']}/scores?threshold=0.31"
+    ).json()
+    assert body["threshold"] == pytest.approx(0.31)
+
+
+def test_scores_before_detection_is_409(client, seeded):
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores")
+    assert r.status_code == 409
+
+
+def test_scores_unknown_source_is_404(client):
+    assert client.get("/api/sources/nope/scores").status_code == 404

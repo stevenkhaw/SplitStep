@@ -21,7 +21,7 @@ from bootleg.db.sessions import (
     set_source_preset,
 )
 from bootleg.detect.features import read_features
-from bootleg.detect.segment import SegmentParams, segment
+from bootleg.detect.segment import SegmentParams, score_series, segment
 
 from .media import range_response
 
@@ -148,6 +148,29 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
     intervals = segment(read_features(path), SegmentParams(threshold=body.threshold))
     count = replace_rallies(conn, source["session_id"], source_id, intervals)
     return {"count": count}
+
+
+@router.get("/api/sources/{source_id}/scores")
+def api_scores(source_id: str, request: Request,
+               threshold: float = SegmentParams().threshold):
+    conn = _conn(request)
+    library = _library(request)
+    source = get_source(conn, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    path = library.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
+    if not path.exists():
+        raise HTTPException(status_code=409, detail="Source has not been detected yet")
+
+    frames = read_features(path)
+    params = SegmentParams(threshold=threshold)
+    step_ms = 200 if len(frames) < 2 else frames[1].t_ms - frames[0].t_ms
+    return {
+        "step_ms": step_ms,
+        "threshold": threshold,
+        "scores": [round(s, 4) for s in score_series(frames, params)],
+    }
 
 
 @router.post("/api/sources/{source_id}/preset")
