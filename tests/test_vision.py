@@ -1,5 +1,8 @@
+import sys
+import threading
+
 from bootleg.detect.geometry import Quad
-from bootleg.detect.vision import Box, build_features, split_near_far
+from bootleg.detect.vision import Box, _run_frames, _scaled_dims, build_features, split_near_far
 
 FULL = Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
 
@@ -73,3 +76,73 @@ def test_build_features_counts_only_in_region():
     boxes = [[Box(0.5, 0.85, 0.1, 0.3), Box(0.05, 0.85, 0.1, 0.3)]]
     frames = build_features(boxes, court, audio_grid=[], step_ms=200)
     assert frames[0].n == 1
+
+
+# -- _scaled_dims (minor: scale=960:-2 must not force 16:9) -----------------
+
+def test_scaled_dims_preserves_aspect_ratio_for_16_9():
+    assert _scaled_dims(1920, 1080) == (960, 540)
+
+
+def test_scaled_dims_preserves_aspect_ratio_for_vertical_phone_video():
+    # Verified against ffmpeg 9.0.1's actual `scale=960:-2` output for a
+    # 1080x1920 source -- a fixed 960x540 would squash this to 16:9.
+    assert _scaled_dims(1080, 1920) == (960, 1706)
+
+
+def test_scaled_dims_rounds_to_an_even_height():
+    w, h = _scaled_dims(4000, 3000)
+    assert h % 2 == 0
+    assert (w, h) == (960, 720)
+
+
+# -- Finding 9: _run_frames must not deadlock on an undrained stderr pipe ---
+
+def test_run_frames_drains_stderr_so_a_chatty_producer_cannot_deadlock():
+    """Before stderr was drained on a reader thread, `iter_person_boxes`
+    read stdout in a loop and only drained stderr after that loop ended.
+    ffmpeg's stderr pipe fills at roughly 64 KB; a producer that writes more
+    than that to stderr before any stdout -- exactly a proxy hitting decode
+    errors, the case worth diagnosing -- blocks on that write while this
+    generator sits blocked reading stdout. Those two blocks deadlock each
+    other with no timeout. This never touches ffmpeg or YOLO: a plain
+    Python subprocess stands in as the producer.
+    """
+    frame_bytes = 4
+    script = (
+        "import sys\n"
+        "sys.stderr.write('E' * 2_000_000)\n"  # far past the ~64 KB pipe buffer
+        "sys.stderr.flush()\n"
+        "sys.stdout.buffer.write(b'1234' * 3)\n"
+        "sys.stdout.flush()\n"
+    )
+    cmd = [sys.executable, "-c", script]
+
+    result: list[bytes] = []
+
+    def consume():
+        result.extend(_run_frames(cmd, frame_bytes))
+
+    t = threading.Thread(target=consume, daemon=True)
+    t.start()
+    t.join(timeout=10.0)
+
+    assert not t.is_alive(), "deadlocked reading stdout with stderr un-drained"
+    assert result == [b"1234", b"1234", b"1234"]
+
+
+def test_run_frames_raises_with_captured_stderr_on_a_nonzero_exit():
+    frame_bytes = 4
+    script = (
+        "import sys\n"
+        "sys.stderr.write('decode exploded')\n"
+        "sys.exit(1)\n"
+    )
+    cmd = [sys.executable, "-c", script]
+
+    try:
+        list(_run_frames(cmd, frame_bytes))
+    except RuntimeError as exc:
+        assert "decode exploded" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError for a nonzero exit")

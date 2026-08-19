@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ import numpy as np
 from bootleg.accel import detect_accel
 from bootleg.detect.features import FeatureFrame, Player
 from bootleg.detect.geometry import Quad
+from bootleg.media.probe import probe
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,56 @@ def build_features(
     return frames
 
 
+def _scaled_dims(width: int, height: int, target_w: int = 960) -> tuple[int, int]:
+    """Mirror ffmpeg's `scale={target_w}:-2`: width fixed, height keeps the
+    source aspect ratio and is rounded down to the nearest even number (`-2`
+    requires a multiple of 2).
+
+    A fixed `960:540` (forced 16:9) squashes any non-16:9 source -- notably
+    vertical phone footage -- which degrades the apparent-height distance
+    proxy the near/far split depends on. Verified byte-for-byte against
+    ffmpeg 9.0.1's actual `scale=960:-2` output across several source aspect
+    ratios, including 1080x1920 vertical video.
+    """
+    h = round(height * target_w / width)
+    return target_w, h - (h % 2)
+
+
+def _drain(pipe, sink: list[bytes]) -> None:
+    sink.extend(iter(lambda: pipe.read(4096), b""))
+
+
+def _run_frames(cmd: Sequence[str], frame_bytes: int) -> Iterator[bytes]:
+    """Run `cmd`, yielding one `frame_bytes`-sized chunk of stdout per frame.
+
+    stderr is drained on a background thread instead of being read after the
+    loop. ffmpeg's stderr pipe fills at roughly 64 KB; a producer that is
+    chatty on stderr -- or one hitting decode errors, exactly the case worth
+    diagnosing -- blocks on that write once the pipe is full, while this
+    generator is blocked reading stdout. Left undrained until after the
+    loop, those two blocks deadlock each other with no timeout.
+    """
+    stderr_chunks: list[bytes] = []
+    with subprocess.Popen(
+        list(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=frame_bytes
+    ) as proc:
+        reader = threading.Thread(
+            target=_drain, args=(proc.stderr, stderr_chunks), daemon=True
+        )
+        reader.start()
+        try:
+            while True:
+                raw = proc.stdout.read(frame_bytes)
+                if len(raw) < frame_bytes:
+                    break
+                yield raw
+        finally:
+            reader.join(timeout=5.0)
+        if proc.wait() != 0:
+            stderr = b"".join(stderr_chunks).decode(errors="replace")
+            raise RuntimeError(f"frame decode failed: {stderr.strip()}")
+
+
 def iter_person_boxes(
     proxy: Path,
     *,
@@ -91,44 +143,39 @@ def iter_person_boxes(
 ) -> Iterator[list[Box]]:
     """Decode the proxy at sample_fps and yield person boxes per frame.
 
-    Not unit tested — inference is mocked everywhere else. Exercised only by
-    the CLI against real footage.
+    YOLO inference itself is not unit tested here -- it is mocked everywhere
+    else, and model inference in CI is slow and non-deterministic across
+    devices. Frame decoding (`_run_frames`) is exercised directly in
+    tests/test_vision.py without touching YOLO.
     """
     from ultralytics import YOLO
 
     accel = detect_accel()
-    width, height = 960, 540
+    info = probe(proxy)
+    width, height = _scaled_dims(info.width, info.height)
+
     cmd = ["ffmpeg", "-v", "error"]
     if accel.hwaccel:
         cmd += ["-hwaccel", accel.hwaccel]
-    cmd += ["-i", str(proxy), "-vf", f"fps={sample_fps},scale={width}:{height}",
+    cmd += ["-i", str(proxy), "-vf", f"fps={sample_fps},scale={width}:-2",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
 
     model = YOLO(model_name)
     frame_bytes = width * height * 3
 
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, bufsize=frame_bytes) as proc:
-        while True:
-            raw = proc.stdout.read(frame_bytes)
-            if len(raw) < frame_bytes:
-                break
-            frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
-            result = model.predict(
-                frame, imgsz=imgsz, classes=[0], device=accel.torch_device,
-                verbose=False,
-            )[0]
+    for raw in _run_frames(cmd, frame_bytes):
+        frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
+        result = model.predict(
+            frame, imgsz=imgsz, classes=[0], device=accel.torch_device,
+            verbose=False,
+        )[0]
 
-            boxes: list[Box] = []
-            for x1, y1, x2, y2 in result.boxes.xyxy.tolist():
-                boxes.append(Box(
-                    cx=((x1 + x2) / 2) / width,
-                    cy=((y1 + y2) / 2) / height,
-                    w=(x2 - x1) / width,
-                    h=(y2 - y1) / height,
-                ))
-            yield boxes
-
-        stderr = proc.stderr.read().decode()
-        if proc.wait() != 0:
-            raise RuntimeError(f"frame decode failed: {stderr.strip()}")
+        boxes: list[Box] = []
+        for x1, y1, x2, y2 in result.boxes.xyxy.tolist():
+            boxes.append(Box(
+                cx=((x1 + x2) / 2) / width,
+                cy=((y1 + y2) / 2) / height,
+                w=(x2 - x1) / width,
+                h=(y2 - y1) / height,
+            ))
+        yield boxes
