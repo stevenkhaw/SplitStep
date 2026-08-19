@@ -95,3 +95,18 @@ def test_make_proxy_creates_parent_directories(big_video, tmp_path):
     dst = tmp_path / "a" / "b" / "proxy.mp4"
     make_proxy(big_video, dst)
     assert dst.exists()
+
+
+def test_run_ffmpeg_converts_a_timeout_to_transcode_error(monkeypatch):
+    """extract_frame passes a short timeout since it runs inside a request
+    handler (every route shares Starlette's anyio worker-thread pool, so a
+    hung ffmpeg there would tie one up indefinitely); callers must see one
+    exception type regardless of whether ffmpeg failed outright or hung.
+    """
+    def _raise_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", _raise_timeout)
+    with pytest.raises(TranscodeError) as exc:
+        run_ffmpeg(["-i", "whatever"], timeout=0.01)
+    assert "timed out" in str(exc.value)

@@ -9,11 +9,25 @@ class TranscodeError(Exception):
     """An ffmpeg invocation failed."""
 
 
-def run_ffmpeg(args: list[str]) -> None:
-    proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", *args],
-        capture_output=True, text=True, check=False,
-    )
+def run_ffmpeg(args: list[str], timeout: float | None = None) -> None:
+    """Run ffmpeg with the given args.
+
+    `timeout` is None by default so the long-running background-job call
+    sites (`make_proxy`, `make_thumbs` -- up to an hour for a full
+    transcode) are unaffected. Request-handling call sites (`extract_frame`)
+    pass a short timeout instead: every route runs on Starlette's shared
+    anyio worker-thread pool, so a hung ffmpeg there would tie up a
+    request-handling thread indefinitely.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", *args],
+            capture_output=True, text=True, check=False, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TranscodeError(
+            f"ffmpeg timed out after {timeout}s\nargs: {' '.join(args)}"
+        ) from exc
     if proc.returncode != 0:
         raise TranscodeError(
             f"ffmpeg failed (exit {proc.returncode})\n"

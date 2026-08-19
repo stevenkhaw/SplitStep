@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -25,6 +26,8 @@ from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
 from bootleg.media.frames import extract_frame
+from bootleg.media.probe import probe
+from bootleg.media.transcode import TranscodeError
 
 from .media import range_response
 
@@ -245,6 +248,20 @@ def api_create_preset(body: PresetCreateBody, request: Request):
     return {"id": preset_id}
 
 
+FRAME_CACHE_KEEP = 20
+
+
+def _evict_old_frames(src_dir: Path, keep: int = FRAME_CACHE_KEEP) -> None:
+    """Frame extraction caches one file per requested at_ms with no
+    eviction otherwise -- a quad-editor session scrubbing through many
+    timestamps would grow this directory without bound. Keep only the
+    `keep` most recently written frame-*.jpg, deleting the rest by mtime.
+    """
+    frames = sorted(src_dir.glob("frame-*.jpg"), key=lambda p: p.stat().st_mtime)
+    for stale in frames[:-keep]:
+        stale.unlink(missing_ok=True)
+
+
 @router.get("/media/{session_id}/{idx}/frame.jpg")
 def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     library = _library(request)
@@ -253,12 +270,41 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     if not proxy.is_file():
         raise HTTPException(status_code=404, detail="Proxy not found")
 
+    # Scrubbing past a clip's end (or before its start) is ordinary UI
+    # behaviour in the quad editor. Past end-of-stream, ffmpeg fails with
+    # exit 234 and a misleading "Non full-range YUV is non-standard"
+    # message -- the same end-of-stream encoder bug make_thumbs already
+    # documents and clamps against (bootleg/media/transcode.py) -- so clamp
+    # into the clip's duration here too, rather than reject. This also
+    # makes the negative case explicit instead of relying on ffmpeg to
+    # silently clamp it (which produced a duplicate cached file per
+    # distinct negative value, all byte-identical to frame-0.jpg).
+    #
+    # Clamping to `duration_ms - 1` alone still reproduces the bug: at
+    # 30fps (2000ms/60 frames) the true last frame lands at ~1966.67ms, so
+    # 1999ms falls in the same post-last-frame gap the bug lives in
+    # (measured: 1967ms fails, 1966ms succeeds; at a synthetic 10fps
+    # 1901ms fails, 1900ms succeeds). The margin has to account for the
+    # source's own frame period, not just its reported duration.
+    info = probe(proxy)
+    margin_ms = int(1000 / info.fps) + 1 if info.fps > 0 else max(1, info.duration_ms // 2)
+    last_safe_ms = max(0, info.duration_ms - margin_ms)
+    at_ms = max(0, min(at_ms, last_safe_ms))
+
     dst = src_dir / f"frame-{at_ms}.jpg"
     # A crash-retry ingest reuses the same source_dir and overwrites
     # proxy.mp4 in place (see jobs/handlers.py's existing-source reuse for a
     # requeued job). Checking mtime, not just existence, keeps a frame
     # cached before that reuse from being served forever against footage it
-    # no longer matches.
-    if not dst.exists() or dst.stat().st_mtime < proxy.stat().st_mtime:
-        extract_frame(proxy, dst, at_ms=at_ms)
+    # no longer matches. `<=` (not `<`) so a same-tick mtime tie -- plausible
+    # on coarse-granularity filesystems or fast successive writes -- still
+    # regenerates instead of silently serving the stale file.
+    if not dst.exists() or dst.stat().st_mtime <= proxy.stat().st_mtime:
+        try:
+            extract_frame(proxy, dst, at_ms=at_ms)
+        except TranscodeError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Could not extract frame: {exc}"
+            ) from exc
+        _evict_old_frames(src_dir)
     return FileResponse(dst, media_type="image/jpeg")

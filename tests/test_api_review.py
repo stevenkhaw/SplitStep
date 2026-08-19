@@ -16,6 +16,7 @@ from bootleg.db.sessions import (
 )
 from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.segment import Interval
+from bootleg.media.transcode import TranscodeError
 
 
 @pytest.fixture
@@ -323,10 +324,10 @@ def test_unrouted_media_path_404s_with_a_different_detail(client, seeded):
     assert r.json()["detail"] != "Proxy not found"
 
 
-def _write_clip(path, color, size):
+def _write_clip(path, color, size, duration=1):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
-         "-i", f"color=c={color}:size={size}:rate=10:duration=1",
+         "-i", f"color=c={color}:size={size}:rate=10:duration={duration}",
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
         check=True, capture_output=True,
     )
@@ -362,3 +363,123 @@ def test_stale_cached_frame_is_regenerated_when_the_proxy_changes(client, librar
     r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r2.status_code == 200
     assert frame.read_bytes() != old_bytes
+
+
+def test_frame_endpoint_clamps_at_ms_past_the_clip_duration(client, library, seeded):
+    """Scrubbing past a clip's end is ordinary UI behaviour in the quad
+    editor. Past end-of-stream ffmpeg fails with exit 234 and a misleading
+    "Non full-range YUV is non-standard" message -- the same end-of-stream
+    encoder bug make_thumbs already documents and clamps against
+    (bootleg/media/transcode.py). at_ms must be clamped into the clip's
+    duration, not passed straight through to ffmpeg.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240", duration=2)
+
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg?at_ms=5000")
+    assert r.status_code == 200
+    assert len(r.content) > 0
+
+
+def test_frame_endpoint_clamps_negative_at_ms_to_the_cached_zero_frame(client, library, seeded):
+    """A negative at_ms must be clamped to 0 explicitly rather than left for
+    ffmpeg to silently clamp -- otherwise every distinct negative value
+    ffmpeg happens to treat as "start of clip" leaves its own duplicate
+    frame-{at_ms}.jpg on disk (frame--500.jpg, frame--999.jpg, ...) even
+    though the bytes are identical to frame-0.jpg.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240", duration=2)
+
+    r0 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg?at_ms=0")
+    rneg = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg?at_ms=-500")
+    assert r0.status_code == 200
+    assert rneg.status_code == 200
+    assert rneg.content == r0.content
+    assert not (d / "frame--500.jpg").exists()
+    assert (d / "frame-0.jpg").exists()
+
+
+def test_frame_endpoint_regenerates_on_a_same_tick_mtime_tie(client, library, seeded):
+    """`<` between the cached frame's mtime and the proxy's mtime never
+    fires when both land in the same mtime tick -- plausible on
+    coarse-granularity filesystems or fast successive writes. Pin the tie
+    directly (rather than relying on real timing) and confirm the frame
+    still regenerates on a tie, not just on a strictly-newer proxy.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    proxy = d / "proxy.mp4"
+    _write_clip(proxy, "red", "320x240")
+
+    r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r1.status_code == 200
+    frame = d / "frame-0.jpg"
+    old_bytes = frame.read_bytes()
+
+    _write_clip(proxy, "blue", "640x480")
+    tied = proxy.stat().st_mtime
+    os.utime(frame, (tied, tied))
+    os.utime(proxy, (tied, tied))
+    assert frame.stat().st_mtime == proxy.stat().st_mtime
+
+    r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r2.status_code == 200
+    assert frame.read_bytes() != old_bytes
+
+
+def test_frame_cache_keeps_at_most_20_files(client, library, seeded):
+    """Every distinct at_ms leaves a permanent frame-{at_ms}.jpg with no
+    eviction otherwise -- an editor session scrubbing through many
+    timestamps would grow this directory without bound.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240", duration=30)
+
+    for at_ms in range(0, 25000, 1000):
+        r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg?at_ms={at_ms}")
+        assert r.status_code == 200
+
+    assert len(list(d.glob("frame-*.jpg"))) <= 20
+
+
+def test_repeat_frame_request_does_not_touch_the_cached_file(client, library, seeded):
+    """Every other frame-endpoint test here covers the staleness branch. A
+    regression that disabled caching entirely -- re-running ffmpeg on every
+    request -- would pass all of them; this is the one test that would
+    catch it: a repeat request for the same at_ms must not rewrite the
+    cached file.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240")
+
+    r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r1.status_code == 200
+    frame = d / "frame-0.jpg"
+    mtime1 = frame.stat().st_mtime
+
+    r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r2.status_code == 200
+    assert frame.stat().st_mtime == mtime1
+
+
+def test_frame_endpoint_422s_when_extraction_fails(client, library, seeded, monkeypatch):
+    """Any residual ffmpeg failure -- not just the out-of-range at_ms case,
+    which is now clamped away before reaching ffmpeg -- must be a clean
+    client error, not a bare 500.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240")
+
+    def _boom(*args, **kwargs):
+        raise TranscodeError("ffmpeg failed (exit 234)\nNon full-range YUV is non-standard")
+
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", _boom)
+
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r.status_code == 422
