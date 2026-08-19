@@ -82,3 +82,40 @@ export function nearestHandle(
   if (dStart > grab && dEnd > grab) return null
   return dStart <= dEnd ? 'start' : 'end'
 }
+
+/**
+ * Map a detector score (0..1) to an SVG y-coordinate, higher score drawn
+ * higher up. `height` is the viewBox height; the curve is inset 2px from the
+ * top so a score of exactly 1 doesn't clip against the viewBox edge.
+ */
+export function scoreToY(score: number, height: number): number {
+  return height - clamp(score, 0, 1) * (height - 2)
+}
+
+/**
+ * SVG `points` for the score curve visible under the zoomed band.
+ *
+ * `scores` is the full per-source series at a fixed `stepMs` cadence; only
+ * the slice covering [windowStartMs, windowEndMs] is drawn, stretched to
+ * fill [0, width] regardless of how many samples fall in that slice -- the
+ * window is a fixed span (see zoomWindow) but the sample count within it can
+ * vary by a step at either edge, so this is index-based, not ms-based,
+ * spacing.
+ */
+export function scoreCurvePoints(
+  scores: number[],
+  stepMs: number,
+  windowStartMs: number,
+  windowEndMs: number,
+  width: number,
+  height: number,
+): string {
+  if (scores.length === 0 || stepMs <= 0) return ''
+  const from = Math.max(0, Math.floor(windowStartMs / stepMs))
+  const to = Math.min(scores.length, Math.ceil(windowEndMs / stepMs))
+  const slice = scores.slice(from, to)
+  if (slice.length < 2) return ''
+  return slice
+    .map((s, i) => `${(i / (slice.length - 1)) * width},${scoreToY(s, height)}`)
+    .join(' ')
+}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
@@ -17,14 +18,14 @@
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
-  // index/star/reject state thereafter (svelte-check's "referenced locally"
-  // warning here is expected). Session.svelte never remounts QueueMode
-  // across two different sessions without an intervening trip through the
-  // library list, which is the only route that currently produces a fresh
-  // `detail` -- so this is safe today, but it is a latent trap if a
-  // "next session" shortcut is ever added that swaps `detail` on a mounted
-  // instance without remounting it.
-  const queue = new QueueController(detail.rallies)
+  // index/star/reject state thereafter. Session.svelte guarantees this is
+  // safe -- not merely by convention but structurally -- by wrapping the
+  // mode components in `{#key detail.rallies}`: any replacement of `detail`
+  // (e.g. Task 13's re-segment) changes that key and remounts QueueMode
+  // fresh, so a mounted instance can never observe `detail` changing out
+  // from under it. `untrack` tells svelte-check this one-time read is
+  // intentional rather than an accidental non-reactive reference.
+  const queue = new QueueController(untrack(() => detail.rallies))
   const toaster = createToaster()
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)

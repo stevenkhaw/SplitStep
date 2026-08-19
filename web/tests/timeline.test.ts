@@ -3,6 +3,8 @@ import {
   fractionToMs,
   msToFraction,
   nearestHandle,
+  scoreCurvePoints,
+  scoreToY,
   sessionTimeline,
   toSessionMs,
   zoomWindow,
@@ -148,5 +150,47 @@ describe('nearestHandle', () => {
   it('picks the closer handle when the segment is very short', () => {
     expect(nearestHandle(0.5005, 0.5, 0.502, 10, 1000)).toBe('start')
     expect(nearestHandle(0.5018, 0.5, 0.502, 10, 1000)).toBe('end')
+  })
+})
+
+describe('scoreToY', () => {
+  it('maps a score of 1 near the top of the viewBox', () => {
+    expect(scoreToY(1, 38)).toBe(2)
+  })
+
+  it('maps a score of 0 to the bottom of the viewBox', () => {
+    expect(scoreToY(0, 38)).toBe(38)
+  })
+
+  it('clamps out-of-range scores', () => {
+    expect(scoreToY(-1, 38)).toBe(38)
+    expect(scoreToY(2, 38)).toBe(2)
+  })
+})
+
+describe('scoreCurvePoints', () => {
+  it('returns an empty string for an empty series', () => {
+    expect(scoreCurvePoints([], 200, 0, 40000, 1000, 38)).toBe('')
+  })
+
+  it('returns an empty string for a non-positive step', () => {
+    expect(scoreCurvePoints([0.1, 0.2, 0.3], 0, 0, 40000, 1000, 38)).toBe('')
+  })
+
+  it('returns an empty string when fewer than two samples fall in the window', () => {
+    // step 200ms, window 0..100ms -> only index 0 is in range
+    expect(scoreCurvePoints([0.1, 0.2, 0.3], 200, 0, 100, 1000, 38)).toBe('')
+  })
+
+  it('spaces samples evenly across the requested width, mapped by score', () => {
+    // step 1000ms, window 0..2500ms -> ceil(2500/1000)=3 -> indices 0,1,2 (3 samples)
+    const points = scoreCurvePoints([0, 0.5, 1], 1000, 0, 2500, 1000, 38)
+    expect(points).toBe('0,38 500,20 1000,2')
+  })
+
+  it('clips the slice to the available series length', () => {
+    // window extends past the end of the series -- only what exists is drawn
+    const points = scoreCurvePoints([0, 1], 1000, 0, 5000, 1000, 38)
+    expect(points).toBe('0,38 1000,2')
   })
 })
