@@ -93,22 +93,41 @@
     play()
   }
 
+  // Whether the current rally has already been ended. rAF and `timeupdate`
+  // both race to detect the out-point; this guard is what lets either win
+  // without double-firing onended. Reset to false each time a rally arms.
+  let rallyFinished = false
+
+  function finishRally(el: HTMLVideoElement): void {
+    if (rallyFinished) return
+    rallyFinished = true
+    raf = 0
+    el.pause()
+    onended()
+  }
+
+  // Shared out-point check used by both backstop paths (timeupdate and the
+  // visibility-restore check) -- NOT by the rAF loop, which inlines its own
+  // check below because it also needs `ms` for onprogress.
+  function checkBoundary(el: HTMLVideoElement): void {
+    if (el.currentTime * 1000 >= endMs) finishRally(el)
+  }
+
   function tick() {
     const el = live()
     if (el) {
       const ms = el.currentTime * 1000
       // Read position on every frame, not via `timeupdate` -- that fires about
-      // four times a second and would overshoot each cut by up to 250ms.
+      // four times a second and would overshoot each cut by up to 250ms. This
+      // stays the precise path; `timeupdate` below is only a backstop for
+      // when rAF itself gets throttled (e.g. a hidden/backgrounded tab), so
+      // the out-point can still be missed for the several hundred ms rAF is
+      // silent, but never indefinitely.
       if (onprogress && endMs > startMs) {
         onprogress(Math.min(1, Math.max(0, (ms - startMs) / (endMs - startMs))))
       }
       if (ms >= endMs) {
-        // Clear raf before calling out -- onended may synchronously drive a
-        // prop update that reruns the effect below, and that shouldn't ever
-        // observe a raf id this frame already retired.
-        raf = 0
-        el.pause()
-        onended()
+        finishRally(el)
         return
       }
     }
@@ -169,11 +188,23 @@
     if (!target) return
 
     target.playbackRate = speed
+    rallyFinished = false
     attemptPlay(target)
+
+    // Backstop: if rAF gets throttled (hidden/backgrounded tab), `tick()`
+    // may not run for a long time, and the out-point would otherwise be
+    // missed entirely -- playback would run straight through into whatever
+    // footage follows. `timeupdate` fires ~4x/sec regardless of rAF
+    // throttling, so it catches the boundary late (up to ~250ms) but it
+    // *does* catch it. finishRally()'s guard keeps this from double-firing
+    // against the rAF path.
+    const handleTimeUpdate = () => checkBoundary(target)
+    target.addEventListener('timeupdate', handleTimeUpdate)
 
     return () => {
       if (raf) cancelAnimationFrame(raf)
       raf = 0
+      target.removeEventListener('timeupdate', handleTimeUpdate)
     }
   })
 
@@ -189,6 +220,21 @@
   $effect(() => {
     const el = live()
     if (el) el.playbackRate = speed
+  })
+
+  // A tab restored from hidden/throttled should snap to the correct state
+  // immediately rather than waiting for the next `timeupdate` (which may
+  // itself be delayed if the tab was fully suspended). Deliberately does
+  // NOT pause on hide -- a rally may still be worth listening to while the
+  // user reads something else, and audio is intentionally on.
+  $effect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== 'visible') return
+      const el = live()
+      if (el) checkBoundary(el)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   })
 </script>
 
