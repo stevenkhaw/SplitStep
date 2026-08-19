@@ -1,0 +1,2 @@
+[console_scripts]
+bootleg = bootleg.cli:main

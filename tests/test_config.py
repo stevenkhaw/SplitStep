@@ -1,5 +1,5 @@
 import pytest
-from pathlib import Path
+
 from bootleg.config import Library, LibraryNotMounted, NotEnoughSpace
 
 
@@ -28,8 +28,9 @@ def test_open_does_not_create_the_root(tmp_path):
 
 def test_source_dir_is_zero_padded(tmp_path):
     lib = Library.open(tmp_path)
-    assert lib.source_dir("2026-08-19", 1) == tmp_path / "sessions" / "2026-08-19" / "sources" / "01"
-    assert lib.source_dir("2026-08-19", 12) == tmp_path / "sessions" / "2026-08-19" / "sources" / "12"
+    sources = tmp_path / "sessions" / "2026-08-19" / "sources"
+    assert lib.source_dir("2026-08-19", 1) == sources / "01"
+    assert lib.source_dir("2026-08-19", 12) == sources / "12"
 
 
 def test_free_bytes_is_positive(tmp_path):
