@@ -395,7 +395,11 @@ This is what makes queue mode work at all. A single element seeking between rall
 | `space` | play / pause |
 | `T` | open timeline on current rally |
 
-**Undo is required, not optional.** When the primary interaction is a single keystroke at 2× speed, mis-keys are certain. Session-scoped undo stack, in memory.
+**Undo is required, not optional.** When the primary interaction is a single keystroke at 2× speed, mis-keys are certain. Session-scoped undo stack, in memory, bounded at 200 entries.
+
+**A failed save auto-reverts and says so.** Each keystroke mutates local state immediately and posts to the server; if that post fails, the affected rally's flags are restored and a brief toast names what was undone. The queue does not halt — this runs on a LAN box, so a failure means the server died, which the jobs badge already surfaces, and interrupting the pass would punish the user for a rare event by breaking the exact rhythm the design exists to protect.
+
+This uses a dedicated `revert(action)` path, **not** undo. Undo is user-facing and pops last-in-first-out; a failed request arriving after two later keystrokes would revert whichever action happened to be on top rather than the one that actually failed. Actions therefore carry their pre-action flag state so any one of them can be reverted independently, and the type system enforces the distinction — an undo result cannot be passed to `revert`.
 
 **Resume is free.** `reviewed_at` per rally means reopening a session lands on the first unreviewed one. Every exit path from a rally sets `reviewed_at` — starring, rejecting, skipping with the arrow key, and auto-advance all count as seen. A session's `status` becomes `reviewed` once no rally in it has a NULL `reviewed_at`.
 
