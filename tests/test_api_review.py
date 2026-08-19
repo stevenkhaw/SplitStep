@@ -1,3 +1,6 @@
+import os
+import subprocess
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -298,5 +301,64 @@ def test_preset_with_out_of_range_point_is_422(client):
 
 
 def test_frame_endpoint_404s_when_the_proxy_is_missing(client, seeded):
+    """A router miss also 404s, so the status code alone still passes even
+    if this whole route were deleted -- verified by deleting api_frame and
+    re-running this test, which then failed with a 404 whose body did not
+    say "Proxy not found" (FastAPI's default unmatched-route body is
+    {"detail": "Not Found"}). Asserting on the endpoint's own detail string
+    is what actually proves this route ran its proxy-missing check.
+    """
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r.status_code == 404
+    assert r.json()["detail"] == "Proxy not found"
+
+
+def test_unrouted_media_path_404s_with_a_different_detail(client, seeded):
+    """Distinguishes a genuine router miss from the frame endpoint's own
+    404, so the two 404 paths are visibly different in what they report --
+    the sibling to the test above.
+    """
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/nonexistent.jpg")
+    assert r.status_code == 404
+    assert r.json()["detail"] != "Proxy not found"
+
+
+def _write_clip(path, color, size):
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", f"color=c={color}:size={size}:rate=10:duration=1",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+        check=True, capture_output=True,
+    )
+
+
+def test_stale_cached_frame_is_regenerated_when_the_proxy_changes(client, library, seeded):
+    """jobs/handlers.py's crash-retry ingest path reuses the same
+    source_dir and overwrites proxy.mp4 in place (see the comment on
+    get_source_by_original_name reuse there). Serving a frame cached before
+    that reuse would put the quad editor's still out of sync with the
+    footage a review session is actually scoring -- the endpoint must
+    regenerate whenever the cached frame predates the proxy on disk, not
+    just when the frame file is missing.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    proxy = d / "proxy.mp4"
+    _write_clip(proxy, "red", "320x240")
+
+    r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r1.status_code == 200
+    frame = d / "frame-0.jpg"
+    old_bytes = frame.read_bytes()
+
+    # Simulate the crash-retry: proxy.mp4 rewritten in place with different
+    # footage, forced to a later mtime than the frame cached above --
+    # os.utime rather than a real sleep, so the assertion doesn't depend on
+    # filesystem timestamp resolution or wall-clock timing.
+    _write_clip(proxy, "blue", "640x480")
+    newer = proxy.stat().st_mtime + 5
+    os.utime(proxy, (newer, newer))
+
+    r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r2.status_code == 200
+    assert frame.read_bytes() != old_bytes

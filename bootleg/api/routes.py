@@ -1,12 +1,10 @@
 import sqlite3
-import uuid
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator, model_validator
 
-from bootleg.db.presets import get_preset
+from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     list_rallies,
     mark_reviewed,
@@ -224,9 +222,10 @@ def api_proxy(session_id: str, idx: int, request: Request,
 
 @router.get("/api/court_presets")
 def api_list_presets(request: Request):
-    rows = _conn(request).execute(
-        "SELECT id, name, quad, created_at FROM court_presets ORDER BY created_at DESC"
-    ).fetchall()
+    """Presentation only -- storage and ordering live in db/presets.py so the
+    CLI (`bootleg preset list`) and this endpoint always agree on both.
+    """
+    rows = list_presets(_conn(request))
     return [
         {"id": r["id"], "name": r["name"],
          "points": [list(p) for p in Quad.from_json(r["quad"]).points],
@@ -237,13 +236,12 @@ def api_list_presets(request: Request):
 
 @router.post("/api/court_presets")
 def api_create_preset(body: PresetCreateBody, request: Request):
+    """Validation belongs at the boundary: PresetCreateBody.check_points
+    rejects a malformed body as a 422 before a Quad is ever constructed;
+    db/presets.create_preset does the storage, shared with the CLI.
+    """
     quad = Quad(tuple((x, y) for x, y in body.points))
-    preset_id = uuid.uuid4().hex
-    _conn(request).execute(
-        "INSERT INTO court_presets (id, name, quad, created_at) VALUES (?,?,?,?)",
-        (preset_id, body.name, quad.to_json(), datetime.now(UTC).isoformat()),
-    )
-    _conn(request).commit()
+    preset_id = create_preset(_conn(request), body.name, quad)
     return {"id": preset_id}
 
 
@@ -256,6 +254,11 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
         raise HTTPException(status_code=404, detail="Proxy not found")
 
     dst = src_dir / f"frame-{at_ms}.jpg"
-    if not dst.exists():
+    # A crash-retry ingest reuses the same source_dir and overwrites
+    # proxy.mp4 in place (see jobs/handlers.py's existing-source reuse for a
+    # requeued job). Checking mtime, not just existence, keeps a frame
+    # cached before that reuse from being served forever against footage it
+    # no longer matches.
+    if not dst.exists() or dst.stat().st_mtime < proxy.stat().st_mtime:
         extract_frame(proxy, dst, at_ms=at_ms)
     return FileResponse(dst, media_type="image/jpeg")
