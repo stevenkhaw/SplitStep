@@ -155,3 +155,57 @@ def test_audio_only_does_not_create_a_rally_with_audio_heavy_weights():
 def test_score_series_length_matches_input(params):
     stream = frames("A" * 17)
     assert len(score_series(stream, params)) == 17
+
+
+# -- Finding 8: lateral term measures motion, not position ------------------
+#
+# Isolate w_lateral as the only nonzero weight and disable smoothing, so
+# score_series(...)[1] reads back the raw lateral fraction of the second
+# frame's displacement directly through the public API.
+
+LATERAL_ONLY = SegmentParams(
+    w_both=0.0, w_speed=0.0, w_lateral=1.0, w_hits=0.0, w_regularity=0.0,
+    w_outside=0.0, smooth_window_s=0.0,
+)
+
+
+def _lateral_pair(prev_near: Player, near: Player) -> list[FeatureFrame]:
+    far = Player(0.5, 0.4, 0.10, 2.0)  # present so `both` is true; value unused
+    return [
+        FeatureFrame(0, 2, prev_near, far, hits=0, hit_reg=0.0),
+        FeatureFrame(SAMPLE_MS, 2, near, far, hits=0, hit_reg=0.0),
+    ]
+
+
+def test_lateral_term_scores_pure_sideways_motion_high():
+    """Sliding sideways with the foot position unchanged is fully lateral."""
+    stream = _lateral_pair(Player(0.3, 0.5, 0.30, 2.0), Player(0.5, 0.5, 0.30, 2.0))
+    assert score_series(stream, LATERAL_ONLY)[1] == 1.0
+
+
+def test_lateral_term_scores_pure_longitudinal_motion_zero_even_off_center():
+    """Moving straight toward the camera off to one side (retrieving a ball
+    near the fence) must score 0. The old position-based formula scored this
+    0.8 (abs(0.9 - 0.5) * 2) purely from where the player stood, ignoring
+    that the motion itself was directly toward the camera -- this is the
+    exact inversion Finding 8 describes, pinned so it cannot come back.
+    """
+    stream = _lateral_pair(Player(0.9, 0.5, 0.30, 2.0), Player(0.9, 0.7, 0.30, 2.0))
+    assert score_series(stream, LATERAL_ONLY)[1] == 0.0
+
+
+def test_lateral_term_scores_a_stationary_player_zero_even_off_center():
+    """A player standing still at the sideline: the measured consequence
+    from Finding 8 itself. The old formula scored this 0.9
+    (abs(0.95 - 0.5) * 2) despite zero motion -- position, not motion. This
+    test would fail if the position-based formula were reinstated.
+    """
+    stationary = Player(0.95, 0.9, 0.30, 2.0)
+    stream = _lateral_pair(stationary, stationary)
+    assert score_series(stream, LATERAL_ONLY)[1] == 0.0
+
+
+def test_lateral_term_is_zero_on_the_first_frame_with_no_previous_position():
+    far = Player(0.5, 0.4, 0.10, 2.0)
+    stream = [FeatureFrame(0, 2, Player(0.9, 0.5, 0.30, 2.0), far, hits=0, hit_reg=0.0)]
+    assert score_series(stream, LATERAL_ONLY)[0] == 0.0

@@ -1,7 +1,7 @@
 import statistics
 from dataclasses import dataclass
 
-from bootleg.detect.features import FeatureFrame
+from bootleg.detect.features import FeatureFrame, Player
 
 MAX_SPEED = 4.0   # body-lengths/sec that counts as "fully moving"
 MAX_HIT_RATE = 2.0  # impacts in the trailing second that counts as "full"
@@ -39,13 +39,35 @@ def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else (min(x, 1.0))
 
 
-def _raw_score(f: FeatureFrame, p: SegmentParams) -> float:
+def _lateral_fraction(near: Player | None, prev_near: Player | None) -> float:
+    """Horizontal share of the near player's displacement since the
+    previous sampled frame.
+
+    0 when the movement was purely toward/away from the camera
+    (longitudinal, e.g. walking to the fence) or the player did not move
+    at all; 1 when purely sideways (lateral, e.g. rallying). Position
+    alone -- distance from frame centre -- cannot tell the two apart, only
+    displacement between consecutive frames can: a player standing still
+    at the sideline has no motion at all, let alone lateral motion.
+    """
+    if near is None or prev_near is None:
+        return 0.0
+    dx = abs(near.cx - prev_near.cx)
+    dy = abs(near.foot - prev_near.foot)
+    total = dx + dy
+    if total < 1e-9:
+        # No meaningful displacement -- a stationary player has no
+        # direction, so the term is 0, not a division by zero.
+        return 0.0
+    return dx / total
+
+
+def _raw_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
     both = 1.0 if (f.near is not None and f.far is not None) else 0.0
 
     if both:
         slower = min(f.near.v, f.far.v)
         speed = _clamp01(slower / MAX_SPEED)
-        lateral = _clamp01(abs(f.near.cx - 0.5) * 2.0)
     else:
         speed = 0.0
         lateral = 0.0
@@ -79,7 +101,11 @@ def _sample_interval_ms(frames: list[FeatureFrame]) -> int:
 
 def score_series(frames: list[FeatureFrame], params: SegmentParams) -> list[float]:
     """Raw per-frame score, smoothed with a rolling median."""
-    raw = [_raw_score(f, params) for f in frames]
+    raw = []
+    prev_near: Player | None = None
+    for f in frames:
+        raw.append(_raw_score(f, params, _lateral_fraction(f.near, prev_near)))
+        prev_near = f.near
     if not raw:
         return []
 
