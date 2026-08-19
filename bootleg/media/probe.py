@@ -19,12 +19,38 @@ class MediaInfo:
     has_audio: bool
 
 
+def _pick_fps(*rates: str | None) -> float:
+    """Return the first usable frame-rate string as a float, else 0.0.
+
+    ffprobe reports an unknown ``avg_frame_rate`` as the string "0/0" rather
+    than an empty value, so each candidate must be parsed and checked for a
+    zero value (and a zero denominator, which raises ZeroDivisionError)
+    before falling through to the next one.
+    """
+    for rate in rates:
+        if not rate:
+            continue
+        try:
+            frac = Fraction(rate)
+        except (ZeroDivisionError, ValueError):
+            continue
+        if frac == 0:
+            continue
+        return float(frac)
+    return 0.0
+
+
 def probe(path: Path) -> MediaInfo:
-    proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-print_format", "json",
-         "-show_format", "-show_streams", str(path)],
-        capture_output=True, text=True, check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json",
+             "-show_format", "-show_streams", str(path)],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ProbeError(
+            "ffprobe not found on PATH. Install it: brew install ffmpeg"
+        ) from exc
     if proc.returncode != 0:
         raise ProbeError(f"ffprobe failed for {path}: {proc.stderr.strip()}")
 
@@ -39,8 +65,7 @@ def probe(path: Path) -> MediaInfo:
     if duration_s <= 0:
         raise ProbeError(f"Could not determine duration for {path}")
 
-    rate = video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1"
-    fps = float(Fraction(rate)) if not rate.startswith("0/") else 0.0
+    fps = _pick_fps(video.get("avg_frame_rate"), video.get("r_frame_rate"))
 
     tags = fmt.get("tags", {})
     recorded_at = tags.get("creation_time")

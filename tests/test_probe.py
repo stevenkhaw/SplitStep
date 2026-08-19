@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from bootleg.accel import detect_accel
-from bootleg.media.probe import ProbeError, probe
+from bootleg.media.probe import ProbeError, _pick_fps, probe
 
 
 @pytest.fixture
@@ -14,6 +14,18 @@ def sample_video(tmp_path):
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
          "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
          "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+@pytest.fixture
+def audio_only_file(tmp_path):
+    """1 second 440Hz tone with no video stream."""
+    out = tmp_path / "audio_only.m4a"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-c:a", "aac", str(out)],
         check=True, capture_output=True,
     )
     return out
@@ -39,3 +51,25 @@ def test_probe_raises_on_non_media(tmp_path):
     junk.write_bytes(b"this is not a video")
     with pytest.raises(ProbeError):
         probe(junk)
+
+
+def test_probe_raises_on_no_video_stream(audio_only_file):
+    with pytest.raises(ProbeError):
+        probe(audio_only_file)
+
+
+def test_probe_fps_close_to_30(sample_video):
+    info = probe(sample_video)
+    assert abs(info.fps - 30.0) < 1.0
+
+
+def test_pick_fps_falls_back_when_avg_frame_rate_is_unusable():
+    # ffprobe reports "0/0" for avg_frame_rate when it cannot determine an
+    # average; the picker must skip it and use r_frame_rate instead, rather
+    # than short-circuiting on the truthy-but-useless "0/0" string.
+    assert _pick_fps("0/0", "30/1") == 30.0
+
+
+def test_pick_fps_returns_zero_when_all_candidates_unusable():
+    assert _pick_fps("0/0", "0/0") == 0.0
+    assert _pick_fps(None, None) == 0.0
