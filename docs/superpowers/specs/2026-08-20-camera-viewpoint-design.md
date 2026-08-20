@@ -112,13 +112,36 @@ player (0.227 median) and the horizon strangers (0.055 median, 0.099 p90).
 Deriving it means it scales with camera height and lens rather than being tuned
 to one clip.
 
-**Degenerate cases.** Fewer than 50 frames carrying a near box → return
-`subject` with `low_confidence=True` and log a warning; a source where the far
-player is rarely seen *is* a subject-mode source, and the warning covers the
-other reading (a wrong quad, where nothing is detected and neither profile
-helps). No frames at all → `segment()` already returns `[]`. A degenerate
+**Confidence gate.** *(Amended 2026-08-20 during implementation — see the
+amendment note below.)* The classification is a median over **paired** frames,
+so the number of pairs is what decides whether it can be trusted. The near-box
+count only says whether the source has usable detections at all.
+
+1. No pairs at all → `subject`, `foot_separation = 0.0`. `low_confidence` is
+   true only if fewer than 50 frames carried a near box. A far player never
+   seen across a long source is the clearest possible subject signal, not a
+   weak reading; across a very short source we genuinely do not know.
+2. Fewer than 20 pairs (4 s of paired observation at 5 fps) → `subject`,
+   `low_confidence=True`. Too few paired samples for a median to mean anything.
+3. Otherwise → the median separation decides, `low_confidence=False`.
+
+A low-confidence result is logged as a warning from `params_for_frames`, so it
+fires for the detect job, the CLI and the API alike. The warning also covers
+the other reading of a sparse stream: a wrong court quad, where almost nothing
+is detected and neither profile can help.
+
+No frames at all → `segment()` already returns `[]`. A degenerate
 `median(near.h) == 0` floors `subject_min_h` to a small constant so the gate
 cannot open on every box.
+
+> **Amendment note.** As first written, this section gated on "fewer than 50
+> frames carrying a near box". That measures the wrong quantity: an 8-second
+> source with 40 frames, *every one* of them carrying both boxes at an
+> unambiguous 0.5 separation, was forced to `subject` with `low_confidence`
+> despite the geometry being about as clear as it gets. Forty paired samples is
+> ample for a median. The flaw surfaced when wiring the call sites (Task 4) —
+> a pre-existing CLI test caught it — and the gate was moved onto the pair
+> count rather than bending the test to fit.
 
 ## 5. Subject-mode scoring
 
