@@ -16,6 +16,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+*.egg-info/
 
 # node
 node_modules/
@@ -27,3 +28,6 @@ dist/
 
 # ...but golden test fixtures are source
 !tests/fixtures/**/*.jsonl
+
+web/node_modules/
+web/dist/

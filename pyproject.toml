@@ -1,0 +1,35 @@
+[project]
+name = "bootleg"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "ultralytics>=8.3",
+    "opencv-python-headless>=4.10",
+    "watchdog>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
+
+[project.scripts]
+bootleg = "bootleg.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # starlette.testclient prefers an httpx2 package that we do not install
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

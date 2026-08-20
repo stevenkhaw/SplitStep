@@ -94,7 +94,11 @@ The external drive *is* the library — a single self-contained portable folder.
   reels/<slug>.mp4
 ```
 
-The app refuses to start if the library path is not mounted and writable, naming the path in the error. It never auto-creates the tree — doing so would silently build a second empty library on internal storage.
+The app refuses to start unless `library.db` already exists at the path, naming it in the error. It never auto-creates the tree — doing so would silently build a second empty library on internal storage.
+
+Checking only that the directory exists and is writable is not enough, because that is exactly what a stale `/Volumes/BootlegVision` mountpoint looks like after an unclean eject: the app would start a clean empty library, report zero sessions, and ingest new footage to the internal SSD while the real drive remounted as `/Volumes/BootlegVision 1`. Requiring the database file distinguishes "the drive is here" from "something is mounted here."
+
+First-time creation is explicit: `bootleg --library /Volumes/BootlegVision init`.
 
 ### Retention
 
@@ -263,7 +267,9 @@ Ingest runs per source file. A new file is assigned to the session matching its 
 
 The user drags four corners over frame 1. Not the court lines — the region both players actually move in, extended down to the bottom of frame so the near player's feet stay inside when standing between the camera and the baseline.
 
-Stored as a `court_preset`, normalized 0-1, reusable across every session shot from the same spot. This one manual step is what makes adjacent courts disappear from detection.
+Stored as a `court_preset`, normalized 0-1, reusable across every session shot from the same spot. This one manual step is what makes adjacent courts disappear from detection — without it `w_outside`, the largest single weight, never fires.
+
+Until the visual editor exists, presets are created and assigned from the CLI: `bootleg preset add --name NAME --quad "x1,y1 x2,y2 x3,y3 x4,y4"`, then `bootleg source set-preset <source_id> <preset_id>`.
 
 Automatic court-line detection was rejected: it is a substantial project on its own, and at roughly 1 ft camera height the lines converge into a sliver.
 
@@ -294,9 +300,15 @@ Ball contact is audible on this footage; it is noisy, not absent. Audio is there
 ffmpeg -vn -ac 1 -ar 22050 -f s16le      raw PCM, streamed
   → butterworth highpass @ 800 Hz        wind is low-frequency; ball contact is a broadband transient
   → 10 ms RMS envelope
-  → adaptive peak pick                   local max above median + k·MAD over a 2 s window
+  → peakiness gate                       p99.9/median ≥ 3.0, else the clip has no transients at all
+  → adaptive peak pick                   local max above median + k·MAD over a 2 s window (reflect-padded)
+  → prominence floor                     peak must clear 0.30 × (p99.9 − median)
   → hit timestamps + strengths           aggregated onto the same 5 Hz grid
 ```
+
+**The two global gates are not optional.** A purely local threshold — `median + k·MAD` over a sliding window and nothing else — is what the first draft specified, and it is wrong: in a quiet stretch both the baseline and the MAD collapse toward zero, so an arbitrarily small noise wiggle clears the bar. Measured on a synthetic 6-click track, that version returned 13 hits: the 6 real impacts at strength 0.15–0.22, plus 7 noise-floor artifacts at 0.0005–0.003. A ball strike is loud relative to *the recording*, not merely relative to its neighbours, and the peakiness gate plus prominence floor are what encode that. With them: 6 clicks → 6, pure noise → 0, wind buffets → 0.
+
+Reflect-padding the sliding window rather than edge-padding it matters too — edge-padding manufactured false hits in the first and last second of every clip.
 
 numpy and scipy only — no librosa. Seconds per hour of audio.
 
@@ -308,6 +320,8 @@ Two derived features:
 **Why this earns its place:** it is strongest exactly where the visual features are weakest — the *end* of a rally. Players keep moving for a second or two after a point dies, so visual activity decays slowly; the last ball contact followed by ~1 s of silence is a sharp boundary. Adjacent courts are farther from the mic and gate out on amplitude.
 
 **Downside is bounded.** If audio proves useless on real footage, its weights fit to zero and nothing is lost — the two-stage split means discovering that costs 200 ms, not a re-run.
+
+**Validation status: synthetic only.** Every threshold above was tuned against generated click tracks, noise, and simulated wind. Whether ball contact is separable from adjacent-court play on real windy public-court audio is genuinely unknown until the first session is ingested, and is the second thing to check after rally recall.
 
 ### Feature record
 
@@ -328,11 +342,13 @@ One line per sampled frame into `features.jsonl`:
 ```
 score(t) = w1·both_present
          + w2·min(near_v, far_v)        both moving, not one player retrieving a ball
-         + w3·lateral_fraction(near)    rallies move you sideways; walking to the fence is longitudinal
+         + w3·lateral_fraction(near)    share of this frame's DISPLACEMENT that is horizontal
          + w5·hit_rate(t)               audio: ball contact
          + w6·hit_regularity(t)         audio: the metronome of a rally
          - w4·either_outside_region
 ```
+
+`lateral_fraction` is computed from consecutive frames as `dx / (dx + dy)`, where `dx`/`dy` are the near player's horizontal and vertical displacement since the previous sample; a player who did not move scores 0. It must be measured from *motion*, not position — an earlier draft used distance from frame centre, which scored a player standing still at the sideline 0.9 and a player rallying hard down the middle 0.0, exactly inverted for the commonest case.
 
 1. Rolling median, ~1 s window
 2. Threshold → binary
@@ -379,7 +395,11 @@ This is what makes queue mode work at all. A single element seeking between rall
 | `space` | play / pause |
 | `T` | open timeline on current rally |
 
-**Undo is required, not optional.** When the primary interaction is a single keystroke at 2× speed, mis-keys are certain. Session-scoped undo stack, in memory.
+**Undo is required, not optional.** When the primary interaction is a single keystroke at 2× speed, mis-keys are certain. Session-scoped undo stack, in memory, bounded at 200 entries.
+
+**A failed save auto-reverts and says so.** Each keystroke mutates local state immediately and posts to the server; if that post fails, the affected rally's flags are restored and a brief toast names what was undone. The queue does not halt — this runs on a LAN box, so a failure means the server died, which the jobs badge already surfaces, and interrupting the pass would punish the user for a rare event by breaking the exact rhythm the design exists to protect.
+
+This uses a dedicated `revert(action)` path, **not** undo. Undo is user-facing and pops last-in-first-out; a failed request arriving after two later keystrokes would revert whichever action happened to be on top rather than the one that actually failed. Actions therefore carry their pre-action flag state so any one of them can be reverted independently, and the type system enforces the distinction — an undo result cannot be passed to `revert`.
 
 **Resume is free.** `reviewed_at` per rally means reopening a session lands on the first unreviewed one. Every exit path from a rally sets `reviewed_at` — starring, rejecting, skipping with the arrow key, and auto-advance all count as seen. A session's `status` becomes `reviewed` once no rally in it has a NULL `reviewed_at`.
 
@@ -476,7 +496,9 @@ Ordered list, drag to reorder, remove. **Preview plays the reel in-browser** by 
 
 **Free space is checked before any job that writes.** A 4K clip that dies at 90% is worse than a job that refuses to start.
 
-**Bad input** — `ffprobe` failure marks the session `failed` and leaves the file untouched. Nothing is deleted.
+**Bad input** — `ffprobe` failure marks the source and session `failed` and moves the file to `<library>/_inbox/failed/`. Nothing is deleted.
+
+An earlier draft said the file was left in place. Implementation showed that is wrong: the inbox watcher only skips paths with a `queued` or `running` job, so a file that fails ingest is re-queued on every 5-second scan — measured at 720 failed job rows per hour, which also floods the jobs view. Quarantining preserves the actual intent (nothing destroyed, file recoverable and inspectable) while breaking the loop.
 
 ---
 
