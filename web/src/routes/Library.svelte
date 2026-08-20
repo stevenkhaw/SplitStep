@@ -6,9 +6,21 @@
 
   let sessions = $state<Session[]>([])
   let error = $state<string | null>(null)
+  // Session.svelte already has a "Loading…" state for its in-flight fetch;
+  // this didn't, so the empty-library copy ("Nothing yet...") was what a
+  // user saw for the entire fetch, indistinguishable from a genuinely empty
+  // library.
+  let loading = $state(true)
 
   $effect(() => {
     let cancelled = false
+    loading = true
+    // Cleared at the start of each attempt rather than left to linger from
+    // a previous one -- defensive even though nothing here currently
+    // retriggers this effect (no reactive reads besides the static `api`
+    // import), so a future retry/refresh affordance doesn't inherit a
+    // stale error alongside a successful refetch.
+    error = null
 
     api
       .listSessions()
@@ -17,6 +29,9 @@
       })
       .catch((e) => {
         if (!cancelled) error = String(e)
+      })
+      .finally(() => {
+        if (!cancelled) loading = false
       })
 
     return () => {
@@ -32,6 +47,8 @@
 
 {#if error}
   <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+{:else if loading}
+  <p class="text-sm text-neutral-400">Loading…</p>
 {:else if sessions.length === 0}
   <p class="text-sm text-neutral-400">
     Nothing yet. Drop a video into <code>_inbox/</code> and it will appear here.
