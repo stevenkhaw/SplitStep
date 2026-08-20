@@ -302,7 +302,15 @@ def api_create_preset(body: PresetCreateBody, request: Request):
     return {"id": preset_id}
 
 
-FRAME_CACHE_KEEP = 20
+FRAME_CACHE_KEEP = 20  # frame.jpg (proxy scrubbing) -- unchanged, not the wizard's access pattern.
+# preview.jpg's own cache key is `preview-{rot}-{at_ms}.jpg`, and the setup
+# wizard's nine-tile grid requests all nine timestamps at each of the four
+# candidate rotations as the user cycles through them (9 * 4 = 36 distinct
+# files) -- comfortably fewer than FRAME_CACHE_KEEP's 20 would evict the
+# tiles for a rotation the user just backed away from, forcing a re-decode
+# of a 4K frame on the very next click back to it. Set well above 36 so a
+# full cycle through all four rotations stays cache-resident at once.
+PREVIEW_CACHE_KEEP = 48
 # Two concurrent 4K HEVC decodes is what an 8 GB M2 Air absorbs without
 # swapping. The setup wizard's nine-frame rotation/timestamp grid fires
 # nine preview requests at once; the rest queue on this semaphore rather
@@ -485,13 +493,23 @@ def api_preview(
                 # never bytes from an in-progress ffmpeg write. Two writers
                 # for the same key can still both run ffmpeg (see above),
                 # but they land on two distinct temp paths and only one
-                # rename wins; neither can produce a torn dst. The leading
-                # dot keeps it out of the "preview-*.jpg" glob eviction
-                # scans; the trailing .jpg is load-bearing -- ffmpeg's
-                # output muxer is inferred from the destination filename's
-                # extension (run_ffmpeg passes no explicit -f), so the temp
-                # path has to end in .jpg too or extraction itself fails.
-                tmp = src_dir / f".{dst.stem}.{uuid.uuid4().hex}{dst.suffix}"
+                # rename wins; neither can produce a torn dst. Named to
+                # START with "preview-" (not a dotfile) so it still MATCHES
+                # the "preview-*.jpg" glob _evict_old_frames sweeps below --
+                # a process SIGKILLed between this line and the `finally`
+                # unlink otherwise leaks the temp file forever, since a
+                # dotfile name never matches that glob no matter how many
+                # sweeps run. The embedded uuid keeps it unguessable and
+                # guarantees it can never collide with a real `dst` name (no
+                # route ever serves a path built from anything but rot/
+                # at_ms), so a reader can still only ever be served the
+                # complete `dst`, never this file, whether or not eviction
+                # touches it first. The trailing .jpg is load-bearing --
+                # ffmpeg's output muxer is inferred from the destination
+                # filename's extension (run_ffmpeg passes no explicit -f),
+                # so the temp path has to end in .jpg too or extraction
+                # itself fails.
+                tmp = src_dir / f"{dst.stem}.{uuid.uuid4().hex}{dst.suffix}"
                 try:
                     extract_frame(
                         original, tmp, at_ms=at_ms, rotation_deg=rot,
@@ -502,9 +520,21 @@ def api_preview(
                     raise HTTPException(
                         status_code=409, detail="Source is still being processed"
                     ) from exc
+                except FileNotFoundError as exc:
+                    # tmp matching the eviction glob (see above) means a
+                    # concurrent sweep could in principle unlink it between
+                    # extract_frame finishing and this os.replace -- the
+                    # same best-effort race _evict_old_frames' own docstring
+                    # already accepts for completed cache files. Surface it
+                    # the same way as a torn extraction rather than an
+                    # unhandled 500: a caller retrying the request gets a
+                    # fresh temp path and a fresh chance.
+                    raise HTTPException(
+                        status_code=409, detail="Source is still being processed"
+                    ) from exc
                 finally:
                     tmp.unlink(missing_ok=True)
-        _evict_old_frames(src_dir, pattern="preview-*.jpg")
+        _evict_old_frames(src_dir, pattern="preview-*.jpg", keep=PREVIEW_CACHE_KEEP)
     else:
         os.utime(dst, None)
     return FileResponse(dst, media_type="image/jpeg")

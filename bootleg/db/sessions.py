@@ -222,6 +222,27 @@ def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: 
     conn.commit()
 
 
+def set_source_dimensions(conn: sqlite3.Connection, source_id: str, width: int, height: int) -> None:
+    """Record the ACTUAL dimensions of a source's proxy file.
+
+    add_source seeds width/height once, at ingest time, from the original's
+    probed rotation. Neither set_source_setup (rotation+preset only) nor
+    handle_build_proxy's own status write ever touch them again, so a
+    source seeded at one rotation and later corrected by the wizard keeps
+    reporting its stale ingest-time pair even though the proxy build
+    changed its actual shape -- exactly the mismatch `bootleg doctor`
+    prints as its headline diagnostic. Call this with dimensions probed
+    from the proxy itself, not recomputed from rotation_deg: the proxy is
+    the artifact everything downstream (the player, doctor, this row)
+    actually reads.
+    """
+    conn.execute(
+        "UPDATE sources SET width=?, height=? WHERE id=?",
+        (width, height, source_id),
+    )
+    conn.commit()
+
+
 def set_source_setup(
     conn: sqlite3.Connection, source_id: str, rotation_deg: int, preset_id: str
 ) -> None:

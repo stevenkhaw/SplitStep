@@ -1,5 +1,6 @@
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,7 +20,7 @@ from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
 from bootleg.jobs.handlers import handle_build_proxy, handle_detect, handle_ingest
-from bootleg.media.probe import ProbeError
+from bootleg.media.probe import ProbeError, probe
 from bootleg.watcher import scan_inbox
 
 
@@ -730,10 +731,51 @@ def test_build_proxy_passes_the_stored_rotation(library, sample_video, monkeypat
         lambda src, dst, rotation_deg=0: seen.update(rotation_deg=rotation_deg) or dst.touch(),
     )
     monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.probe",
+        lambda path: SimpleNamespace(width=100, height=200),
+    )
 
     handle_build_proxy(library, {"source_id": row["id"]})
 
     assert seen["rotation_deg"] == 270
+
+
+def test_build_proxy_records_the_proxys_actual_dimensions(library, sample_video):
+    """Finding: add_source seeds width/height from the ORIGINAL's probed
+    rotation at ingest time. set_source_setup (the wizard's write path)
+    only ever writes rotation_deg and court_preset_id, and the old
+    handle_build_proxy only wrote status -- so a source seeded at one
+    rotation whose orientation the wizard later corrects keeps its stale
+    ingest-time dimensions forever, even though the proxy on disk is a
+    completely different shape. `bootleg doctor` prints exactly that pair
+    (width/height vs rotation) as its headline diagnostic, so it lies on
+    every source the wizard corrected.
+
+    Reproduces the disagreement directly: 320x240 landscape ingests at
+    rotation_deg=0 (sample_video carries no display-matrix tag), so the row
+    seeds (320, 240). Correcting to a 90 rotation via set_source_rotation
+    -- exactly what the wizard's setup call does -- changes ONLY
+    rotation_deg, leaving width/height stale. A real build_proxy run (no
+    make_proxy mock, so a real portrait-oriented proxy file lands on disk)
+    must update the row to match what ffprobe reports for that actual
+    file, not the stale ingest-time pair and not a value merely recomputed
+    from rotation_deg without looking at the artifact.
+    """
+    conn, row = _registered(library, sample_video, name="IMG_1002.MOV")
+    assert (row["width"], row["height"]) == (320, 240)
+    set_source_rotation(conn, row["id"], 90)
+
+    handle_build_proxy(library, {"source_id": row["id"]})
+
+    src_dir = library.source_dir(row["session_id"], row["idx"])
+    actual = probe(src_dir / "proxy.mp4")
+    after = get_source(conn, row["id"])
+    assert (after["width"], after["height"]) == (actual.width, actual.height)
+    # The bug this guards against: silently keeping the stale ingest-time
+    # pair despite the rotation (and therefore the proxy's shape) having
+    # changed.
+    assert (after["width"], after["height"]) != (320, 240)
 
 
 def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
@@ -742,6 +784,10 @@ def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
         "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
     )
     monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.probe",
+        lambda path: SimpleNamespace(width=100, height=200),
+    )
 
     handle_build_proxy(library, {"source_id": row["id"]})
 
@@ -893,6 +939,10 @@ def test_build_proxy_retried_after_the_first_run_does_not_duplicate_detect(
         "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
     )
     monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.probe",
+        lambda path: SimpleNamespace(width=100, height=200),
+    )
 
     handle_build_proxy(library, {"source_id": row["id"]})
     handle_build_proxy(library, {"source_id": row["id"]})

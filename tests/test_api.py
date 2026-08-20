@@ -1,12 +1,15 @@
+import os
 import sqlite3
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
+from bootleg.api.routes import _evict_old_frames
 from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies, replace_rallies, set_star
 from bootleg.db.schema import connect
@@ -333,6 +336,63 @@ def test_preview_write_is_atomic_on_extraction_failure(
     # away from: only the original ingest left in place, nothing else.
     remaining = {p.name for p in registered_source.dir.iterdir()}
     assert all(name.startswith("original.") for name in remaining)
+
+
+def test_preview_leaked_temp_file_is_eventually_swept(client, registered_source, monkeypatch):
+    """A process killed between extract_frame finishing and api_preview's
+    `finally: tmp.unlink()` actually running leaks the temp file it wrote
+    to -- `finally` runs on any ordinary exception, so only a real crash
+    (never reached, by definition, in a single test process) skips it.
+    Stand in for that by making cleanup itself a no-op for the duration of
+    one request, the same end state a SIGKILL leaves behind: the temp file
+    the ROUTE'S OWN CODE named stays on disk.
+
+    Before this fix that name was a dotfile (`.preview-....jpg`), which the
+    "preview-*.jpg" glob `_evict_old_frames` sweeps after every request
+    never matches -- so it stayed on disk forever, no matter how many later
+    requests ran. Renaming it to start with "preview-" makes it ordinary
+    eviction fodder: once enough fresher files exist to push it out of the
+    "keep most recent" window, the very same sweep every preview request
+    already triggers reclaims it.
+    """
+    captured: dict[str, Path] = {}
+
+    def dies_after_writing(src, dst, at_ms=0, rotation_deg=0, hwaccel=None):
+        Path(dst).write_bytes(b"leaked mid-extraction")
+        captured["tmp"] = Path(dst)
+        # Anything other than TranscodeError/ProbeError/FileNotFoundError:
+        # api_preview does not catch it, so it propagates out uncaught --
+        # the same "nothing ran to completion" shape as a real crash.
+        raise RuntimeError("process killed mid-extraction")
+
+    real_unlink = Path.unlink
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", dies_after_writing)
+    monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: None)
+
+    with pytest.raises(RuntimeError):
+        client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
+
+    # Restore real cleanup for what the test does next -- only the ROUTE's
+    # own cleanup needed to be suppressed, to leave its temp file behind.
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+
+    tmp = captured["tmp"]
+    assert tmp.exists()
+    # The fix itself: a dotfile name can never match "preview-*.jpg", no
+    # matter how eviction is tuned.
+    assert tmp.name.startswith("preview-")
+
+    old = time.time() - 3600
+    os.utime(tmp, (old, old))
+    # Enough fresher decoys that the leaked file is no longer among the
+    # `keep` most recently touched -- regardless of what the real budget is
+    # tuned to (see FRAME_CACHE_KEEP / PREVIEW_CACHE_KEEP).
+    for i in range(25):
+        (registered_source.dir / f"preview-0-{600 + i}.jpg").write_bytes(b"x")
+
+    _evict_old_frames(registered_source.dir, pattern="preview-*.jpg", keep=20)
+
+    assert not tmp.exists()
 
 
 def test_preview_rotation_reaches_the_pixels(client, registered_source, tmp_path):

@@ -17,6 +17,7 @@ from bootleg.db.sessions import (
     get_source,
     get_source_by_original_name,
     set_session_status,
+    set_source_dimensions,
     set_source_status,
 )
 from bootleg.detect.audio import detect_hits, extract_pcm, hits_to_grid
@@ -77,19 +78,18 @@ def _session_should_fail(
 ) -> bool:
     """Decide whether a source failure should also fail its session.
 
-    True unless some OTHER source in the session already reached 'ready'
-    or 'reviewed'. Sessions hold multiple sources (see
-    test_second_file_same_day_joins_the_same_session), and
+    True unless some OTHER source in the session already reached 'ready'.
+    ('reviewed' is a SESSION-only status -- see the vocabulary table in the
+    spec and refresh_session_review_status; sources never hold it, so
+    checking for it here was always a no-op.) Sessions hold multiple
+    sources (see test_second_file_same_day_joins_the_same_session), and
     refresh_session_review_status (bootleg/db/sessions.py) only ever acts
     on sessions already in ('ready', 'reviewed') -- once a session is
     written 'failed' it can never transition again. Failing it while a
     sibling source already finished review would strand that sibling's
     reviewed rallies behind this source's unrelated failure.
     """
-    query = (
-        "SELECT 1 FROM sources WHERE session_id = ?"
-        " AND status IN ('ready', 'reviewed')"
-    )
+    query = "SELECT 1 FROM sources WHERE session_id = ? AND status = 'ready'"
     params: list[str] = [session_id]
     if failing_source_id is not None:
         query += " AND id != ?"
@@ -207,8 +207,16 @@ def handle_build_proxy(library: Library, payload: dict) -> None:
         set_source_status(conn, source["id"], "building")
         # Proxy plus sprite sheet run roughly 1.5x the source in the worst case.
         library.require_free(int(original.stat().st_size * 1.5))
-        make_proxy(original, src_dir / "proxy.mp4", rotation_deg=source["rotation_deg"])
-        make_thumbs(src_dir / "proxy.mp4", src_dir / "thumbs.jpg")
+        proxy_path = src_dir / "proxy.mp4"
+        make_proxy(original, proxy_path, rotation_deg=source["rotation_deg"])
+        make_thumbs(proxy_path, src_dir / "thumbs.jpg")
+        # Probe the proxy we just wrote rather than recomputing dimensions
+        # from rotation_deg: it's the artifact everything downstream (the
+        # player, `bootleg doctor`) actually reads, and add_source's
+        # ingest-time seed goes stale the moment the wizard corrects
+        # rotation after that seed was written (see set_source_dimensions).
+        proxy_info = probe(proxy_path)
+        set_source_dimensions(conn, source["id"], proxy_info.width, proxy_info.height)
     except Exception:
         set_source_status(conn, source["id"], "failed")
         # See _session_should_fail: don't strand a sibling source's
@@ -224,6 +232,14 @@ def handle_build_proxy(library: Library, payload: dict) -> None:
     # handler; a duplicate detect job would call replace_rallies again and
     # silently discard any rally boundaries a human hand-edited between the
     # two detect runs (replace_rallies only preserves starred/rejected).
+    # TODO: this is a check-then-act, unlike claim()'s BEGIN IMMEDIATE --
+    # two concurrent `bootleg serve` processes racing this same window
+    # could both pass has_pending_job and both enqueue. No live path hits
+    # that today (reclaim_stale only re-enters at worker startup against a
+    # dead process), but the project designs for a second concurrent serve
+    # elsewhere (see claim()). Close it with BEGIN IMMEDIATE around this
+    # check-and-enqueue, or a single `INSERT ... WHERE NOT EXISTS`, before
+    # that ever runs for real.
     if not jobq.has_pending_job(conn, "detect", source["id"]):
         jobq.enqueue(conn, "detect", {"source_id": source["id"]})
 

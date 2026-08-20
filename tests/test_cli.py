@@ -1,4 +1,6 @@
 import json
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -356,6 +358,38 @@ def test_setup_now_with_failing_job(library, registered_source, a_preset, capsys
     err = capsys.readouterr().err
     # Error from the failed job should appear in stderr
     assert "simulated build_proxy failure" in err
+
+
+def test_setup_now_succeeds_despite_an_earlier_unrelated_failed_job(
+    library, conn, registered_source, a_preset, capsys
+):
+    """Finding: get_failed_jobs_for_source is not time-scoped, so `setup
+    --now` reported failure -- and exited non-zero -- if the source EVER
+    had a failed job, even a stale one from a completely unrelated earlier
+    run that has no bearing on whether THIS run's jobs succeeded. Seed a
+    failed job row that predates this invocation, then run a `setup --now`
+    that succeeds outright (no monkeypatched failure): the stale row must
+    not be able to fail it.
+    """
+    old_ts = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    conn.execute(
+        "INSERT INTO jobs (id,type,payload,status,error,created_at,finished_at)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (
+            uuid.uuid4().hex, "build_proxy",
+            json.dumps({"source_id": registered_source.id}),
+            "failed", "stale unrelated failure from an earlier run",
+            old_ts, old_ts,
+        ),
+    )
+    conn.commit()
+
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset, "--now",
+    ])
+    assert code == 0
+    assert "stale unrelated failure" not in capsys.readouterr().err
 
 
 def test_doctor_lists_source_rotation(library, registered_source, capsys):

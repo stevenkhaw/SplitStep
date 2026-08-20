@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bootleg.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
@@ -120,6 +121,12 @@ def cmd_setup(args) -> int:
             print("no --preset given and none assigned; see `bootleg preset list`",
                   file=sys.stderr)
             return 1
+    # Captured before this invocation queues anything, so the --now check
+    # below only ever looks at jobs THIS run created -- get_failed_jobs_for_source
+    # is otherwise unscoped, and a source that failed once in a completely
+    # unrelated earlier run would make every later, successful `setup --now`
+    # exit non-zero forever.
+    since = datetime.now(UTC).isoformat()
     try:
         job_id = queue_setup(conn, args.source_id, args.rotation, preset_id)
     except (ValueError, LookupError, RuntimeError) as exc:
@@ -132,7 +139,7 @@ def cmd_setup(args) -> int:
         Worker(lib, HANDLERS).run_once()
         # Check if any jobs for this source failed. If so, print the error
         # and return non-zero so the caller knows the rebuild didn't succeed.
-        failed_jobs = jobq.get_failed_jobs_for_source(conn, args.source_id)
+        failed_jobs = jobq.get_failed_jobs_for_source(conn, args.source_id, since=since)
         for job in failed_jobs:
             if job["error"]:
                 print(job["error"], file=sys.stderr)

@@ -104,17 +104,25 @@ def reclaim_stale(conn: sqlite3.Connection, older_than_s: int = 120) -> int:
 
 
 def get_failed_jobs_for_source(
-    conn: sqlite3.Connection, source_id: str
+    conn: sqlite3.Connection, source_id: str, since: str | None = None
 ) -> list[sqlite3.Row]:
-    """Return all failed jobs for a source_id.
+    """Return failed jobs for a source_id, optionally scoped to `since`.
 
     Queries the payload's source_id field to match against the source_id
     parameter, using json_extract so that a source_id that is a prefix of
     another's (e.g. 'src-1' vs 'src-10') cannot false-match.
+
+    `since` (an ISO timestamp, as produced by `_now()`) restricts the
+    result to jobs created at or after it. Without it, a caller like
+    `bootleg setup --now` would report failure -- and exit non-zero --
+    forever after a single failed run, even once a later run of the very
+    same source's jobs succeeds outright: the source's job history is
+    cumulative, but "did THIS invocation's jobs succeed" is a question
+    about a specific time window, not the source's entire history.
     """
-    rows = conn.execute(
-        "SELECT * FROM jobs WHERE status='failed'"
-        " AND json_extract(payload, '$.source_id') = ?",
-        (source_id,),
-    ).fetchall()
-    return rows
+    query = "SELECT * FROM jobs WHERE status='failed' AND json_extract(payload, '$.source_id') = ?"
+    params: list[str] = [source_id]
+    if since is not None:
+        query += " AND created_at >= ?"
+        params.append(since)
+    return conn.execute(query, params).fetchall()
