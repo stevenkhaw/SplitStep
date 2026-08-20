@@ -631,3 +631,81 @@ def test_ingest_stores_rotation_and_display_dimensions(library, tmp_path, sample
     assert row["rotation_deg"] in (90, 270)
     # 320x240 coded, quarter-turned for display.
     assert (row["width"], row["height"]) == (240, 320)
+
+
+# -- Fix 4: replace the recovery lookup rule ---------------------------------
+
+def test_ingest_recovery_of_a_completed_source_ignores_an_unrelated_failed_source(
+    library, conn
+):
+    """Reproduces the fourth defect: an unscoped, name-only lookup with an
+    arbitrary tiebreak (`ORDER BY idx LIMIT 1`) could resolve a recovery to
+    a same-named source that failed before its move instead of the one that
+    actually finished. Session F's source failed before `_move_to_failed`
+    could even run, so its session dir holds no `original.*`; session R's
+    same-named source ingested cleanly to 'needs_setup' with `original.*`
+    on disk. Replaying R's already-finished payload must resolve by asking
+    "does any source with this name hold a completed original" -- never by
+    picking a row -- so it returns quietly and leaves both untouched.
+    """
+    session_f = create_session(conn, "session-f", "2024-01-01", "2024-01-01")
+    source_f_id, _idx_f = add_source(
+        conn, session_f,
+        recorded_at="2024-01-01T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_0001.mp4",
+    )
+    handlers.set_source_status(conn, source_f_id, "failed")
+    handlers.set_session_status(conn, session_f, "failed")
+    # No mkdir here -- a source that failed before its move has nothing in
+    # its session dir; _move_to_failed puts the file in `_inbox/failed/`.
+
+    session_r = create_session(conn, "session-r", "2024-01-02", "2024-01-02")
+    source_r_id, idx_r = add_source(
+        conn, session_r,
+        recorded_at="2024-01-02T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_0001.mp4",
+    )
+    handlers.set_source_status(conn, source_r_id, "needs_setup")
+    handlers.set_session_status(conn, session_r, "needs_setup")
+    r_dir = library.source_dir(session_r, idx_r)
+    r_dir.mkdir(parents=True)
+    (r_dir / "original.mp4").write_bytes(b"session r's original")
+
+    source_f_before = dict(get_source(conn, source_f_id))
+    source_r_before = dict(get_source(conn, source_r_id))
+
+    # A redundant requeue of session R's already-finished job: same name,
+    # inbox path already gone.
+    ghost = library.inbox / "IMG_0001.mp4"
+    handle_ingest(library, {"path": str(ghost)})
+
+    assert dict(get_source(conn, source_f_id)) == source_f_before
+    assert dict(get_source(conn, source_r_id)) == source_r_before
+
+
+def test_ingest_raises_when_no_source_anywhere_holds_a_completed_original(
+    library, conn
+):
+    """A payload naming a file that never existed anywhere must raise, even
+    when a same-named source row exists -- as long as none of them ever
+    completed a move. A failed source with an empty session dir must not be
+    mistaken for "the earlier attempt finished".
+    """
+    session_f = create_session(conn, "session-f", "2024-01-01", "2024-01-01")
+    source_f_id, _idx_f = add_source(
+        conn, session_f,
+        recorded_at="2024-01-01T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_9999.mp4",
+    )
+    handlers.set_source_status(conn, source_f_id, "failed")
+    handlers.set_session_status(conn, session_f, "failed")
+
+    ghost = library.inbox / "IMG_9999.mp4"
+
+    with pytest.raises(FileNotFoundError):
+        handle_ingest(library, {"path": str(ghost)})
+
+    assert get_source(conn, source_f_id)["status"] == "failed"

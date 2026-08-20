@@ -108,17 +108,15 @@ def find_ingesting_sources_by_original_name(
     """Find every source row named original_name that is still stuck at
     status='ingesting', with no session_id to scope the search.
 
-    Used when a requeued ingest job finds its inbox path already gone, as
-    the first thing to check before falling back to
-    find_source_by_original_name's broader, unscoped match. Filtering to
-    'ingesting' is what makes a row identifiable as *this* crash's source:
-    two sessions can hold a source with the same original_name (a phone
+    This is the set a requeued ingest job checks first when its inbox path
+    is already gone: status, not name, is what identifies a crashed job.
+    Two sessions can hold a source with the same original_name (a phone
     reusing IMG_0001.MOV across days), but only a source stranded by a
     crash between the move and the status write is still sitting at
     'ingesting' -- a source that finished ingest is already at
-    'needs_setup' or beyond. Checking this narrower, unambiguous set first
-    is what lets a genuine crash victim win over an unrelated, already-
-    finished source that merely happens to share its name.
+    'needs_setup' or beyond. A single match here is unambiguous; more than
+    one means two crashes raced on the same name and neither can be
+    trusted over the other.
     """
     return conn.execute(
         "SELECT * FROM sources WHERE original_name = ? AND status = 'ingesting'"
@@ -127,24 +125,23 @@ def find_ingesting_sources_by_original_name(
     ).fetchall()
 
 
-def find_source_by_original_name(
+def find_sources_by_original_name(
     conn: sqlite3.Connection, original_name: str
-) -> sqlite3.Row | None:
-    """Find a source row by original_name alone, with no session_id or
+) -> list[sqlite3.Row]:
+    """Find every source row named original_name, with no session_id or
     status to scope the search.
 
-    Fallback used only once find_ingesting_sources_by_original_name has
-    come back empty, i.e. no source anywhere is currently mid-crash-
-    recovery for this name -- so there is no still-'ingesting' row this
-    unscoped match could wrongly out-rank. What's left at that point is the
-    case where the earlier attempt already finished (its row has moved on
-    to 'needs_setup' or beyond) and reclaim_stale() requeued the same
-    payload anyway: this reaffirms that already-completed row.
+    Used only to answer a set-membership question -- "has ANY attempt at
+    this name ever completed its move" -- never to pick one row to act on.
+    A name-only match can span sessions (a phone reusing IMG_0001.MOV
+    across days), so treating any single row here as *the* row would be an
+    arbitrary tiebreak. See find_ingesting_sources_by_original_name for the
+    narrower, single-row-safe set that crash recovery actually acts on.
     """
     return conn.execute(
-        "SELECT * FROM sources WHERE original_name = ? ORDER BY idx LIMIT 1",
+        "SELECT * FROM sources WHERE original_name = ? ORDER BY idx",
         (original_name,),
-    ).fetchone()
+    ).fetchall()
 
 
 def set_source_status(conn: sqlite3.Connection, source_id: str, status: str) -> None:

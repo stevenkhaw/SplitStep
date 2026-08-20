@@ -12,7 +12,7 @@ from bootleg.db.sessions import (
     add_source,
     find_ingesting_sources_by_original_name,
     find_or_create_session_for_date,
-    find_source_by_original_name,
+    find_sources_by_original_name,
     get_source,
     get_source_by_original_name,
     set_session_status,
@@ -91,26 +91,17 @@ def handle_ingest(library: Library, payload: dict) -> None:
 
     try:
         if not src.exists():
-            # A requeued job can find the inbox path gone for two different
-            # reasons, and a missing file alone can't tell them apart: the
-            # first attempt may have moved the original and then crashed
-            # before writing 'needs_setup' (recoverable -- verify the move
-            # really landed and finish the write it already earned), or the
-            # path may never have existed at all (not recoverable -- fail
-            # loudly rather than return as if the job had succeeded).
-            #
-            # Two sessions can hold a source with the same original_name (a
-            # phone reusing IMG_0001.MOV across days), so name alone can't
-            # tell "the crashed job" apart from "an unrelated finished job
-            # that happens to share a name". Status can: a source stranded
-            # by this exact crash is always still 'ingesting' (the status
-            # add_source() writes), while a completed one has already moved
-            # on to 'needs_setup' or beyond. Checking 'ingesting' rows first
-            # is what lets a genuine crash victim win over a same-named
-            # source that merely finished around the same time -- only once
-            # no 'ingesting' row exists at all do we fall back to the
-            # broader unscoped match, for the case where reclaim_stale()
-            # redundantly requeues a job that already finished.
+            # A crashed job is identified by status, never by name or row
+            # order: original_name alone doesn't scope to one session (a
+            # phone can reuse IMG_0001.MOV across days), so picking a row
+            # out of an unscoped, name-only match is always an arbitrary
+            # tiebreak. Exactly one 'ingesting' row for this name is the
+            # crashed job -- finish it if its move landed, else raise; more
+            # than one is ambiguous and must raise rather than guess. Zero
+            # 'ingesting' rows means nothing is stranded: whether this is a
+            # redundant requeue of a finished job or a payload that never
+            # existed is answered without picking a row either, by asking
+            # whether ANY same-named source has a completed original on disk.
             ingesting = find_ingesting_sources_by_original_name(conn, src.name)
             if len(ingesting) > 1:
                 ids = ", ".join(sorted(c["id"] for c in ingesting))
@@ -119,24 +110,18 @@ def handle_ingest(library: Library, payload: dict) -> None:
                     f"multiple 'ingesting' sources ({ids}); refusing to "
                     f"guess which one to finish: {src}"
                 )
-            existing = (
-                ingesting[0] if ingesting
-                else find_source_by_original_name(conn, src.name)
-            )
-            if existing is not None:
-                moved_dir = library.source_dir(existing["session_id"], existing["idx"])
+            if len(ingesting) == 1:
+                crashed = ingesting[0]
+                moved_dir = library.source_dir(crashed["session_id"], crashed["idx"])
                 if any(moved_dir.glob("original.*")):
-                    # A redundantly requeued job can find the original already
-                    # moved, but the source may have since advanced well beyond
-                    # 'ingesting' -- it may be 'ready' with rallies attached. The
-                    # status write must be conditional: only advance a source that
-                    # is still stranded at 'ingesting' (where this very crash left
-                    # it). If it has already moved on, an earlier attempt completed,
-                    # and this requeue is redundant; return without rewinding.
-                    if existing["status"] == "ingesting":
-                        set_source_status(conn, existing["id"], "needs_setup")
-                        set_session_status(conn, existing["session_id"], "needs_setup")
+                    set_source_status(conn, crashed["id"], "needs_setup")
+                    set_session_status(conn, crashed["session_id"], "needs_setup")
                     return
+            elif any(
+                any(library.source_dir(s["session_id"], s["idx"]).glob("original.*"))
+                for s in find_sources_by_original_name(conn, src.name)
+            ):
+                return
             raise FileNotFoundError(
                 f"ingest payload names a missing inbox file with no completed "
                 f"source to recover it from: {src}"
