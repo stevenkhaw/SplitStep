@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bootleg.config import Library
+from bootleg.db import jobs as jobq
 from bootleg.db.rallies import replace_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
@@ -25,12 +26,7 @@ from bootleg.detect.segment import SegmentParams, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler
 from bootleg.media.probe import display_size, probe
-
-# make_proxy is not called here anymore -- register-only ingest leaves the
-# transcode to the setup wizard's build_proxy job (a later task). Imported
-# so tests can assert on `bootleg.jobs.handlers.make_proxy` that it is not
-# called; make_thumbs has no such caller left and is dropped.
-from bootleg.media.transcode import make_proxy  # noqa: F401
+from bootleg.media.transcode import make_proxy, make_thumbs
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +158,43 @@ def handle_ingest(library: Library, payload: dict) -> None:
         raise
 
 
+def handle_build_proxy(library: Library, payload: dict) -> None:
+    """Transcode a registered source's proxy at its chosen rotation.
+
+    Idempotent by overwrite: a proxy half-written by a killed worker is
+    worthless, so a retry re-encodes rather than trying to resume.
+    """
+    conn = _open(library)
+    source = get_source(conn, payload["source_id"])
+    if source is None:
+        raise ValueError(f"No such source: {payload['source_id']}")
+
+    src_dir = library.source_dir(source["session_id"], source["idx"])
+    original = _original_path(src_dir)
+    if original is None:
+        raise ValueError(f"No original on disk for source {source['id']}")
+
+    try:
+        set_source_status(conn, source["id"], "building")
+        # Proxy plus sprite sheet run roughly 1.5x the source in the worst case.
+        library.require_free(int(original.stat().st_size * 1.5))
+        make_proxy(original, src_dir / "proxy.mp4", rotation_deg=source["rotation_deg"])
+        make_thumbs(src_dir / "proxy.mp4", src_dir / "thumbs.jpg")
+    except Exception:
+        set_source_status(conn, source["id"], "failed")
+        set_session_status(conn, source["session_id"], "failed")
+        raise
+
+    set_source_status(conn, source["id"], "ingested")
+    set_session_status(conn, source["session_id"], "detecting")
+    jobq.enqueue(conn, "detect", {"source_id": source["id"]})
+
+
+def _original_path(src_dir: Path) -> Path | None:
+    matches = sorted(src_dir.glob("original.*"))
+    return matches[0] if matches else None
+
+
 def _quad_for(conn: sqlite3.Connection, source: sqlite3.Row) -> Quad:
     if source["court_preset_id"]:
         row = conn.execute(
@@ -183,9 +216,9 @@ def _audio_source(src_dir: Path, proxy: Path, source: sqlite3.Row) -> Path:
     the proxy only once the original has been reclaimed (has_original=0).
     """
     if source["has_original"]:
-        matches = sorted(src_dir.glob("original.*"))
-        if matches:
-            return matches[0]
+        original = _original_path(src_dir)
+        if original is not None:
+            return original
     return proxy
 
 
@@ -231,5 +264,6 @@ def _audio_grid(path: Path, duration_ms: int) -> list[tuple[int, float]]:
 
 HANDLERS: dict[str, Handler] = {
     "ingest": handle_ingest,
+    "build_proxy": handle_build_proxy,
     "detect": handle_detect,
 }

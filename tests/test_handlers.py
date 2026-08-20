@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -12,11 +13,12 @@ from bootleg.db.sessions import (
     list_sessions,
     list_sources,
     set_source_preset,
+    set_source_rotation,
 )
 from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
-from bootleg.jobs.handlers import handle_detect, handle_ingest
+from bootleg.jobs.handlers import handle_build_proxy, handle_detect, handle_ingest
 from bootleg.media.probe import ProbeError
 from bootleg.watcher import scan_inbox
 
@@ -709,3 +711,47 @@ def test_ingest_raises_when_no_source_anywhere_holds_a_completed_original(
         handle_ingest(library, {"path": str(ghost)})
 
     assert get_source(conn, source_f_id)["status"] == "failed"
+
+
+def _registered(library, sample_video, name="IMG_1000.MOV"):
+    src = library.inbox / name
+    src.write_bytes(sample_video.read_bytes())
+    handle_ingest(library, {"path": str(src)})
+    conn = connect(library.db_path)
+    return conn, conn.execute("SELECT * FROM sources").fetchone()
+
+
+def test_build_proxy_passes_the_stored_rotation(library, sample_video, monkeypatch):
+    conn, row = _registered(library, sample_video)
+    set_source_rotation(conn, row["id"], 270)
+    seen = {}
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy",
+        lambda src, dst, rotation_deg=0: seen.update(rotation_deg=rotation_deg) or dst.touch(),
+    )
+    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+
+    handle_build_proxy(library, {"source_id": row["id"]})
+
+    assert seen["rotation_deg"] == 270
+
+
+def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
+    conn, row = _registered(library, sample_video, name="IMG_1001.MOV")
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
+    )
+    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+
+    handle_build_proxy(library, {"source_id": row["id"]})
+
+    job = conn.execute("SELECT * FROM jobs WHERE type='detect'").fetchone()
+    assert json.loads(job["payload"])["source_id"] == row["id"]
+    assert conn.execute(
+        "SELECT status FROM sources WHERE id=?", (row["id"],)
+    ).fetchone()["status"] == "ingested"
+
+
+def test_build_proxy_on_a_missing_source_raises(library):
+    with pytest.raises(ValueError, match="No such source"):
+        handle_build_proxy(library, {"source_id": "nope"})
