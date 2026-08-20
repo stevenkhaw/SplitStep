@@ -184,6 +184,59 @@ def test_resegment_rewrites_rallies_from_cached_features(client, library, conn, 
     assert r.json()["count"] == 1
 
 
+def test_scores_with_no_threshold_returns_the_resolved_profile_default(
+    client, library, seeded, ground_features
+):
+    """No `threshold` in the query string means "use the profile's default",
+    and api_scores must echo back what params_for_frames actually resolved
+    (params.threshold) rather than the raw None it was called with -- that
+    resolved value is what lets the UI adopt the right default on first load.
+
+    ground_features is real footage that classifies as subject mode
+    (threshold 0.25), deliberately not pair mode (0.45). Pair's default
+    happens to equal SegmentParams()'s hardcoded dataclass default, so a
+    regression that returned that hardcoded default without ever running
+    classification would still pass a pair-fixture assertion; subject's 0.25
+    only comes out if params_for_frames's resolution actually ran.
+    """
+    from bootleg.detect.features import write_features
+
+    src_dir = library.source_dir(seeded["session_id"], seeded["idx"])
+    src_dir.mkdir(parents=True, exist_ok=True)
+    write_features(src_dir / "features.jsonl", ground_features)
+
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["threshold"] == 0.25
+    assert body["step_ms"] == 200
+    assert len(body["scores"]) == len(ground_features)
+
+
+def test_scores_with_explicit_threshold_returns_it_unchanged(client, library, seeded):
+    """The re-segment slider passes an explicit threshold to override the
+    profile default -- that value must come back verbatim, same as
+    params_for_frames itself (see test_params_for_frames_honours_an_explicit_threshold)."""
+    from bootleg.detect.features import FeatureFrame, Player, write_features
+
+    frames = [
+        FeatureFrame(i * 200, 2,
+                     Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9)
+        for i in range(40)
+    ]
+    src_dir = library.source_dir(seeded["session_id"], seeded["idx"])
+    src_dir.mkdir(parents=True, exist_ok=True)
+    write_features(src_dir / "features.jsonl", frames)
+
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores", params={"threshold": 0.6})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["threshold"] == 0.6
+    assert body["step_ms"] == 200
+    assert len(body["scores"]) == len(frames)
+
+
 # -- Finding 7: each request gets its own sqlite connection -----------------
 
 def test_two_concurrent_requests_do_not_share_a_connection(library):

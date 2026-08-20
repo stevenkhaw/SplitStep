@@ -411,6 +411,21 @@ def test_params_for_frames_warns_on_low_confidence_classification(caplog):
     assert any("low-confidence" in r.message for r in caplog.records)
 
 
+def test_params_for_frames_warns_on_pair_scarce_low_confidence(caplog):
+    """low_confidence has a second, independent cause: pairs present but too
+    few to trust their median (analyze_view's MIN_PAIRS_FOR_CONFIDENCE), which
+    can fire with frames_measured well past MIN_FRAMES_FOR_CONFIDENCE -- the
+    branch the frames-scarce test above does not exercise. 100 'O' frames
+    plus 15 'A' frames put frames_measured at 115 (comfortably over the
+    50-frame floor) but pairs_measured at 15 (under the 20-pair floor), so a
+    warning that only ever named frames_measured would misdescribe this case
+    as near-box scarcity when the real cause is pair scarcity."""
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("O" * 100 + "A" * 15))
+    assert any("low-confidence" in r.message for r in caplog.records)
+    assert any("15 of those were paired" in r.message for r in caplog.records)
+
+
 def test_params_for_frames_does_not_warn_on_a_confident_classification(caplog):
     with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
         params_for_frames(frames("A" * 200))

@@ -280,17 +280,25 @@ def params_for_frames(
     """
     view: ViewGeometry = analyze_view(frames)
     if view.low_confidence:
-        # Too few frames carried a near-player box to tell pair from subject
-        # reliably, so analyze_view assumed subject mode as the safe default.
-        # The same reading also covers a wrong court quad: with the play
-        # region misplaced, almost nothing detects as a near box either, so
-        # a source landing here is worth a human glance at its preset, not
-        # just a shrug that it happens to be ground-level footage.
+        # analyze_view sets this for two independent reasons, and only the
+        # two counts it returns tell them apart: too few frames carried a
+        # near-player box to say a far player is genuinely absent
+        # (frames_measured under MIN_FRAMES_FOR_CONFIDENCE), or a far player
+        # did show up but too rarely for the paired-frame median to be
+        # trusted (pairs_measured under MIN_PAIRS_FOR_CONFIDENCE, which can
+        # fire even with frames_measured well past its own floor). Either
+        # way analyze_view assumed subject mode as the safe default, and
+        # either way it can also mean a wrong court quad: with the play
+        # region misplaced, near/far boxes go missing for the same reason,
+        # so a source landing here is worth a human glance at its preset,
+        # not just a shrug that it happens to be ground-level footage.
         log.warning(
             "low-confidence viewpoint classification (%d frames carried a "
-            "near-player box); assuming subject mode -- check the source's "
-            "court quad if it is not actually ground-level footage",
+            "near-player box, %d of those were paired with a far box); "
+            "assuming subject mode -- check the source's court quad if it "
+            "is not actually ground-level footage",
             view.frames_measured,
+            view.pairs_measured,
         )
     if view.profile == "subject":
         params = SegmentParams(

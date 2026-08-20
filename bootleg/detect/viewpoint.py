@@ -43,6 +43,7 @@ class ViewGeometry:
     foot_separation: float
     subject_min_h: float
     frames_measured: int
+    pairs_measured: int
     low_confidence: bool
 
 
@@ -74,14 +75,16 @@ def analyze_view(frames: list[FeatureFrame]) -> ViewGeometry:
         # frames is the line between "genuinely absent" and "haven't looked
         # long enough to say."
         return ViewGeometry(
-            "subject", 0.0, subject_min_h, measured, measured < MIN_FRAMES_FOR_CONFIDENCE
+            "subject", 0.0, subject_min_h, measured, 0, measured < MIN_FRAMES_FOR_CONFIDENCE
         )
 
     if len(pairs) < MIN_PAIRS_FOR_CONFIDENCE:
         # Pairs exist but too few to trust their median -- distinct from the
         # no-pairs case above, which is a confident reading in its own right.
-        return ViewGeometry("subject", 0.0, subject_min_h, measured, True)
+        return ViewGeometry("subject", 0.0, subject_min_h, measured, len(pairs), True)
 
     separation = statistics.median(abs(n.foot - f.foot) for n, f in pairs)
     profile: Profile = "subject" if separation < GROUND_FOOT_SEPARATION else "pair"
-    return ViewGeometry(profile, round(separation, 4), subject_min_h, measured, False)
+    return ViewGeometry(
+        profile, round(separation, 4), subject_min_h, measured, len(pairs), False
+    )
