@@ -3,7 +3,13 @@ import subprocess
 import pytest
 
 from bootleg.media.probe import probe
-from bootleg.media.transcode import TranscodeError, make_proxy, make_thumbs, run_ffmpeg
+from bootleg.media.transcode import (
+    TranscodeError,
+    make_proxy,
+    make_thumbs,
+    rotation_filter,
+    run_ffmpeg,
+)
 
 
 @pytest.fixture
@@ -95,6 +101,76 @@ def test_make_proxy_creates_parent_directories(big_video, tmp_path):
     dst = tmp_path / "a" / "b" / "proxy.mp4"
     make_proxy(big_video, dst)
     assert dst.exists()
+
+
+def test_rotation_filter_maps_every_right_angle():
+    assert rotation_filter(0) == ""
+    assert rotation_filter(90) == "transpose=1"
+    assert rotation_filter(180) == "transpose=1,transpose=1"
+    assert rotation_filter(270) == "transpose=2"
+
+
+def test_rotation_filter_rejects_anything_else():
+    with pytest.raises(ValueError, match="0, 90, 180 or 270"):
+        rotation_filter(45)
+
+
+def test_make_proxy_at_zero_rotation_ignores_the_display_matrix(tmp_path, big_video):
+    """A tagged clip transcoded at rotation 0 keeps its coded orientation.
+
+    This is the whole point of -noautorotate: the stored rotation decides,
+    not ffmpeg's default.
+    """
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(big_video),
+         "-c", "copy", str(tagged)],
+        check=True, capture_output=True,
+    )
+    out = tmp_path / "proxy.mp4"
+    make_proxy(tagged, out, rotation_deg=0)
+    info = probe(out)
+    assert info.width > info.height
+
+
+def test_make_proxy_at_the_probed_rotation_matches_ffmpeg_autorotate(tmp_path, big_video):
+    """Settles the sign convention: probe + rotation_filter must agree with
+    what every other player would show.
+
+    Frames are compared as raw rgb24 pixels rather than encoded PNG bytes.
+    A PNG produced through -noautorotate carries an extra ~92-byte eXIf
+    chunk that an autorotate-produced PNG does not: ffmpeg's own autorotate
+    consumes the frame's Display Matrix side data before the frame reaches
+    an encoder, so there is nothing left to serialize; -noautorotate leaves
+    that side data attached to the frame even after this module's own
+    transpose has already corrected the orientation, and the PNG encoder
+    serializes it into an eXIf chunk regardless. That chunk is unrelated to
+    orientation -- confirmed by decoding both legs to rgb24 rawvideo, where
+    the correct transpose direction is byte-identical to ffmpeg's autorotate
+    and the wrong one differs in ~95% of bytes -- so it must not affect
+    whether this test can settle the sign convention.
+    """
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(big_video),
+         "-c", "copy", str(tagged)],
+        check=True, capture_output=True,
+    )
+    ours = tmp_path / "ours.rgb"
+    theirs = tmp_path / "theirs.rgb"
+    deg = probe(tagged).rotation_deg
+    vf = ",".join(f for f in (rotation_filter(deg), "scale=-2:120") if f)
+    subprocess.run(
+        ["ffmpeg", "-y", "-noautorotate", "-i", str(tagged), "-vf", vf,
+         "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", str(ours)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(tagged), "-vf", "scale=-2:120",
+         "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", str(theirs)],
+        check=True, capture_output=True,
+    )
+    assert ours.read_bytes() == theirs.read_bytes()
 
 
 def test_run_ffmpeg_converts_a_timeout_to_transcode_error(monkeypatch):
