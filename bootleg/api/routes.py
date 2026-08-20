@@ -171,7 +171,18 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
 
     intervals = segment(read_features(path), SegmentParams(threshold=body.threshold))
     count = replace_rallies(conn, source["session_id"], source_id, intervals)
-    return {"count": count}
+    # replace_rallies inserts every new rally with reviewed_at NULL and
+    # carries starred/rejected across by overlap, but never reviewed_at --
+    # so a session that read "reviewed" before this call would otherwise
+    # keep reading "reviewed" while none of its rallies has actually been
+    # seen (worst case: a threshold raised too far yields zero rallies and
+    # the session is stuck showing "reviewed" with nothing to review). The
+    # guard inside refresh_session_review_status makes this a no-op for a
+    # session still 'ingesting'/'detecting'/'failed'.
+    return {
+        "count": count,
+        "session_status": refresh_session_review_status(conn, source["session_id"]),
+    }
 
 
 @router.get("/api/sources/{source_id}/scores")

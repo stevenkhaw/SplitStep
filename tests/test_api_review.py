@@ -267,6 +267,47 @@ def test_scores_clamps_step_ms_to_one_for_duplicate_leading_timestamps(client, l
     assert body["step_ms"] == 1
 
 
+def test_resegment_drops_a_reviewed_session_back_to_ready(client, conn, library, seeded):
+    """replace_rallies inserts every new rally with reviewed_at NULL and
+    carries starred/rejected across by overlap, but never reviewed_at.
+    api_resegment must refresh the session's review status itself -- the
+    session list is how the user picks what to review next, so a session
+    that still reads 'reviewed' after a re-segment that produced unseen
+    rallies would be a wrong answer they act on.
+    """
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    for rally in list_rallies(conn, seeded["session_id"]):
+        mark_reviewed(conn, rally["id"])
+    refresh_session_review_status(conn, seeded["session_id"])
+    assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
+
+    r = client.post(f"/api/sources/{seeded['source_id']}/resegment", json={})
+    assert r.status_code == 200
+    assert r.json()["count"] > 0
+    assert r.json()["session_status"] == "ready"
+    assert get_session(conn, seeded["session_id"])["status"] == "ready"
+
+
+def test_resegment_producing_zero_intervals_also_leaves_the_session_ready(
+    client, conn, library, seeded
+):
+    """Worst case of the same bug: a threshold raised too far yields zero
+    rallies, and the session must not be left sitting at 'reviewed' with no
+    rallies at all to review.
+    """
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    for rally in list_rallies(conn, seeded["session_id"]):
+        mark_reviewed(conn, rally["id"])
+    refresh_session_review_status(conn, seeded["session_id"])
+    assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
+
+    r = client.post(f"/api/sources/{seeded['source_id']}/resegment", json={"threshold": 1.0})
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+    assert r.json()["session_status"] == "ready"
+    assert get_session(conn, seeded["session_id"])["status"] == "ready"
+
+
 def test_create_preset_returns_an_id(client):
     r = client.post("/api/court_presets", json={
         "name": "Memorial court 3",
