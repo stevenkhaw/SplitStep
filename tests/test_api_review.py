@@ -1,5 +1,6 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -365,17 +366,28 @@ def test_stale_cached_frame_is_regenerated_when_the_proxy_changes(client, librar
     assert frame.read_bytes() != old_bytes
 
 
-def test_frame_endpoint_clamps_at_ms_past_the_clip_duration(client, library, seeded):
+def test_frame_endpoint_clamps_at_ms_past_the_clip_duration(client, conn, library, seeded):
     """Scrubbing past a clip's end is ordinary UI behaviour in the quad
     editor. Past end-of-stream ffmpeg fails with exit 234 and a misleading
     "Non full-range YUV is non-standard" message -- the same end-of-stream
     encoder bug make_thumbs already documents and clamps against
     (bootleg/media/transcode.py). at_ms must be clamped into the clip's
     duration, not passed straight through to ffmpeg.
+
+    The clamp margin now comes from the sources row (duration_ms/fps)
+    rather than probing proxy.mp4 -- see api_frame. Sync the row to this
+    test's actual 2s@10fps clip (the seeded fixture's own duration_ms/fps
+    are arbitrary placeholders, unrelated to any real proxy file) so the
+    clamp math is exercised against the same duration the fake clip has.
     """
     d = library.source_dir(seeded["session_id"], seeded["idx"])
     d.mkdir(parents=True, exist_ok=True)
     _write_clip(d / "proxy.mp4", "red", "320x240", duration=2)
+    conn.execute(
+        "UPDATE sources SET duration_ms = ?, fps = ? WHERE id = ?",
+        (2000, 10.0, seeded["source_id"]),
+    )
+    conn.commit()
 
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg?at_ms=5000")
     assert r.status_code == 200
@@ -446,12 +458,46 @@ def test_frame_cache_keeps_at_most_20_files(client, library, seeded):
     assert len(list(d.glob("frame-*.jpg"))) <= 20
 
 
-def test_repeat_frame_request_does_not_touch_the_cached_file(client, library, seeded):
+def test_repeat_frame_request_does_not_re_extract_the_cached_file(
+    client, library, seeded, monkeypatch
+):
     """Every other frame-endpoint test here covers the staleness branch. A
     regression that disabled caching entirely -- re-running ffmpeg on every
     request -- would pass all of them; this is the one test that would
-    catch it: a repeat request for the same at_ms must not rewrite the
-    cached file.
+    catch it: a repeat request for the same at_ms must not call
+    extract_frame again.
+
+    A cache hit now calls os.utime on the cached file (finding 3b), so
+    mtime alone can no longer prove non-re-extraction the way it used to --
+    assert directly on the call count instead.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240")
+
+    import bootleg.api.routes as routes_mod
+    real_extract_frame = routes_mod.extract_frame
+    calls = []
+
+    def _counting(src, dst, at_ms=0):
+        calls.append(at_ms)
+        real_extract_frame(src, dst, at_ms=at_ms)
+
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", _counting)
+
+    r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r1.status_code == 200
+    r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r2.status_code == 200
+    assert calls == [0]
+
+
+def test_frame_cache_hit_bumps_the_cached_files_mtime(client, library, seeded):
+    """A cache hit must call os.utime on the cached file: this both keeps a
+    hot frame from being evicted mid-response by a concurrent eviction
+    sweep (finding 3b) and turns eviction from write-time-based into
+    access-time-based (finding 8) -- a frame still being scrubbed through
+    stays hot instead of aging out.
     """
     d = library.source_dir(seeded["session_id"], seeded["idx"])
     d.mkdir(parents=True, exist_ok=True)
@@ -460,17 +506,49 @@ def test_repeat_frame_request_does_not_touch_the_cached_file(client, library, se
     r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r1.status_code == 200
     frame = d / "frame-0.jpg"
-    mtime1 = frame.stat().st_mtime
+    stale = frame.stat().st_mtime - 100
+    os.utime(frame, (stale, stale))
 
     r2 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r2.status_code == 200
-    assert frame.stat().st_mtime == mtime1
+    assert frame.stat().st_mtime > stale
 
 
-def test_frame_endpoint_422s_when_extraction_fails(client, library, seeded, monkeypatch):
+def test_evict_old_frames_tolerates_a_file_vanishing_mid_sweep(tmp_path, monkeypatch):
+    """A concurrent eviction pass (another request racing this one) can
+    unlink a file between _evict_old_frames's own glob and its stat (sort
+    key). That race must not bubble an OSError out of a request that
+    otherwise succeeded -- eviction is best-effort housekeeping.
+    """
+    from bootleg.api.routes import _evict_old_frames
+
+    for i in range(25):
+        (tmp_path / f"frame-{i}.jpg").write_bytes(b"x")
+
+    real_stat = Path.stat
+
+    def _flaky_stat(self, *args, **kwargs):
+        if self.name == "frame-5.jpg":
+            self.unlink(missing_ok=True)
+            raise FileNotFoundError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _flaky_stat)
+
+    _evict_old_frames(tmp_path, keep=20)  # must not raise
+
+    # os.path.exists (not Path.exists) so this check itself doesn't route
+    # back through the still-active _flaky_stat patch.
+    assert not os.path.exists(tmp_path / "frame-5.jpg")
+
+
+def test_frame_endpoint_409s_when_extraction_fails(client, library, seeded, monkeypatch):
     """Any residual ffmpeg failure -- not just the out-of-range at_ms case,
     which is now clamped away before reaching ffmpeg -- must be a clean
-    client error, not a bare 500.
+    client error, not a bare 500. TranscodeError (and ProbeError, see the
+    test below) both mean the proxy is not a complete, valid video yet, a
+    normal transient state rather than a server error, so this is a 409
+    rather than the 422 it used to be.
     """
     d = library.source_dir(seeded["session_id"], seeded["idx"])
     d.mkdir(parents=True, exist_ok=True)
@@ -482,7 +560,27 @@ def test_frame_endpoint_422s_when_extraction_fails(client, library, seeded, monk
     monkeypatch.setattr("bootleg.api.routes.extract_frame", _boom)
 
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
-    assert r.status_code == 422
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Source is still being processed"
+
+
+def test_frame_endpoint_409s_when_the_proxy_is_a_truncated_stub(client, library, seeded):
+    """Regression test for finding 1/4: a source mid-ingest (or a
+    crash-retry that has not finished rewriting proxy.mp4 yet) can leave a
+    proxy.mp4 that exists but is not a complete, valid video. Before this
+    fix, api_frame's own probe(proxy) call raised ProbeError here on every
+    single request -- uncaught, so a bare 500. That call is gone now
+    (duration_ms/fps come from the sources row instead), and extract_frame
+    failing against the stub is caught alongside TranscodeError -- so this
+    must be a clean 409, not a 500.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "proxy.mp4").write_bytes(b"not a real mp4")
+
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Source is still being processed"
 
 
 def test_index_is_served_when_the_spa_is_built(library, tmp_path):

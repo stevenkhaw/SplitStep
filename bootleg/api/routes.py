@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from pathlib import Path
 
@@ -26,7 +27,7 @@ from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
 from bootleg.media.frames import extract_frame
-from bootleg.media.probe import probe
+from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError
 
 from .media import range_response
@@ -255,16 +256,49 @@ def _evict_old_frames(src_dir: Path, keep: int = FRAME_CACHE_KEEP) -> None:
     """Frame extraction caches one file per requested at_ms with no
     eviction otherwise -- a quad-editor session scrubbing through many
     timestamps would grow this directory without bound. Keep only the
-    `keep` most recently written frame-*.jpg, deleting the rest by mtime.
+    `keep` most recently touched frame-*.jpg, deleting the rest by mtime.
+
+    Eviction is best-effort housekeeping, not correctness-critical for the
+    request it runs inside: a concurrent eviction pass (another request
+    racing this one) can unlink a file between this glob and this stat, or
+    between this stat and this unlink. Default a vanished file's sort key to
+    0 instead of letting `stat()` raise, and swallow any other OSError from
+    the sweep, so a race here never turns an otherwise-successful frame
+    request into a 500 -- the next eviction pass reconciles whatever this
+    one didn't finish.
     """
-    frames = sorted(src_dir.glob("frame-*.jpg"), key=lambda p: p.stat().st_mtime)
-    for stale in frames[:-keep]:
-        stale.unlink(missing_ok=True)
+    def _mtime_or_zero(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    try:
+        frames = sorted(src_dir.glob("frame-*.jpg"), key=_mtime_or_zero)
+        for stale in frames[:-keep]:
+            stale.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.get("/media/{session_id}/{idx}/frame.jpg")
 def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
+    conn = _conn(request)
     library = _library(request)
+
+    # Look the source up in the database, the way api_scores/api_resegment
+    # already do, instead of shelling out to ffprobe on every request
+    # (including cache hits): probe() has no timeout, so a wedged ffprobe
+    # against e.g. a spun-down external drive would hold an anyio worker
+    # thread forever out of Starlette's pool of 40, shared with every other
+    # route. This also turns an unknown session_id/idx into a clean 404
+    # instead of a filesystem probe.
+    source = conn.execute(
+        "SELECT * FROM sources WHERE session_id = ? AND idx = ?", (session_id, idx)
+    ).fetchone()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
     src_dir = library.source_dir(session_id, idx)
     proxy = src_dir / "proxy.mp4"
     if not proxy.is_file():
@@ -286,9 +320,14 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     # (measured: 1967ms fails, 1966ms succeeds; at a synthetic 10fps
     # 1901ms fails, 1900ms succeeds). The margin has to account for the
     # source's own frame period, not just its reported duration.
-    info = probe(proxy)
-    margin_ms = int(1000 / info.fps) + 1 if info.fps > 0 else max(1, info.duration_ms // 2)
-    last_safe_ms = max(0, info.duration_ms - margin_ms)
+    #
+    # duration_ms/fps come from the sources row rather than probe(proxy):
+    # make_proxy passes no -r and only scales, so the proxy's duration and
+    # frame rate match the recorded values already in the database.
+    fps = source["fps"]
+    duration_ms = source["duration_ms"]
+    margin_ms = int(1000 / fps) + 1 if fps > 0 else max(1, duration_ms // 2)
+    last_safe_ms = max(0, duration_ms - margin_ms)
     at_ms = max(0, min(at_ms, last_safe_ms))
 
     dst = src_dir / f"frame-{at_ms}.jpg"
@@ -302,9 +341,22 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     if not dst.exists() or dst.stat().st_mtime <= proxy.stat().st_mtime:
         try:
             extract_frame(proxy, dst, at_ms=at_ms)
-        except TranscodeError as exc:
+        except (TranscodeError, ProbeError) as exc:
+            # ProbeError and TranscodeError are unrelated exception classes,
+            # but extract_frame's underlying ffmpeg call can surface either
+            # against a proxy that is not yet a complete, valid video (e.g.
+            # mid-transcode, or a crash-retry ingest that has not finished
+            # rewriting proxy.mp4 yet). That is a normal transient state,
+            # not a server error.
             raise HTTPException(
-                status_code=422, detail=f"Could not extract frame: {exc}"
+                status_code=409, detail="Source is still being processed"
             ) from exc
         _evict_old_frames(src_dir)
+    else:
+        # Cache hit: bump the mtime so a concurrent eviction sweep can't
+        # unlink this exact file between this handler returning and
+        # Starlette sending the body, and so eviction becomes
+        # access-time-based rather than write-time-based -- a frame still
+        # being scrubbed through stays hot instead of aging out.
+        os.utime(dst, None)
     return FileResponse(dst, media_type="image/jpeg")
