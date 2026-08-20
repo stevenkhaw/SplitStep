@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bootleg.config import Library
-from bootleg.db import jobs as jobq
 from bootleg.db.rallies import replace_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
@@ -23,8 +22,13 @@ from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler
-from bootleg.media.probe import probe
-from bootleg.media.transcode import make_proxy, make_thumbs
+from bootleg.media.probe import display_size, probe
+
+# make_proxy is not called here anymore -- register-only ingest leaves the
+# transcode to the setup wizard's build_proxy job (a later task). Imported
+# so tests can assert on `bootleg.jobs.handlers.make_proxy` that it is not
+# called; make_thumbs has no such caller left and is dropped.
+from bootleg.media.transcode import make_proxy  # noqa: F401
 
 log = logging.getLogger(__name__)
 
@@ -70,55 +74,53 @@ def _move_to_failed(library: Library, src: Path, message: str) -> None:
 
 
 def handle_ingest(library: Library, payload: dict) -> None:
+    """Register a dropped file. No transcode, no detection.
+
+    Both wait for a human to confirm orientation and play region in the
+    setup wizard, which enqueues `build_proxy`. Registering is seconds of
+    probing and a move, so a file dropped in the inbox shows up in the UI
+    immediately instead of after a ten-minute round trip that may have been
+    encoding it sideways the whole time.
+    """
     src = Path(payload["path"])
     conn = _open(library)
     session_id: str | None = None
     source_id: str | None = None
 
     try:
+        if not src.exists():
+            # A requeued job whose first attempt already moved the file.
+            # Nothing to redo: the source row is committed and the original
+            # is in place.
+            return
         info = probe(src)
-        # Proxy plus sprite sheet run roughly 1.5x the source in the worst case.
-        library.require_free(int(src.stat().st_size * 1.5))
+        # The transcode's space is checked in build_proxy, where it happens.
+        # A move needs only what the file already occupies.
+        library.require_free(src.stat().st_size)
         played_on = _played_on(info.recorded_at, src)
         session_id = find_or_create_session_for_date(conn, played_on)
 
-        # A retry (this job's payload names the same inbox path again, after
-        # a worker crash and reclaim_stale requeue) must reuse the source
-        # row add_source already committed rather than adding a duplicate.
         existing = get_source_by_original_name(conn, session_id, src.name)
         if existing is not None:
             source_id, idx = existing["id"], existing["idx"]
         else:
+            width, height = display_size(info.width, info.height, info.rotation_deg)
             source_id, idx = add_source(
                 conn, session_id,
                 recorded_at=info.recorded_at or played_on,
                 duration_ms=info.duration_ms,
-                width=info.width, height=info.height, fps=info.fps,
+                width=width, height=height, fps=info.fps,
                 original_name=src.name,
+                rotation_deg=info.rotation_deg,
             )
 
         dest_dir = library.source_dir(session_id, idx)
         dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), dest_dir / f"original{src.suffix.lower()}")
 
-        # Encode from the inbox copy and move it into place only once ingest
-        # has fully succeeded. Moving first (the old order) and encoding
-        # second stranded a retry: the payload names this exact inbox path,
-        # and after a crash mid-encode that path would no longer exist for
-        # probe() to find on the next attempt, wedging the source at
-        # 'ingesting' forever.
-        make_proxy(src, dest_dir / "proxy.mp4")
-        make_thumbs(dest_dir / "proxy.mp4", dest_dir / "thumbs.jpg")
-
-        original = dest_dir / f"original{src.suffix.lower()}"
-        shutil.move(str(src), original)
-
-        set_source_status(conn, source_id, "ingested")
-        set_session_status(conn, session_id, "detecting")
-        jobq.enqueue(conn, "detect", {"source_id": source_id})
+        set_source_status(conn, source_id, "needs_setup")
+        set_session_status(conn, session_id, "needs_setup")
     except Exception as exc:
-        # A failed ingest must not sit in the inbox to be re-queued on every
-        # 5-second scan, and must not leave sources/sessions status frozen
-        # at 'ingesting' with no record that anything went wrong.
         if source_id is not None:
             set_source_status(conn, source_id, "failed")
         if session_id is not None:

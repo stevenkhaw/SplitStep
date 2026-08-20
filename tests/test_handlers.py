@@ -1,4 +1,3 @@
-import json
 import subprocess
 
 import pytest
@@ -12,7 +11,6 @@ from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
 from bootleg.jobs.handlers import handle_detect, handle_ingest
 from bootleg.media.probe import ProbeError
-from bootleg.media.transcode import TranscodeError
 from bootleg.watcher import scan_inbox
 
 
@@ -36,7 +34,20 @@ def dropped_video(library):
     return out
 
 
-def test_ingest_creates_session_source_and_proxy(library, conn, dropped_video):
+@pytest.fixture
+def sample_video(tmp_path):
+    """2 second 320x240 30fps clip with a 440Hz tone."""
+    out = tmp_path / "sample.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_ingest_creates_session_and_source_without_a_proxy(library, conn, dropped_video):
     handle_ingest(library, {"path": str(dropped_video)})
 
     sessions = list_sessions(conn)
@@ -45,11 +56,14 @@ def test_ingest_creates_session_source_and_proxy(library, conn, dropped_video):
     sources = list_sources(conn, sessions[0]["id"])
     assert len(sources) == 1
     assert sources[0]["original_name"] == "IMG_0001.mp4"
+    assert sources[0]["status"] == "needs_setup"
 
     src_dir = library.source_dir(sessions[0]["id"], 1)
-    assert (src_dir / "proxy.mp4").exists()
-    assert (src_dir / "thumbs.jpg").exists()
     assert (src_dir / "original.mp4").exists()
+    # Register-only ingest never transcodes -- the proxy and sprite sheet
+    # are the setup wizard's build_proxy job, not ingest's.
+    assert not (src_dir / "proxy.mp4").exists()
+    assert not (src_dir / "thumbs.jpg").exists()
 
 
 def test_ingest_removes_the_file_from_the_inbox(library, conn, dropped_video):
@@ -57,11 +71,10 @@ def test_ingest_removes_the_file_from_the_inbox(library, conn, dropped_video):
     assert not dropped_video.exists()
 
 
-def test_ingest_enqueues_a_detect_job(library, conn, dropped_video):
+def test_ingest_no_longer_enqueues_a_detect_job(library, conn, dropped_video):
     handle_ingest(library, {"path": str(dropped_video)})
     row = conn.execute("SELECT * FROM jobs WHERE type='detect'").fetchone()
-    assert row is not None
-    assert "source_id" in json.loads(row["payload"])
+    assert row is None
 
 
 def test_second_file_same_day_joins_the_same_session(library, conn, dropped_video):
@@ -212,20 +225,31 @@ def test_an_unprobeable_file_is_quarantined_and_not_rescanned(library, conn):
     assert scan_inbox(library, conn, settle_s=0.1) == []
 
 
-def test_an_encode_failure_marks_the_source_and_session_failed(
+def test_a_failure_after_the_source_is_created_marks_it_failed(
     library, conn, dropped_video, monkeypatch
 ):
     """Nothing ever set sources.status/sessions.status to 'failed' -- the
-    value was dead in both schema comments, and spec's "ffprobe/encode
-    failure marks the session failed" was unimplemented. This also proves
-    the failing file is quarantined even after session/source rows exist.
+    value was dead in both schema comments, and spec's "failure marks the
+    session failed" was unimplemented. This also proves the failing file is
+    quarantined even after session/source rows exist. Register-only ingest
+    no longer encodes, so the failure is simulated at the move into the
+    session tree -- the step that now runs where the transcode used to.
+    Only the first move call fails: the second is `_move_to_failed`'s own
+    call to quarantine the file, which must still work with a real
+    `shutil.move` or this test could not tell the two failure paths apart.
     """
-    def boom(src, dst, *_a, **_kw):
-        raise TranscodeError("ffmpeg exploded")
+    real_move = handlers.shutil.move
+    calls = {"n": 0}
 
-    monkeypatch.setattr(handlers, "make_proxy", boom)
+    def flaky_move(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk exploded")
+        return real_move(src, dst, *a, **kw)
 
-    with pytest.raises(TranscodeError):
+    monkeypatch.setattr(handlers.shutil, "move", flaky_move)
+
+    with pytest.raises(OSError):
         handle_ingest(library, {"path": str(dropped_video)})
 
     session = list_sessions(conn)[0]
@@ -250,38 +274,35 @@ class _SimulatedCrash(BaseException):
     """
 
 
-def test_retry_after_a_crash_reuses_the_still_present_source_file(
+def test_retry_after_a_crash_before_the_move_reuses_the_committed_source_row(
     library, conn, dropped_video, monkeypatch
 ):
-    """shutil.move used to relocate the inbox file to its final
-    sessions/<id>/sources/<idx>/original.* path *before* encoding it. A
-    crash after that move but before the job finished left the source row
-    stuck at 'ingesting' forever: reclaim_stale() hands the exact same
-    payload (the original inbox path) to a fresh handle_ingest() call, and
-    probe() can never find the file there again.
-
-    This simulates the crash landing after add_source() has committed but
-    before the proxy is encoded, then replays the same payload -- the
-    reclaim_stale() retry path -- and asserts it completes cleanly, reusing
-    the already-committed source row instead of duplicating it.
+    """Register-only ingest moves the original right after add_source()
+    commits, and handles a requeue by returning early once the inbox path
+    is gone (see test_ingest_retry_after_the_original_moved_is_a_no_op). But
+    a crash can still land *before* that move finishes, leaving the source
+    row at 'ingesting' with the file still sitting at its original inbox
+    path. reclaim_stale() hands the exact same payload to a fresh
+    handle_ingest() call; this asserts the retry reuses the already-
+    committed source row instead of duplicating it.
     """
     payload = {"path": str(dropped_video)}
     calls = {"n": 0}
-    real_make_proxy = handlers.make_proxy
+    real_move = handlers.shutil.move
 
     def crash_on_first_call(src, dst, *a, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
             raise _SimulatedCrash()
-        return real_make_proxy(src, dst, *a, **kw)
+        return real_move(src, dst, *a, **kw)
 
-    monkeypatch.setattr(handlers, "make_proxy", crash_on_first_call)
+    monkeypatch.setattr(handlers.shutil, "move", crash_on_first_call)
 
     with pytest.raises(_SimulatedCrash):
         handle_ingest(library, payload)
 
-    # The crash landed before the move -- the file must still be exactly
-    # where the payload says it is, or the retry below cannot find it.
+    # The crash landed before the move completed -- the file must still be
+    # exactly where the payload says it is, or the retry below cannot find it.
     assert dropped_video.exists()
     session_after_crash = list_sessions(conn)[0]
     assert list_sources(conn, session_after_crash["id"])[0]["status"] == "ingesting"
@@ -293,9 +314,82 @@ def test_retry_after_a_crash_reuses_the_still_present_source_file(
     assert len(sessions) == 1
     sources = list_sources(conn, sessions[0]["id"])
     assert len(sources) == 1  # reused, not duplicated by the retry
-    assert sources[0]["status"] == "ingested"
+    assert sources[0]["status"] == "needs_setup"
 
     src_dir = library.source_dir(sessions[0]["id"], 1)
-    assert (src_dir / "proxy.mp4").exists()
     assert (src_dir / "original.mp4").exists()
     assert not dropped_video.exists()
+
+
+# -- Task 5: ingest becomes register-only ------------------------------------
+
+def test_ingest_registers_without_transcoding(library, sample_video, monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy",
+        lambda *a, **k: called.append(a),
+    )
+    src = library.inbox / "IMG_0001.MOV"
+    src.write_bytes(sample_video.read_bytes())
+
+    handle_ingest(library, {"path": str(src)})
+
+    conn = connect(library.db_path)
+    row = conn.execute("SELECT * FROM sources").fetchone()
+    assert row["status"] == "needs_setup"
+    assert called == []
+
+
+def test_ingest_moves_the_original_into_the_session_tree(library, sample_video):
+    src = library.inbox / "IMG_0002.MOV"
+    src.write_bytes(sample_video.read_bytes())
+
+    handle_ingest(library, {"path": str(src)})
+
+    conn = connect(library.db_path)
+    row = conn.execute("SELECT * FROM sources").fetchone()
+    dest = library.source_dir(row["session_id"], row["idx"])
+    assert not src.exists()
+    assert (dest / "original.mov").is_file()
+
+
+def test_ingest_enqueues_nothing(library, sample_video):
+    src = library.inbox / "IMG_0003.MOV"
+    src.write_bytes(sample_video.read_bytes())
+
+    handle_ingest(library, {"path": str(src)})
+
+    conn = connect(library.db_path)
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_ingest_retry_after_the_original_moved_is_a_no_op(library, sample_video):
+    src = library.inbox / "IMG_0004.MOV"
+    src.write_bytes(sample_video.read_bytes())
+    handle_ingest(library, {"path": str(src)})
+
+    # The worker crashed and reclaim_stale requeued the same payload; the
+    # inbox path is gone because the first attempt already moved it.
+    handle_ingest(library, {"path": str(src)})
+
+    conn = connect(library.db_path)
+    assert conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
+
+
+def test_ingest_stores_rotation_and_display_dimensions(library, tmp_path, sample_video):
+    tagged = tmp_path / "tagged.mov"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(sample_video),
+         "-c", "copy", str(tagged)],
+        check=True, capture_output=True,
+    )
+    src = library.inbox / "IMG_0005.MOV"
+    src.write_bytes(tagged.read_bytes())
+
+    handle_ingest(library, {"path": str(src)})
+
+    conn = connect(library.db_path)
+    row = conn.execute("SELECT * FROM sources").fetchone()
+    assert row["rotation_deg"] in (90, 270)
+    # 320x240 coded, quarter-turned for display.
+    assert (row["width"], row["height"]) == (240, 320)
