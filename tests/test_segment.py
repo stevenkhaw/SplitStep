@@ -1,4 +1,5 @@
 import itertools
+import logging
 import statistics
 
 import pytest
@@ -397,6 +398,23 @@ def test_params_for_frames_honours_an_explicit_threshold(ground_features):
     params = params_for_frames(ground_features, threshold=0.4)
     assert params.threshold == 0.4
     assert params.profile == "subject"
+
+
+def test_params_for_frames_warns_on_low_confidence_classification(caplog):
+    """Fewer than 50 frames with a near box means the profile guess is a
+    coin flip, not a measurement -- see analyze_view's MIN_FRAMES_FOR_CONFIDENCE.
+    That has to reach a human somehow, since the caller (detect handler, CLI,
+    API) has no other signal that the source might need a look, e.g. a wrong
+    court quad silently starving it of near-player boxes."""
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("O" * 10))
+    assert any("low-confidence" in r.message for r in caplog.records)
+
+
+def test_params_for_frames_does_not_warn_on_a_confident_classification(caplog):
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("A" * 200))
+    assert caplog.records == []
 
 
 def test_real_ground_footage_segments_into_rallies(ground_features):

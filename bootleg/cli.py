@@ -13,7 +13,7 @@ from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import get_source, set_source_preset
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import SegmentParams, segment
+from bootleg.detect.segment import params_for_frames, segment
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
 from bootleg.setup import queue_setup
@@ -207,14 +207,14 @@ def cmd_segment(args) -> int:
 
     path = lib.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
     frames = read_features(path)
-    params = SegmentParams(threshold=args.threshold)
+    params = params_for_frames(frames, threshold=args.threshold)
     intervals = segment(frames, params)
 
     if args.dry_run:
         for i, iv in enumerate(intervals, 1):
             print(f"{i:3d}  {_format_ts(iv.start_ms):>9} → {_format_ts(iv.end_ms):>9}"
                   f"  ({(iv.end_ms-iv.start_ms)/1000:5.1f}s)  conf {iv.confidence:.2f}")
-        print(f"\n{len(intervals)} rallies at threshold {args.threshold}")
+        print(f"\n{len(intervals)} rallies at threshold {params.threshold}")
         return 0
 
     replace_rallies(conn, source["session_id"], args.source_id, intervals)
@@ -309,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("segment", help="re-segment cached features")
     p.add_argument("source_id")
-    p.add_argument("--threshold", type=float, default=SegmentParams().threshold)
+    p.add_argument("--threshold", type=float, default=None,
+                   help="override the profile's default threshold")
     p.add_argument("--dry-run", action="store_true",
                    help="print intervals without writing rallies")
     p.set_defaults(func=cmd_segment)

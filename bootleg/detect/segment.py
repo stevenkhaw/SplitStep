@@ -1,8 +1,11 @@
+import logging
 import statistics
 from dataclasses import dataclass, replace
 
 from bootleg.detect.features import FeatureFrame, Player
 from bootleg.detect.viewpoint import Profile, ViewGeometry, analyze_view
+
+log = logging.getLogger(__name__)
 
 # Body-lengths/sec that counts as "fully moving". Measured, not guessed:
 # on the first real source the near player's speed runs p50=0.11, p75=0.25,
@@ -276,6 +279,19 @@ def params_for_frames(
     and hardcoding either one in a caller is a bug.
     """
     view: ViewGeometry = analyze_view(frames)
+    if view.low_confidence:
+        # Too few frames carried a near-player box to tell pair from subject
+        # reliably, so analyze_view assumed subject mode as the safe default.
+        # The same reading also covers a wrong court quad: with the play
+        # region misplaced, almost nothing detects as a near box either, so
+        # a source landing here is worth a human glance at its preset, not
+        # just a shrug that it happens to be ground-level footage.
+        log.warning(
+            "low-confidence viewpoint classification (%d frames carried a "
+            "near-player box); assuming subject mode -- check the source's "
+            "court quad if it is not actually ground-level footage",
+            view.frames_measured,
+        )
     if view.profile == "subject":
         params = SegmentParams(
             profile="subject",
