@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bootleg.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
@@ -15,6 +16,7 @@ from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, segment
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
+from bootleg.setup import queue_setup
 from bootleg.watcher import InboxWatcher
 
 
@@ -85,6 +87,64 @@ def cmd_doctor(args) -> int:
     print(f"torch device: {accel.torch_device}")
     for sub in (lib.inbox, lib.sessions_dir, lib.reels_dir):
         print(f"{'ok ' if sub.is_dir() else 'MISSING'} {sub}")
+    conn = connect(lib.db_path)
+    migrate(conn)
+    rows = conn.execute(
+        "SELECT session_id, idx, status, width, height, rotation_deg FROM sources"
+        " ORDER BY session_id, idx"
+    ).fetchall()
+    if rows:
+        print("sources:")
+        for r in rows:
+            print(f"  {r['session_id']}/{r['idx']:02d}  {r['status']:<12}"
+                  f"  {r['width']}x{r['height']}  rotation {r['rotation_deg']}")
+    return 0
+
+
+def cmd_setup(args) -> int:
+    lib = _library(args)
+    conn = connect(lib.db_path)
+    migrate(conn)
+    preset_id = args.preset
+    if preset_id is None:
+        # Fetch the source to check both existence and assigned preset.
+        # Distinguish missing source from source-exists-but-no-preset so we
+        # report the right problem to the user.
+        row = conn.execute(
+            "SELECT court_preset_id FROM sources WHERE id=?", (args.source_id,)
+        ).fetchone()
+        if row is None:
+            print(f"no such source: {args.source_id}", file=sys.stderr)
+            return 1
+        preset_id = row["court_preset_id"]
+        if not preset_id:
+            print("no --preset given and none assigned; see `bootleg preset list`",
+                  file=sys.stderr)
+            return 1
+    # Captured before this invocation queues anything, so the --now check
+    # below only ever looks at jobs THIS run created -- get_failed_jobs_for_source
+    # is otherwise unscoped, and a source that failed once in a completely
+    # unrelated earlier run would make every later, successful `setup --now`
+    # exit non-zero forever.
+    since = datetime.now(UTC).isoformat()
+    try:
+        job_id = queue_setup(conn, args.source_id, args.rotation, preset_id)
+    except (ValueError, LookupError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"queued build_proxy {job_id}")
+    if args.now:
+        # Two run_once calls: build_proxy, then the detect it enqueued.
+        Worker(lib, HANDLERS).run_once()
+        Worker(lib, HANDLERS).run_once()
+        # Check if any jobs for this source failed. If so, print the error
+        # and return non-zero so the caller knows the rebuild didn't succeed.
+        failed_jobs = jobq.get_failed_jobs_for_source(conn, args.source_id, since=since)
+        for job in failed_jobs:
+            if job["error"]:
+                print(job["error"], file=sys.stderr)
+        if failed_jobs:
+            return 1
     return 0
 
 
@@ -239,6 +299,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reuse-features", action="store_true")
     p.add_argument("--now", action="store_true")
     p.set_defaults(func=cmd_detect)
+
+    p = sub.add_parser("setup", help="set a source's rotation and play region, then rebuild")
+    p.add_argument("source_id")
+    p.add_argument("--rotation", type=int, required=True, help="0, 90, 180 or 270 (clockwise)")
+    p.add_argument("--preset", help="court preset id; defaults to the one already assigned")
+    p.add_argument("--now", action="store_true", help="run the jobs inline instead of queueing")
+    p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("segment", help="re-segment cached features")
     p.add_argument("source_id")

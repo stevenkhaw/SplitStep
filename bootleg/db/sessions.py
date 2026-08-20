@@ -2,9 +2,19 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
+from bootleg.media.transcode import rotation_filter
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _check_rotation(rotation_deg: int) -> int:
+    # rotation_filter is the single source of truth for what is legal; a
+    # CHECK constraint would surface a bad value as an opaque IntegrityError
+    # from three layers down instead of a message naming the four options.
+    rotation_filter(rotation_deg)
+    return rotation_deg
 
 
 def create_session(conn: sqlite3.Connection, session_id: str,
@@ -38,6 +48,7 @@ def add_source(
     height: int,
     fps: float,
     original_name: str | None,
+    rotation_deg: int = 0,
 ) -> tuple[str, int]:
     row = conn.execute(
         "SELECT COALESCE(MAX(idx),0) AS max_idx,"
@@ -50,9 +61,9 @@ def add_source(
 
     conn.execute(
         "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
-        "width,height,fps,original_name,status) VALUES (?,?,?,?,?,?,?,?,?,?,'ingesting')",
+        "width,height,fps,original_name,rotation_deg,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ingesting')",
         (source_id, session_id, idx, recorded_at, offset_ms, duration_ms,
-         width, height, fps, original_name),
+         width, height, fps, original_name, _check_rotation(rotation_deg)),
     )
     conn.commit()
     return source_id, idx
@@ -89,6 +100,48 @@ def get_source_by_original_name(
         " ORDER BY idx LIMIT 1",
         (session_id, original_name),
     ).fetchone()
+
+
+def find_ingesting_sources_by_original_name(
+    conn: sqlite3.Connection, original_name: str
+) -> list[sqlite3.Row]:
+    """Find every source row named original_name that is still stuck at
+    status='ingesting', with no session_id to scope the search.
+
+    This is the set a requeued ingest job checks first when its inbox path
+    is already gone: status, not name, is what identifies a crashed job.
+    Two sessions can hold a source with the same original_name (a phone
+    reusing IMG_0001.MOV across days), but only a source stranded by a
+    crash between the move and the status write is still sitting at
+    'ingesting' -- a source that finished ingest is already at
+    'needs_setup' or beyond. A single match here is unambiguous; more than
+    one means two crashes raced on the same name and neither can be
+    trusted over the other.
+    """
+    return conn.execute(
+        "SELECT * FROM sources WHERE original_name = ? AND status = 'ingesting'"
+        " ORDER BY idx",
+        (original_name,),
+    ).fetchall()
+
+
+def find_sources_by_original_name(
+    conn: sqlite3.Connection, original_name: str
+) -> list[sqlite3.Row]:
+    """Find every source row named original_name, with no session_id or
+    status to scope the search.
+
+    Used only to answer a set-membership question -- "has ANY attempt at
+    this name ever completed its move" -- never to pick one row to act on.
+    A name-only match can span sessions (a phone reusing IMG_0001.MOV
+    across days), so treating any single row here as *the* row would be an
+    arbitrary tiebreak. See find_ingesting_sources_by_original_name for the
+    narrower, single-row-safe set that crash recovery actually acts on.
+    """
+    return conn.execute(
+        "SELECT * FROM sources WHERE original_name = ? ORDER BY idx",
+        (original_name,),
+    ).fetchall()
 
 
 def set_source_status(conn: sqlite3.Connection, source_id: str, status: str) -> None:
@@ -157,5 +210,50 @@ def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) 
     """
     conn.execute(
         "UPDATE sources SET court_preset_id = ? WHERE id = ?", (preset_id, source_id)
+    )
+    conn.commit()
+
+
+def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: int) -> None:
+    conn.execute(
+        "UPDATE sources SET rotation_deg=? WHERE id=?",
+        (_check_rotation(rotation_deg), source_id),
+    )
+    conn.commit()
+
+
+def set_source_dimensions(conn: sqlite3.Connection, source_id: str, width: int, height: int) -> None:
+    """Record the ACTUAL dimensions of a source's proxy file.
+
+    add_source seeds width/height once, at ingest time, from the original's
+    probed rotation. Neither set_source_setup (rotation+preset only) nor
+    handle_build_proxy's own status write ever touch them again, so a
+    source seeded at one rotation and later corrected by the wizard keeps
+    reporting its stale ingest-time pair even though the proxy build
+    changed its actual shape -- exactly the mismatch `bootleg doctor`
+    prints as its headline diagnostic. Call this with dimensions probed
+    from the proxy itself, not recomputed from rotation_deg: the proxy is
+    the artifact everything downstream (the player, doctor, this row)
+    actually reads.
+    """
+    conn.execute(
+        "UPDATE sources SET width=?, height=? WHERE id=?",
+        (width, height, source_id),
+    )
+    conn.commit()
+
+
+def set_source_setup(
+    conn: sqlite3.Connection, source_id: str, rotation_deg: int, preset_id: str
+) -> None:
+    """Update rotation and preset in a single write, validating rotation first.
+
+    If validation fails, no columns are written. If the write succeeds but a
+    caller later fails to enqueue the job, the source stays updated: re-running
+    setup detects and recovers that window (the job is idempotent).
+    """
+    conn.execute(
+        "UPDATE sources SET rotation_deg = ?, court_preset_id = ? WHERE id = ?",
+        (_check_rotation(rotation_deg), preset_id, source_id),
     )
     conn.commit()

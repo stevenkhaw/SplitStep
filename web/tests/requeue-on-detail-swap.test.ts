@@ -25,6 +25,9 @@ const mockApi = {
   jobs: vi.fn().mockResolvedValue([]),
   proxyUrl: () => 'about:blank',
   frameUrl: () => 'about:blank',
+  getSource: vi.fn(),
+  setup: vi.fn(),
+  previewUrl: () => 'about:blank',
 }
 
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
@@ -82,6 +85,7 @@ function detailWith(rallies: Rally[]): SessionDetail {
         has_original: 1,
         court_preset_id: null,
         status: 'ready',
+        rotation_deg: 0,
       },
     ],
     rallies,

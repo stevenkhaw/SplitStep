@@ -66,7 +66,7 @@ web/tests/
 
 ### Task 1: Commit the frame scrubber already in the working tree
 
-The session-page quad editor already gained a frame scrubber (slider, frame/second stepping, timecode, `lastSafeFrameMs`). It is written and green but uncommitted; the wizard consumes it in Task 10, so land it first.
+The session-page quad editor already gained a frame scrubber (slider, frame/second stepping, timecode, `lastSafeFrameMs`). It is written and green but uncommitted; the wizard consumes it in Task 14, so land it first.
 
 **Files:**
 - Modify: `web/src/lib/time.ts`, `web/src/components/QuadEditor.svelte`

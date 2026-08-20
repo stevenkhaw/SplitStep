@@ -27,6 +27,7 @@ function source(idx: number, offsetMs: number, durationMs: number, recordedAt: s
     has_original: 1,
     court_preset_id: null,
     status: 'ready',
+    rotation_deg: 0,
   }
 }
 

@@ -545,9 +545,9 @@ def test_repeat_frame_request_does_not_re_extract_the_cached_file(
     real_extract_frame = routes_mod.extract_frame
     calls = []
 
-    def _counting(src, dst, at_ms=0):
+    def _counting(src, dst, at_ms=0, **kwargs):
         calls.append(at_ms)
-        real_extract_frame(src, dst, at_ms=at_ms)
+        real_extract_frame(src, dst, at_ms=at_ms, **kwargs)
 
     monkeypatch.setattr("bootleg.api.routes.extract_frame", _counting)
 
@@ -647,6 +647,31 @@ def test_frame_endpoint_409s_when_the_proxy_is_a_truncated_stub(client, library,
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r.status_code == 409
     assert r.json()["detail"] == "Source is still being processed"
+
+
+def test_frame_endpoint_pins_a_30s_timeout(client, library, seeded, monkeypatch):
+    """extract_frame's own default timeout dropped to 20.0s when preview.jpg
+    was added (tuned for the wizard's 4K original reads, see frames.py).
+    frame.jpg predates that change and must keep the 30s grace its own
+    call-site comment promises against a wedged drive, so it has to pin
+    the value explicitly rather than inherit whatever extract_frame
+    defaults to.
+    """
+    d = library.source_dir(seeded["session_id"], seeded["idx"])
+    d.mkdir(parents=True, exist_ok=True)
+    _write_clip(d / "proxy.mp4", "red", "320x240")
+
+    calls = []
+
+    def _fake(src, dst, **kwargs):
+        calls.append(kwargs)
+        Path(dst).write_bytes(b"fake jpeg bytes")
+
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", _fake)
+
+    r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
+    assert r.status_code == 200
+    assert calls == [{"at_ms": 0, "timeout": 30.0}]
 
 
 def test_index_is_served_when_the_spa_is_built(library, tmp_path):

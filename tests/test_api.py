@@ -1,23 +1,22 @@
+import os
 import sqlite3
+import subprocess
 import threading
+import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
+from bootleg.api.routes import _evict_old_frames
 from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies, replace_rallies, set_star
-from bootleg.db.schema import connect, migrate
+from bootleg.db.schema import connect
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import Interval
-
-
-@pytest.fixture
-def conn(library):
-    c = connect(library.db_path)
-    migrate(c)
-    return c
+from bootleg.media.transcode import TranscodeError
 
 
 @pytest.fixture
@@ -280,3 +279,201 @@ def test_sharing_one_connection_across_callers_finalizes_an_unrelated_open_trans
     finally:
         other.close()
         shared.close()
+
+
+# -- preview.jpg: setup-wizard frames from the original, before a proxy exists
+
+def test_preview_serves_a_frame_from_the_original(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+def test_preview_caches_per_rotation(client, registered_source, tmp_path):
+    base = f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500"
+    client.get(f"{base}&rot=0")
+    client.get(f"{base}&rot=90")
+    names = {p.name for p in registered_source.dir.glob("preview-*.jpg")}
+    assert names == {"preview-0-500.jpg", "preview-90-500.jpg"}
+
+
+def test_preview_rejects_a_non_right_angle(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=0&rot=45")
+    assert r.status_code == 400
+
+
+def test_preview_clamps_past_the_end_of_the_clip(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=99999999&rot=0")
+    assert r.status_code == 200
+
+
+def test_preview_404s_when_the_original_is_gone(client, registered_source):
+    for p in registered_source.dir.glob("original.*"):
+        p.unlink()
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=0&rot=0")
+    assert r.status_code == 404
+
+
+def test_preview_write_is_atomic_on_extraction_failure(
+    client, registered_source, monkeypatch
+):
+    """A failed/interrupted extraction must not leave a torn file at the
+    cache path a concurrent reader could be served mid-write. Simulate an
+    ffmpeg that partially writes its output path and then dies: the
+    partial bytes must land on a temp path, never on `dst` itself, so
+    `preview-*.jpg` must be empty afterwards -- not a half-written JPEG.
+    """
+    def _dies_after_partial_write(src, dst, at_ms=0, rotation_deg=0, hwaccel=None):
+        Path(dst).write_bytes(b"not a complete jpeg")
+        raise TranscodeError("ffmpeg died mid-write")
+
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", _dies_after_partial_write)
+
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
+    assert r.status_code == 409
+    assert list(registered_source.dir.glob("preview-*.jpg")) == []
+    # The temp path it wrote to must also be cleaned up, not just renamed
+    # away from: only the original ingest left in place, nothing else.
+    remaining = {p.name for p in registered_source.dir.iterdir()}
+    assert all(name.startswith("original.") for name in remaining)
+
+
+def test_preview_leaked_temp_file_is_eventually_swept(client, registered_source, monkeypatch):
+    """A process killed between extract_frame finishing and api_preview's
+    `finally: tmp.unlink()` actually running leaks the temp file it wrote
+    to -- `finally` runs on any ordinary exception, so only a real crash
+    (never reached, by definition, in a single test process) skips it.
+    Stand in for that by making cleanup itself a no-op for the duration of
+    one request, the same end state a SIGKILL leaves behind: the temp file
+    the ROUTE'S OWN CODE named stays on disk.
+
+    Before this fix that name was a dotfile (`.preview-....jpg`), which the
+    "preview-*.jpg" glob `_evict_old_frames` sweeps after every request
+    never matches -- so it stayed on disk forever, no matter how many later
+    requests ran. Renaming it to start with "preview-" makes it ordinary
+    eviction fodder: once enough fresher files exist to push it out of the
+    "keep most recent" window, the very same sweep every preview request
+    already triggers reclaims it.
+    """
+    captured: dict[str, Path] = {}
+
+    def dies_after_writing(src, dst, at_ms=0, rotation_deg=0, hwaccel=None):
+        Path(dst).write_bytes(b"leaked mid-extraction")
+        captured["tmp"] = Path(dst)
+        # Anything other than TranscodeError/ProbeError/FileNotFoundError:
+        # api_preview does not catch it, so it propagates out uncaught --
+        # the same "nothing ran to completion" shape as a real crash.
+        raise RuntimeError("process killed mid-extraction")
+
+    real_unlink = Path.unlink
+    monkeypatch.setattr("bootleg.api.routes.extract_frame", dies_after_writing)
+    monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: None)
+
+    with pytest.raises(RuntimeError):
+        client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
+
+    # Restore real cleanup for what the test does next -- only the ROUTE's
+    # own cleanup needed to be suppressed, to leave its temp file behind.
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+
+    tmp = captured["tmp"]
+    assert tmp.exists()
+    # The fix itself: a dotfile name can never match "preview-*.jpg", no
+    # matter how eviction is tuned.
+    assert tmp.name.startswith("preview-")
+
+    old = time.time() - 3600
+    os.utime(tmp, (old, old))
+    # Enough fresher decoys that the leaked file is no longer among the
+    # `keep` most recently touched -- regardless of what the real budget is
+    # tuned to (see FRAME_CACHE_KEEP / PREVIEW_CACHE_KEEP).
+    for i in range(25):
+        (registered_source.dir / f"preview-0-{600 + i}.jpg").write_bytes(b"x")
+
+    _evict_old_frames(registered_source.dir, pattern="preview-*.jpg", keep=20)
+
+    assert not tmp.exists()
+
+
+def test_preview_rotation_reaches_the_pixels(client, registered_source, tmp_path):
+    """An api_preview that built the preview-{rot}-{at_ms}.jpg filename
+    correctly but forgot to pass rotation_deg=rot to extract_frame would
+    pass every other route test here -- decode the actual pixels via
+    ffprobe and confirm rot=90 produces a transposed frame relative to
+    rot=0 for the same timestamp.
+    """
+    base = f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500"
+    r0 = client.get(f"{base}&rot=0")
+    r90 = client.get(f"{base}&rot=90")
+    assert r0.status_code == 200
+    assert r90.status_code == 200
+
+    def _dims(data: bytes, name: str) -> tuple[int, int]:
+        path = tmp_path / name
+        path.write_bytes(data)
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        w, h = out.split("x")
+        return int(w), int(h)
+
+    w0, h0 = _dims(r0.content, "r0.jpg")
+    w90, h90 = _dims(r90.content, "r90.jpg")
+    # rot=0 keeps the source's 4:3 landscape aspect (w0 > h0); rot=90
+    # transposes it to portrait (h90 > w90), and the two aspect ratios are
+    # reciprocals of each other -- a small tolerance absorbs scale's -2
+    # rounding to the nearest even pixel.
+    assert w0 > h0
+    assert h90 > w90
+    assert w0 / h0 == pytest.approx(h90 / w90, rel=0.02)
+
+
+def test_get_source_returns_the_row(client, registered_source):
+    r = client.get(f"/api/sources/{registered_source.id}")
+    assert r.status_code == 200
+    assert r.json()["status"] == "needs_setup"
+    assert r.json()["rotation_deg"] in (0, 90, 180, 270)
+
+
+def test_get_source_404s_for_an_unknown_id(client):
+    assert client.get("/api/sources/nope").status_code == 404
+
+
+def test_setup_stores_both_and_queues_a_build(client, registered_source, a_preset):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 90, "preset_id": a_preset},
+    )
+    assert r.status_code == 200
+    assert r.json()["job_id"]
+    assert client.get(f"/api/sources/{registered_source.id}").json()["rotation_deg"] == 90
+
+
+def test_setup_rejects_a_non_right_angle(client, registered_source, a_preset):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 45, "preset_id": a_preset},
+    )
+    assert r.status_code == 400
+
+
+def test_setup_404s_on_an_unknown_preset(client, registered_source):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": "nope"},
+    )
+    assert r.status_code == 404
+
+
+def test_setup_409s_while_a_job_is_running(client, registered_source, a_preset, conn):
+    conn.execute(
+        "UPDATE sources SET status='detecting' WHERE id=?", (registered_source.id,)
+    )
+    conn.commit()
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": a_preset},
+    )
+    assert r.status_code == 409

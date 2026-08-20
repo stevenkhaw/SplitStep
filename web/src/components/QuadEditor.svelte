@@ -1,16 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
-  import {
-    DEFAULT_QUAD_POINTS,
-    assignedPresetLabel,
-    clonePoints,
-    defaultPresetName,
-    movePoint,
-    pointFromClient,
-    polygonClipPath,
-  } from '../lib/quad'
+  import { DEFAULT_QUAD_POINTS, assignedPresetLabel, clonePoints, defaultPresetName } from '../lib/quad'
+  import { DEFAULT_SCRUB_MS, clamp, formatTs, lastSafeFrameMs } from '../lib/time'
   import type { Preset, Source } from '../lib/types'
+  import QuadCanvas from './QuadCanvas.svelte'
 
   interface Props {
     sessionId: string
@@ -29,11 +23,36 @@
   let sourceId = $state(untrack(() => sources[0]?.id ?? ''))
   let source = $derived(sources.find((s) => s.id === sourceId))
 
+  /**
+   * Phone footage routinely opens on a black frame -- the record button is
+   * hit before the phone is propped against the fence -- and a black frame
+   * is useless for dragging a play region over. Open a little way in
+   * instead, clamped so a clip shorter than that still lands on a real
+   * frame rather than past its end.
+   */
+  function openAt(s: Source | undefined): number {
+    if (!s) return 0
+    return Math.min(DEFAULT_SCRUB_MS, lastSafeFrameMs(s.duration_ms, s.fps))
+  }
+
+  // The timestamp the displayed frame was extracted at. Separate from
+  // `scrubMs` on purpose: every distinct value here costs one ffmpeg
+  // extraction on the server, so a slider drag updates the readout
+  // continuously but only commits (and fetches) on release.
+  let frameMs = $state(untrack(() => openAt(sources[0])))
+  let scrubMs = $state(untrack(() => openAt(sources[0])))
+
+  const maxMs = $derived(source ? lastSafeFrameMs(source.duration_ms, source.fps) : 0)
+
+  function seek(ms: number): void {
+    const next = Math.round(clamp(ms, 0, maxMs))
+    scrubMs = next
+    frameMs = next
+  }
+
   let points = $state<[number, number][]>(clonePoints(DEFAULT_QUAD_POINTS))
   let name = $state('')
   let presets = $state<Preset[]>([])
-  let dragging = $state<number | null>(null)
-  let wrap = $state<HTMLDivElement>()
   let status = $state<string | null>(null)
   let error = $state<string | null>(null)
   // Guards both `save` and `assignExisting`: without it, a double-click on
@@ -55,7 +74,6 @@
     refreshPresets()
   })
 
-  const polygon = $derived(polygonClipPath(points))
   const assignedLabel = $derived(assignedPresetLabel(source?.court_preset_id ?? null, presets))
 
   function onSourceChange(id: string) {
@@ -66,37 +84,12 @@
     // below for that preset loads its exact points (see assignExisting).
     sourceId = id
     points = clonePoints(DEFAULT_QUAD_POINTS)
+    const next = sources.find((s) => s.id === id)
+    scrubMs = openAt(next)
+    frameMs = openAt(next)
     name = ''
     status = null
     error = null
-  }
-
-  function at(e: PointerEvent): [number, number] {
-    if (!wrap) return [0, 0]
-    return pointFromClient(e.clientX, e.clientY, wrap.getBoundingClientRect())
-  }
-
-  // Pointer capture and the move/up listeners live on the handle button
-  // itself (a real interactive, focusable element), not on the wrapping
-  // div -- so the drag keeps tracking the pointer even once it leaves the
-  // button's own bounds, without needing pointer handlers on a static
-  // `<div>` (which svelte-check's a11y check correctly flags: a plain div
-  // with pointer handlers and no interactive role is not something a
-  // keyboard or screen-reader user can operate). `at()` still measures
-  // against `wrap`'s rect regardless of which element the event fired on,
-  // since PointerEvent.clientX/Y are viewport-relative.
-  function onHandleDown(e: PointerEvent, i: number) {
-    dragging = i
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-  }
-
-  function onHandleMove(e: PointerEvent, i: number) {
-    if (dragging !== i) return
-    points = movePoint(points, i, at(e))
-  }
-
-  function endDrag() {
-    dragging = null
   }
 
   async function save() {
@@ -177,54 +170,16 @@
       currently assigned: {assignedLabel}
     </p>
 
-    <!--
-      No fixed aspect ratio (e.g. Tailwind's `aspect-video`) and no
-      `object-fit` on the image: the wrapper has no height of its own, so
-      it sizes to exactly the image's rendered box (block img,
-      `width:100%; height:auto`). That means this wrapper's own
-      getBoundingClientRect() -- what `at()` and every handle's percentage
-      position are computed against -- always equals the frame image's
-      actual displayed rect, whatever the source video's aspect ratio is.
-      An `object-contain` image inside a fixed-aspect box would letterbox
-      when the two ratios differ, silently offsetting every corner from
-      where the pointer actually is.
-    -->
-    <div bind:this={wrap} class="relative mt-3 w-full min-h-48 select-none bg-black">
-      <!--
-        No `overflow-hidden` here, deliberately: the default trapezoid (and
-        any preset) puts two corner handles at y=1.0 -- the bottom edge of
-        `wrap`, on purpose (see the module comment on DEFAULT_QUAD_POINTS).
-        A handle centered exactly on that edge has half its hit area below
-        it; `overflow-hidden` on this element would clip that half away,
-        found live: a real pointer down dead-center on such a handle hit
-        the `<section>` behind it, not the button, because the clip
-        boundary sat right at the handle's own center. Rounding lives on
-        the image itself instead, which needs no clipping parent to look
-        rounded.
-      -->
-      <img
-        src={api.frameUrl(sessionId, source.idx)}
-        alt="first frame of source {source.idx}"
-        class="block w-full h-auto rounded"
-        draggable="false"
-      />
-      <div
-        class="pointer-events-none absolute inset-0 bg-blue-400/20"
-        style={`clip-path: ${polygon}`}
-      ></div>
-      {#each points as p, i (i)}
-        <button
-          class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full
-                 border-2 border-white bg-blue-500 touch-none"
-          style={`left:${p[0] * 100}%;top:${p[1] * 100}%`}
-          onpointerdown={(e) => onHandleDown(e, i)}
-          onpointermove={(e) => onHandleMove(e, i)}
-          onpointerup={endDrag}
-          onpointercancel={endDrag}
-          aria-label={`corner ${i + 1}`}
-        ></button>
-      {/each}
-    </div>
+    <QuadCanvas
+      frameSrc={api.frameUrl(sessionId, source.idx, frameMs)}
+      timeMs={scrubMs}
+      maxMs={maxMs}
+      fps={source.fps}
+      points={points}
+      onpoints={(p) => (points = p)}
+      onseek={seek}
+      alt="source {source.idx} at {formatTs(frameMs)}"
+    />
 
     <div class="mt-3 flex items-center gap-2">
       <input

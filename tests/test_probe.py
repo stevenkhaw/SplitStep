@@ -77,3 +77,40 @@ def test_pick_fps_falls_back_when_avg_frame_rate_is_unusable():
 def test_pick_fps_returns_zero_when_all_candidates_unusable():
     assert _pick_fps("0/0", "0/0") == 0.0
     assert _pick_fps(None, None) == 0.0
+
+
+@pytest.fixture
+def rotated_video(tmp_path, sample_video):
+    """The 320x240 sample re-muxed with a 90 degree display matrix."""
+    out = tmp_path / "rotated.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(sample_video),
+         "-c", "copy", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_probe_reports_zero_rotation_for_an_untagged_clip(sample_video):
+    assert probe(sample_video).rotation_deg == 0
+
+
+def test_probe_reads_a_display_matrix_rotation(rotated_video):
+    assert probe(rotated_video).rotation_deg in (90, 270)
+
+
+def test_probe_still_reports_coded_dimensions_for_a_rotated_clip(rotated_video):
+    info = probe(rotated_video)
+    assert (info.width, info.height) == (320, 240)
+
+
+def test_display_size_swaps_the_axes_on_a_quarter_turn():
+    from bootleg.media.probe import display_size
+    assert display_size(3840, 2160, 90) == (2160, 3840)
+    assert display_size(3840, 2160, 270) == (2160, 3840)
+
+
+def test_display_size_is_unchanged_on_a_half_turn():
+    from bootleg.media.probe import display_size
+    assert display_size(3840, 2160, 0) == (3840, 2160)
+    assert display_size(3840, 2160, 180) == (3840, 2160)

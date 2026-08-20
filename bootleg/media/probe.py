@@ -12,12 +12,13 @@ class ProbeError(Exception):
 @dataclass(frozen=True)
 class MediaInfo:
     duration_ms: int
-    width: int
-    height: int
+    width: int                          # coded width, before any display matrix is applied
+    height: int                         # coded height, likewise
     fps: float
     recorded_at: str | None
     has_audio: bool
-    codec_name: str  # e.g. "h264", "hevc" -- ffprobe's video stream codec_name
+    codec_name: str                     # e.g. "h264", "hevc" -- ffprobe's video stream codec_name
+    rotation_deg: int                   # clockwise degrees to apply to the coded frame
 
 
 def _pick_fps(*rates: str | None) -> float:
@@ -39,6 +40,33 @@ def _pick_fps(*rates: str | None) -> float:
             continue
         return float(frac)
     return 0.0
+
+
+def _display_rotation(video: dict) -> int:
+    """Clockwise degrees a player would rotate this stream by to display it.
+
+    ffprobe reports the Display Matrix angle counter-clockwise, so the sign
+    flips here. Anything that is not a quarter turn (a matrix carrying a
+    flip, or a stream with no matrix at all) reads as 0: BootlegVision only
+    ever encodes right angles, and a bogus value must not reach
+    `rotation_filter`, which raises on one.
+    """
+    for side in video.get("side_data_list", []):
+        raw = side.get("rotation")
+        if raw is None:
+            continue
+        try:
+            deg = round(float(raw))
+        except (TypeError, ValueError):
+            continue
+        deg = (-deg) % 360
+        return deg if deg in (0, 90, 180, 270) else 0
+    return 0
+
+
+def display_size(width: int, height: int, rotation_deg: int) -> tuple[int, int]:
+    """Dimensions after `rotation_deg` is applied to a coded `width x height`."""
+    return (height, width) if rotation_deg in (90, 270) else (width, height)
 
 
 def probe(path: Path, timeout: float | None = None) -> MediaInfo:
@@ -90,4 +118,5 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
         recorded_at=recorded_at,
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
         codec_name=video.get("codec_name", ""),
+        rotation_deg=_display_rotation(video),
     )

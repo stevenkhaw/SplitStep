@@ -1,4 +1,6 @@
 import json
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -290,3 +292,107 @@ def test_source_set_preset_unknown_preset_returns_1(library, seeded_source, caps
                seeded_source["source_id"], "no-such-preset"])
     assert rc == 1
     assert "no such preset" in capsys.readouterr().err
+
+
+# -- setup ---------------------------------------------------------------
+
+def test_setup_command_queues_a_build(library, registered_source, a_preset, capsys):
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset,
+    ])
+    assert code == 0
+    assert "queued build_proxy" in capsys.readouterr().out
+
+
+def test_setup_command_rejects_a_bad_rotation(library, registered_source, a_preset, capsys):
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "45", "--preset", a_preset,
+    ])
+    assert code == 1
+    assert "0, 90, 180 or 270" in capsys.readouterr().err
+
+
+def test_setup_unknown_source_no_preset(library, a_preset, capsys):
+    """Unknown source without --preset should report the unknown source, not missing preset."""
+    code = main([
+        "--library", str(library.root), "setup", "no-such-source",
+        "--rotation", "90",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no such source: no-such-source" in err
+    # Must NOT say "no --preset given"
+    assert "no --preset given" not in err
+
+
+def test_setup_existing_source_no_assigned_preset(library, registered_source, capsys):
+    """Existing source with no assigned preset should report missing preset, not unknown source."""
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no --preset given and none assigned" in err
+    # Must NOT say "no such source"
+    assert "no such source" not in err
+
+
+def test_setup_now_with_failing_job(library, registered_source, a_preset, capsys, monkeypatch):
+    """--now should return non-zero if a queued job fails."""
+    from bootleg.jobs import handlers
+
+    # Make make_proxy raise to simulate a job failure
+    def failing_make_proxy(*args, **kwargs):
+        raise RuntimeError("simulated build_proxy failure")
+
+    monkeypatch.setattr(handlers, "make_proxy", failing_make_proxy)
+
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset, "--now",
+    ])
+    assert code != 0
+    err = capsys.readouterr().err
+    # Error from the failed job should appear in stderr
+    assert "simulated build_proxy failure" in err
+
+
+def test_setup_now_succeeds_despite_an_earlier_unrelated_failed_job(
+    library, conn, registered_source, a_preset, capsys
+):
+    """Finding: get_failed_jobs_for_source is not time-scoped, so `setup
+    --now` reported failure -- and exited non-zero -- if the source EVER
+    had a failed job, even a stale one from a completely unrelated earlier
+    run that has no bearing on whether THIS run's jobs succeeded. Seed a
+    failed job row that predates this invocation, then run a `setup --now`
+    that succeeds outright (no monkeypatched failure): the stale row must
+    not be able to fail it.
+    """
+    old_ts = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    conn.execute(
+        "INSERT INTO jobs (id,type,payload,status,error,created_at,finished_at)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (
+            uuid.uuid4().hex, "build_proxy",
+            json.dumps({"source_id": registered_source.id}),
+            "failed", "stale unrelated failure from an earlier run",
+            old_ts, old_ts,
+        ),
+    )
+    conn.commit()
+
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset, "--now",
+    ])
+    assert code == 0
+    assert "stale unrelated failure" not in capsys.readouterr().err
+
+
+def test_doctor_lists_source_rotation(library, registered_source, capsys):
+    main(["--library", str(library.root), "doctor"])
+    out = capsys.readouterr().out
+    assert "rotation" in out

@@ -35,17 +35,47 @@ def run_ffmpeg(args: list[str], timeout: float | None = None) -> None:
         )
 
 
-def make_proxy(src: Path, dst: Path, accel: Accel | None = None) -> None:
-    """1080p H.264 with a 1-second GOP. H.264 because browser HEVC is a coin flip."""
+# transpose=1 is 90 degrees clockwise, transpose=2 is 90 counter-clockwise.
+# 180 is two clockwise quarter turns rather than hflip,vflip: identical
+# result, one filter name to reason about instead of two.
+_TRANSPOSE = {
+    0: "",
+    90: "transpose=1",
+    180: "transpose=1,transpose=1",
+    270: "transpose=2",
+}
+
+
+def rotation_filter(deg: int) -> str:
+    """ffmpeg filter chain rotating a coded frame `deg` degrees clockwise."""
+    try:
+        return _TRANSPOSE[deg]
+    except KeyError:
+        raise ValueError(f"rotation must be 0, 90, 180 or 270, got {deg!r}") from None
+
+
+def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: int = 0) -> None:
+    """1080p H.264 with a 1-second GOP. H.264 because browser HEVC is a coin flip.
+
+    Orientation comes from `rotation_deg`, never from the source's display
+    matrix: `-noautorotate` disables ffmpeg's default so a rotation this
+    library did not choose can never reach the scale filter. It reached it
+    once -- a 3840x2160 clip tagged rotation=90 scaled to 608x1080, losing
+    two thirds of the scene's pixels and with them every person detection.
+    """
     accel = accel or detect_accel()
     dst.parent.mkdir(parents=True, exist_ok=True)
+    vf = ",".join(f for f in (rotation_filter(rotation_deg), "scale=-2:1080:flags=bicubic") if f)
 
-    args: list[str] = []
+    args: list[str] = ["-noautorotate"]
     if accel.hwaccel:
         args += ["-hwaccel", accel.hwaccel]
     args += [
+        # Strip stale Display Matrix side data so rotation-aware players
+        # (e.g. browser <video> elements in the review UI) don't double-rotate.
+        "-display_rotation", "0",
         "-i", str(src),
-        "-vf", "scale=-2:1080:flags=bicubic",
+        "-vf", vf,
         "-c:v", accel.h264_encoder,
         "-g", "30",
         "-pix_fmt", "yuv420p",
