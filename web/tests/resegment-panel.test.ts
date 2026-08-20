@@ -1,0 +1,198 @@
+import { flushSync, mount, unmount } from 'svelte'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Rally, Source } from '../src/lib/types'
+
+// Same mocking approach as requeue-on-detail-swap.test.ts: ResegmentPanel
+// calls through `../lib/api` directly, so the module is mocked rather than
+// passed in as a prop.
+const mockApi = {
+  listSessions: vi.fn(),
+  getSession: vi.fn(),
+  star: vi.fn(),
+  reject: vi.fn(),
+  reviewed: vi.fn(),
+  setBounds: vi.fn(),
+  resegment: vi.fn(),
+  scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] }),
+  listPresets: vi.fn(),
+  createPreset: vi.fn(),
+  setPreset: vi.fn(),
+  jobs: vi.fn(),
+  proxyUrl: () => 'about:blank',
+  frameUrl: () => 'about:blank',
+}
+
+vi.mock('../src/lib/api', () => ({ api: mockApi }))
+
+const { default: ResegmentPanel } = await import('../src/components/ResegmentPanel.svelte')
+
+function source(id: string, idx: number): Source {
+  return {
+    id,
+    session_id: 's1',
+    idx,
+    recorded_at: '2026-08-19T10:00:00Z',
+    offset_ms: 0,
+    duration_ms: 600000,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    has_original: 1,
+    court_preset_id: null,
+    status: 'ready',
+  }
+}
+
+function rally(overrides: Partial<Rally> = {}): Rally {
+  return {
+    id: 'r1',
+    session_id: 's1',
+    source_id: 'src1',
+    idx: 1,
+    start_ms: 1000,
+    end_ms: 2000,
+    det_start_ms: 1000,
+    det_end_ms: 2000,
+    confidence: 0.9,
+    starred: 0,
+    rejected: 0,
+    reviewed_at: null,
+    ...overrides,
+  }
+}
+
+describe('ResegmentPanel', () => {
+  let target: HTMLDivElement
+  let instance: unknown
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+    vi.useRealTimers()
+  })
+
+  function slider(): HTMLInputElement {
+    const el = target.querySelector('input[type="range"]')
+    if (!el) throw new Error('threshold slider not found')
+    return el as HTMLInputElement
+  }
+
+  function dragTo(value: string) {
+    const el = slider()
+    el.value = value
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  it('debounces the threshold slider: a burst of input collapses into one scores call', async () => {
+    vi.useFakeTimers()
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources: [source('src1', 1)], rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+    // The initial mount effect fetches scores once for the default source --
+    // unrelated to the slider, so it's excluded from the burst count below.
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledTimes(1))
+    mockApi.scores.mockClear()
+
+    dragTo('0.50')
+    flushSync()
+    vi.advanceTimersByTime(50)
+    dragTo('0.60')
+    flushSync()
+    vi.advanceTimersByTime(50)
+    dragTo('0.70')
+    flushSync()
+    // Still inside the 150ms debounce window -- no call yet.
+    expect(mockApi.scores).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(150)
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledTimes(1))
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', 0.7)
+  })
+
+  it('does not confirm and calls onresegmented when no boundaries are hand-edited', async () => {
+    const onresegmented = vi.fn()
+    mockApi.resegment.mockResolvedValue({ count: 4 })
+    const confirmSpy = vi.spyOn(window, 'confirm')
+
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1)],
+        rallies: [rally({ id: 'r1' }), rally({ id: 'r2', idx: 2 })], // untouched bounds
+        onresegmented,
+      },
+    })
+    flushSync()
+
+    const button = target.querySelector('button') as HTMLButtonElement
+    button.click()
+    flushSync()
+    // Wait for the callback that only fires after `await api.resegment(...)`
+    // resolves -- not just for the call itself, which happens synchronously
+    // inside run() before that await yields.
+    await vi.waitFor(() => expect(onresegmented).toHaveBeenCalledTimes(1))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(mockApi.resegment).toHaveBeenCalledWith('src1', 0.45)
+    await vi.waitFor(() => expect(target.textContent).toMatch(/4 rallies at threshold/))
+  })
+
+  it('confirms, naming the count, before discarding hand-edited boundaries -- proceeds on OK', async () => {
+    const onresegmented = vi.fn()
+    mockApi.resegment.mockResolvedValue({ count: 2 })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1)],
+        // r1's start_ms was hand-dragged away from det_start_ms.
+        rallies: [rally({ id: 'r1', start_ms: 900 }), rally({ id: 'r2', idx: 2 })],
+        onresegmented,
+      },
+    })
+    flushSync()
+
+    const button = target.querySelector('button') as HTMLButtonElement
+    button.click()
+    flushSync()
+    await vi.waitFor(() => expect(onresegmented).toHaveBeenCalledTimes(1))
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(confirmSpy.mock.calls[0][0]).toContain('1 hand-edited boundary')
+    expect(mockApi.resegment).toHaveBeenCalledWith('src1', 0.45)
+  })
+
+  it('cancelling the confirmation aborts -- no resegment call, no onresegmented', async () => {
+    const onresegmented = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1)],
+        rallies: [rally({ id: 'r1', start_ms: 900 })],
+        onresegmented,
+      },
+    })
+    flushSync()
+
+    const button = target.querySelector('button') as HTMLButtonElement
+    button.click()
+    flushSync()
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(mockApi.resegment).not.toHaveBeenCalled()
+    expect(onresegmented).not.toHaveBeenCalled()
+  })
+})
