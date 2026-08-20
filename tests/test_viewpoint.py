@@ -82,3 +82,16 @@ def test_real_ground_footage_classifies_as_subject(ground_features):
     assert view.foot_separation == pytest.approx(0.0054, abs=0.0005)
     assert view.subject_min_h == pytest.approx(0.1116, abs=0.0005)
     assert view.low_confidence is False
+
+
+def test_a_short_but_unambiguous_pair_stream_is_confident():
+    """40 frames is below MIN_FRAMES_FOR_CONFIDENCE (50), but all 40 carry
+    both boxes at an unambiguous separation -- 40 clean paired samples, well
+    over MIN_PAIRS_FOR_CONFIDENCE (20). A short clip with unambiguous
+    geometry is not an unclassifiable one: gating confidence on near-box
+    count instead of pair count read this as low-confidence subject, which
+    is what silently sent an 8 s two-player CLI fixture through the wrong
+    scoring model (see tests/test_cli.py's seeded_source)."""
+    view = analyze_view(_stream(40, near_foot=0.90, far_foot=0.55))
+    assert view.profile == "pair"
+    assert view.low_confidence is False
