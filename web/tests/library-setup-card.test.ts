@@ -134,6 +134,85 @@ describe('Library', () => {
     })
   })
 
+  it('navigates to the source that actually needs setup, not always sources[0]', async () => {
+    // handle_ingest flips the SESSION to needs_setup unconditionally, and
+    // find_or_create_session_for_date reuses a session at any status -- so
+    // a second clip dropped on a day whose first clip is already reviewed
+    // flips the session to needs_setup while source 1 stays 'ready'.
+    // Navigating to sources[0]'s wizard would open on the ALREADY-REVIEWED
+    // source; confirming there rebuilds it and discards hand-edited rally
+    // boundaries. The wizard must open on the source that is actually
+    // needs_setup.
+    mockApi.listSessions.mockResolvedValue([
+      {
+        id: 's-mixed',
+        title: 'Mixed Session',
+        played_on: '2026-08-19',
+        status: 'needs_setup',
+        rally_count: 3,
+        starred_count: 1,
+      },
+    ])
+    mockApi.getSession.mockResolvedValue({
+      session: {
+        id: 's-mixed',
+        title: 'Mixed Session',
+        played_on: '2026-08-19',
+        status: 'needs_setup',
+      },
+      sources: [
+        {
+          id: 'src-ready',
+          session_id: 's-mixed',
+          idx: 1,
+          recorded_at: '2026-08-19T00:00:00Z',
+          offset_ms: 0,
+          duration_ms: 60000,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          has_original: 1,
+          court_preset_id: 'p1',
+          status: 'ready',
+          rotation_deg: 0,
+        },
+        {
+          id: 'src-needs-setup',
+          session_id: 's-mixed',
+          idx: 2,
+          recorded_at: '2026-08-19T00:05:00Z',
+          offset_ms: 60000,
+          duration_ms: 60000,
+          width: 3840,
+          height: 2160,
+          fps: 30,
+          has_original: 1,
+          court_preset_id: null,
+          status: 'needs_setup',
+          rotation_deg: 0,
+        },
+      ],
+      rallies: [],
+    })
+
+    instance = mount(Library, { target, props: {} })
+    flushSync()
+
+    await vi.waitFor(() => {
+      const btn = target.querySelector('button[aria-label="set up"]')
+      expect(btn).not.toBeNull()
+    })
+
+    const button = target.querySelector('button[aria-label="set up"]') as HTMLButtonElement
+    button.click()
+    flushSync()
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/setup/src-needs-setup')
+    })
+    expect(mockNavigate).not.toHaveBeenCalledWith('/setup/src-ready')
+  })
+
   it('clicking ready session navigates directly to session page', async () => {
     mockApi.listSessions.mockResolvedValue([
       {

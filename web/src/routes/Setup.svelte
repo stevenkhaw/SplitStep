@@ -14,6 +14,16 @@
   let workingMs = $state(0)
   let scrubMs = $state(0)
   let points = $state<[number, number][] | null>(null) // null until the user commits one
+  // Which existing preset (if any) `points` was last loaded from verbatim.
+  // Confirm reuses this id instead of always calling createPreset -- every
+  // confirm previously created a new "<session> source <idx>" row, with no
+  // dedupe and no unique-name constraint to stop it, even when the user had
+  // just clicked an existing preset button that only copies its
+  // coordinates. Cleared whenever `points` changes to something that did
+  // NOT come from a preset (the default trapezoid, or a dragged corner) so
+  // a subsequent Confirm can't silently reuse a preset the user has since
+  // diverged from.
+  let selectedPresetId = $state<string | null>(null)
   let busy = $state(false)
   let error = $state<string | null>(null)
 
@@ -51,8 +61,11 @@
     scrubMs = next
   }
 
-  function usePoints(next: [number, number][]) {
+  // `presetId` is set when `next` is an existing preset's own points
+  // (reused verbatim), null for the default trapezoid.
+  function usePoints(next: [number, number][], presetId: string | null = null) {
     points = clonePoints(next)
+    selectedPresetId = presetId
   }
 
   async function start() {
@@ -60,12 +73,21 @@
     busy = true
     error = null
     try {
-      const created = await api.createPreset(
-        defaultPresetName(source.session_id, source.idx),
-        points,
-      )
-      if (!created.id) throw new Error('createPreset did not return an id')
-      await api.setup(source.id, rotation, created.id)
+      // Reuse the preset the current points came from verbatim; only
+      // create a new row when the user never picked one, or picked one and
+      // then dragged a corner (usePoints/onpoints both clear
+      // selectedPresetId the moment `points` stops matching an existing
+      // preset's coordinates).
+      let presetId = selectedPresetId
+      if (!presetId) {
+        const created = await api.createPreset(
+          defaultPresetName(source.session_id, source.idx),
+          points,
+        )
+        if (!created.id) throw new Error('createPreset did not return an id')
+        presetId = created.id
+      }
+      await api.setup(source.id, rotation, presetId)
       window.location.hash = `/s/${source.session_id}`
     } catch (e) {
       error = String(e)
@@ -156,7 +178,7 @@
       {#each presets as p (p.id)}
         <button
           class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-          onclick={() => usePoints(p.points)}
+          onclick={() => usePoints(p.points, p.id)}
           aria-label="use preset {p.name}"
         >
           {p.name}
@@ -170,9 +192,16 @@
       {maxMs}
       fps={source.fps}
       points={points ?? DEFAULT_QUAD_POINTS}
-      onpoints={(p) => (points = p)}
+      onpoints={(p) => {
+        points = p
+        // A dragged corner no longer matches the preset it may have
+        // started from -- Confirm must create a new preset, not silently
+        // overwrite the one the user reused.
+        selectedPresetId = null
+      }}
       onseek={seek}
       alt="source {source.idx} at {formatTs(workingMs)}"
+      frameErrorHint="the original may still be processing"
     />
   </section>
 

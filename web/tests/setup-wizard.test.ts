@@ -7,6 +7,18 @@ const source = {
   has_original: 1, court_preset_id: null, status: 'needs_setup', rotation_deg: 90,
 }
 
+const existingPreset = {
+  id: 'existing-preset',
+  name: 'Court 1',
+  points: [
+    [0.1, 0.1],
+    [0.9, 0.1],
+    [0.9, 0.9],
+    [0.1, 0.9],
+  ] as [number, number][],
+  created_at: '2026-08-19T00:00:00Z',
+}
+
 const mockApi = {
   getSource: vi.fn().mockResolvedValue(source),
   listPresets: vi.fn().mockResolvedValue([]),
@@ -19,9 +31,32 @@ vi.mock('../src/lib/api', () => ({ api: mockApi }))
 
 const { default: Setup } = await import('../src/routes/Setup.svelte')
 
+// jsdom has no PointerEvent constructor (same workaround as
+// timeline-drag-gain.test.ts); QuadCanvas's handle drag only ever reads
+// clientX/clientY/pointerId off the events it receives, all of which a
+// MouseEvent-based stand-in carries fine.
+class FakePointerEvent extends MouseEvent {
+  pointerId: number
+  constructor(type: string, init: MouseEventInit & { pointerId: number }) {
+    super(type, init)
+    this.pointerId = init.pointerId
+  }
+}
+
+// A fixed fake layout for the QuadCanvas wrapper -- jsdom never computes
+// real layout, so `wrap.getBoundingClientRect()` (what QuadCanvas's drag
+// math measures pointer positions against) would otherwise always read
+// zero width/height and every dragged point would clamp to the same
+// corner.
+const FAKE_RECT: DOMRect = {
+  left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800,
+  x: 0, y: 0, toJSON: () => ({}),
+}
+
 describe('Setup wizard', () => {
   let target: HTMLDivElement
   let instance: unknown
+  let rectSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -31,11 +66,13 @@ describe('Setup wizard', () => {
     mockApi.setup.mockResolvedValue({ job_id: 'j1' })
     target = document.createElement('div')
     document.body.appendChild(target)
+    rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(FAKE_RECT)
   })
 
   afterEach(() => {
     if (instance) unmount(instance as never)
     target.remove()
+    rectSpy.mockRestore()
     instance = undefined
   })
 
@@ -54,6 +91,29 @@ describe('Setup wizard', () => {
     const el = target.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement
     if (!el) throw new Error(`${label} not found`)
     el.click()
+    flushSync()
+  }
+
+  // Drags the first quad corner handle to a new position via real
+  // pointerdown/pointermove/pointerup events, the way a user actually
+  // changes the play region -- as opposed to clicking a preset button,
+  // which only replaces `points` wholesale.
+  function dragFirstCorner() {
+    const handle = target.querySelector('button[aria-label="corner 1"]') as HTMLButtonElement
+    if (!handle) throw new Error('corner 1 handle not found')
+    handle.setPointerCapture = vi.fn()
+    handle.releasePointerCapture = vi.fn()
+    handle.dispatchEvent(
+      new FakePointerEvent('pointerdown', { clientX: 100, clientY: 100, pointerId: 1, bubbles: true }),
+    )
+    flushSync()
+    handle.dispatchEvent(
+      new FakePointerEvent('pointermove', { clientX: 200, clientY: 150, pointerId: 1, bubbles: true }),
+    )
+    flushSync()
+    handle.dispatchEvent(
+      new FakePointerEvent('pointerup', { clientX: 200, clientY: 150, pointerId: 1, bubbles: true }),
+    )
     flushSync()
   }
 
@@ -96,5 +156,50 @@ describe('Setup wizard', () => {
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
     expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
     expect(mockApi.setup).toHaveBeenCalledWith('src1', 0, 'p1')
+  })
+
+  // Finding: Confirm always called createPreset, even when the user just
+  // clicked an existing preset button (which only copies its coordinates).
+  // No dedupe and no unique name constraint on court_presets meant every
+  // confirm -- and every retry after an error -- inserted another
+  // indistinguishable "<session> source <idx>" row.
+
+  it('confirming right after clicking an existing preset reuses its id and does not create a new one', async () => {
+    mockApi.listPresets.mockResolvedValue([existingPreset])
+    await open()
+    await vi.waitFor(() =>
+      expect(target.querySelector(`button[aria-label="use preset ${existingPreset.name}"]`)).not.toBeNull(),
+    )
+    click(`use preset ${existingPreset.name}`)
+    click('start detection')
+    await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
+    expect(mockApi.createPreset).not.toHaveBeenCalled()
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, existingPreset.id)
+  })
+
+  it('confirming after dragging a corner creates a new preset', async () => {
+    mockApi.listPresets.mockResolvedValue([existingPreset])
+    await open()
+    click('use default play region')
+    dragFirstCorner()
+    click('start detection')
+    await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
+    expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1')
+  })
+
+  it('clicking a preset then dragging a corner creates a new preset rather than silently overwriting the reused one', async () => {
+    mockApi.listPresets.mockResolvedValue([existingPreset])
+    await open()
+    await vi.waitFor(() =>
+      expect(target.querySelector(`button[aria-label="use preset ${existingPreset.name}"]`)).not.toBeNull(),
+    )
+    click(`use preset ${existingPreset.name}`)
+    dragFirstCorner()
+    click('start detection')
+    await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
+    expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1')
+    expect(mockApi.setup).not.toHaveBeenCalledWith('src1', 90, existingPreset.id)
   })
 })

@@ -47,7 +47,18 @@
       if (session.status === 'needs_setup') {
         try {
           const detail = await api.getSession(session.id)
-          const firstSourceId = detail.sources[0]?.id
+          // handle_ingest flips the SESSION to needs_setup unconditionally,
+          // and find_or_create_session_for_date reuses a session at any
+          // status -- so a second clip dropped on a day whose first clip is
+          // already reviewed flips the session to needs_setup while that
+          // first source stays 'ready'. Opening the wizard on sources[0]
+          // would land on the reviewed source; confirming there rebuilds it
+          // and discards its hand-edited rally boundaries. Open on whichever
+          // source actually needs setup, falling back to sources[0] only
+          // when none does (shouldn't happen given the session's own
+          // status, but keeps this from throwing on an empty match).
+          const target = detail.sources.find((s) => s.status === 'needs_setup') ?? detail.sources[0]
+          const firstSourceId = target?.id
           if (firstSourceId) {
             navigate(`/setup/${firstSourceId}`)
           } else {

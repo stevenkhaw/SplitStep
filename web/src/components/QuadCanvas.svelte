@@ -12,9 +12,27 @@
     alt: string
     onpoints: (p: [number, number][]) => void
     onseek: (ms: number) => void
+    // What a missing frame most likely means, phrased for whichever
+    // endpoint `frameSrc` actually points at -- QuadEditor reads
+    // frame.jpg (the PROXY, which can still be mid-transcode) while the
+    // wizard reads preview.jpg (the ORIGINAL; no proxy exists yet at that
+    // point, so "the proxy may still be transcoding" would be actively
+    // wrong there). Defaults to the proxy wording since QuadEditor is the
+    // older, more common caller.
+    frameErrorHint?: string
   }
 
-  let { frameSrc, timeMs, maxMs, fps, points, alt, onpoints, onseek }: Props = $props()
+  let {
+    frameSrc,
+    timeMs,
+    maxMs,
+    fps,
+    points,
+    alt,
+    onpoints,
+    onseek,
+    frameErrorHint = 'the proxy may still be transcoding',
+  }: Props = $props()
 
   let dragging = $state<number | null>(null)
   let wrap = $state<HTMLDivElement>()
@@ -186,7 +204,6 @@
 
 {#if frameError}
   <p class="mt-2 font-mono text-xs text-amber-300">
-    No frame at {formatTs(timeMs)} -- the proxy may still be transcoding. Try again, or
-    scrub somewhere else.
+    No frame at {formatTs(timeMs)} -- {frameErrorHint}. Try again, or scrub somewhere else.
   </p>
 {/if}
