@@ -1,7 +1,8 @@
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from bootleg.detect.features import FeatureFrame, Player
+from bootleg.detect.viewpoint import Profile, ViewGeometry, analyze_view
 
 # Body-lengths/sec that counts as "fully moving". Measured, not guessed:
 # on the first real source the near player's speed runs p50=0.11, p75=0.25,
@@ -44,9 +45,23 @@ class SegmentParams:
     pad_start_s: float = 0.3
     pad_end_s: float = 0.5
 
+    # Which scoring shape to use. "pair" is the original two-player model.
+    # "subject" is for a camera low enough that the far half of the court
+    # collapses onto the horizon, where the second-largest box is not the
+    # opponent but whoever is on the next court -- see
+    # docs/superpowers/specs/2026-08-20-camera-viewpoint-design.md.
+    profile: Profile = "pair"
+    # Minimum box height that counts as your player, in subject mode. Derived
+    # per source by analyze_view; 0.0 here because pair mode never reads it.
+    subject_min_h: float = 0.0
+
     @property
     def weight_total(self) -> float:
-        return self.w_both + self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
+        # Subject mode gates on presence instead of scoring it, so w_both is
+        # not part of the sum. This is why the two profiles' thresholds are
+        # not comparable numbers: 0.25 subject, 0.45 pair.
+        base = self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
+        return base if self.profile == "subject" else base + self.w_both
 
 
 @dataclass(frozen=True)
@@ -83,7 +98,40 @@ def _lateral_fraction(near: Player | None, prev_near: Player | None) -> float:
     return dx / total
 
 
+def _subject_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
+    """Score a frame where only your own player is reliably visible.
+
+    Presence is a gate, not a term. Your player is on court 83% of the time on
+    real footage -- including between points, walking to the baseline, picking
+    up balls -- so an additive presence term handed out a third of the score
+    for free on nearly every frame. As a gate it earns nothing and the audio
+    and motion terms have to carry the frame on their own.
+
+    The gate also replaces the `if not both` guard that keeps audio from
+    segmenting an empty court: a box has to be your player's size before any
+    impact counts, and people on adjacent courts sit at the horizon at roughly
+    a quarter of that height.
+    """
+    if f.near is None or f.near.h < p.subject_min_h:
+        return 0.0
+
+    speed = _clamp01(f.near.v / MAX_SPEED)
+    hits = _clamp01(f.hits / MAX_HIT_RATE)
+    reg = _clamp01(f.hit_reg)
+
+    score = (
+        p.w_speed * speed
+        + p.w_lateral * lateral
+        + p.w_hits * hits
+        + p.w_regularity * reg
+    )
+    return _clamp01(score / p.weight_total)
+
+
 def _raw_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
+    if p.profile == "subject":
+        return _subject_score(f, p, lateral)
+
     both = 1.0 if (f.near is not None and f.far is not None) else 0.0
 
     if both:
@@ -193,3 +241,40 @@ def segment(frames: list[FeatureFrame], params: SegmentParams) -> list[Interval]
             confidence=round(confidence, 4),
         ))
     return out
+
+
+# Subject mode's own defaults. Fitted against audio-impact clusters on the one
+# real ground-level source (59 clusters, median 8.0 s, 59% coverage); these
+# give 61 intervals, median 7.6 s, 63% coverage. That fit is partly circular --
+# audio drives both the score and the labels -- so treat them as provisional
+# until the visual spot-check in the plan's validation task is done.
+SUBJECT_THRESHOLD = 0.25
+SUBJECT_CLOSE_GAP_S = 2.0
+
+
+def params_for_frames(
+    frames: list[FeatureFrame], *, threshold: float | None = None
+) -> SegmentParams:
+    """Build the right SegmentParams for a source, from the source itself.
+
+    Every caller that segments -- the detect handler, the CLI, both API routes
+    -- goes through here, for the same reason setup.py::queue_setup exists:
+    HTTP and terminal must not be able to drift on which model a source gets.
+
+    `threshold=None` means "use the profile's default", which is what the UI
+    wants on first load; the two profiles' thresholds are on different scales
+    and hardcoding either one in a caller is a bug.
+    """
+    view: ViewGeometry = analyze_view(frames)
+    if view.profile == "subject":
+        params = SegmentParams(
+            profile="subject",
+            subject_min_h=view.subject_min_h,
+            threshold=SUBJECT_THRESHOLD,
+            close_gap_s=SUBJECT_CLOSE_GAP_S,
+        )
+    else:
+        params = SegmentParams()
+    if threshold is not None:
+        params = replace(params, threshold=threshold)
+    return params
