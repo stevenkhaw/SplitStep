@@ -1,5 +1,8 @@
 import sqlite3
+import subprocess
 import threading
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +14,7 @@ from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import Interval
+from bootleg.jobs.handlers import handle_ingest
 
 
 @pytest.fixture
@@ -39,6 +43,46 @@ def seeded(library, conn):
     replace_rallies(conn, session_id, source_id,
                     [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7)])
     return {"session_id": session_id, "source_id": source_id, "idx": idx}
+
+
+@pytest.fixture
+def sample_video(tmp_path):
+    """2 second 320x240 30fps clip with a 440Hz tone."""
+    out = tmp_path / "sample.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+@dataclass
+class RegisteredSource:
+    session_id: str
+    id: str
+    idx: int
+    dir: Path
+
+
+@pytest.fixture
+def registered_source(library, conn, sample_video):
+    """A source the way the setup wizard finds it: `handle_ingest` has run,
+    the original is on disk in the session tree, and no proxy exists yet
+    (see handle_ingest's docstring -- both wait on the wizard). preview.jpg
+    exists for exactly this pre-proxy state.
+    """
+    dropped = library.inbox / "IMG_9000.MOV"
+    dropped.write_bytes(sample_video.read_bytes())
+    handle_ingest(library, {"path": str(dropped)})
+    row = conn.execute("SELECT * FROM sources").fetchone()
+    return RegisteredSource(
+        session_id=row["session_id"],
+        id=row["id"],
+        idx=row["idx"],
+        dir=library.source_dir(row["session_id"], row["idx"]),
+    )
 
 
 def test_list_sessions_includes_counts(client, seeded):
@@ -280,3 +324,36 @@ def test_sharing_one_connection_across_callers_finalizes_an_unrelated_open_trans
     finally:
         other.close()
         shared.close()
+
+
+# -- preview.jpg: setup-wizard frames from the original, before a proxy exists
+
+def test_preview_serves_a_frame_from_the_original(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+def test_preview_caches_per_rotation(client, registered_source, tmp_path):
+    base = f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500"
+    client.get(f"{base}&rot=0")
+    client.get(f"{base}&rot=90")
+    names = {p.name for p in registered_source.dir.glob("preview-*.jpg")}
+    assert names == {"preview-0-500.jpg", "preview-90-500.jpg"}
+
+
+def test_preview_rejects_a_non_right_angle(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=0&rot=45")
+    assert r.status_code == 400
+
+
+def test_preview_clamps_past_the_end_of_the_clip(client, registered_source):
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=99999999&rot=0")
+    assert r.status_code == 200
+
+
+def test_preview_404s_when_the_original_is_gone(client, registered_source):
+    for p in registered_source.dir.glob("original.*"):
+        p.unlink()
+    r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=0&rot=0")
+    assert r.status_code == 404

@@ -1,11 +1,13 @@
 import os
 import sqlite3
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from bootleg.accel import detect_accel
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     list_rallies,
@@ -26,9 +28,10 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
+from bootleg.jobs.handlers import _original_path
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
-from bootleg.media.transcode import TranscodeError
+from bootleg.media.transcode import TranscodeError, rotation_filter
 
 from .media import range_response
 
@@ -266,13 +269,22 @@ def api_create_preset(body: PresetCreateBody, request: Request):
 
 
 FRAME_CACHE_KEEP = 20
+# Two concurrent 4K HEVC decodes is what an 8 GB M2 Air absorbs without
+# swapping. The setup wizard's nine-frame rotation/timestamp grid fires
+# nine preview requests at once; the rest queue on this semaphore rather
+# than all nine landing on the kernel's memory pressure handler together.
+_PREVIEW_SLOTS = threading.Semaphore(2)
 
 
-def _evict_old_frames(src_dir: Path, keep: int = FRAME_CACHE_KEEP) -> None:
-    """Frame extraction caches one file per requested at_ms with no
-    eviction otherwise -- a quad-editor session scrubbing through many
-    timestamps would grow this directory without bound. Keep only the
-    `keep` most recently touched frame-*.jpg, deleting the rest by mtime.
+def _evict_old_frames(
+    src_dir: Path, pattern: str = "frame-*.jpg", keep: int = FRAME_CACHE_KEEP
+) -> None:
+    """Frame extraction caches one file per requested at_ms (frame.jpg) or
+    per requested rotation/at_ms (preview.jpg) with no eviction otherwise --
+    a quad-editor session scrubbing through many timestamps, or a setup
+    wizard trying every rotation, would grow the source directory without
+    bound. Keep only the `keep` most recently touched files matching
+    `pattern`, deleting the rest by mtime.
 
     Eviction is best-effort housekeeping, not correctness-critical for the
     request it runs inside: a concurrent eviction pass (another request
@@ -290,11 +302,41 @@ def _evict_old_frames(src_dir: Path, keep: int = FRAME_CACHE_KEEP) -> None:
             return 0.0
 
     try:
-        frames = sorted(src_dir.glob("frame-*.jpg"), key=_mtime_or_zero)
-        for stale in frames[:-keep]:
+        files = sorted(src_dir.glob(pattern), key=_mtime_or_zero)
+        for stale in files[:-keep]:
             stale.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _last_safe_ms(source: sqlite3.Row) -> int:
+    """Clamp a requested at_ms to a timestamp ffmpeg can actually decode.
+
+    Scrubbing past a clip's end (or before its start) is ordinary UI
+    behaviour in the quad editor. Past end-of-stream, ffmpeg fails with
+    exit 234 and a misleading "Non full-range YUV is non-standard" message
+    -- the same end-of-stream encoder bug make_thumbs already documents
+    and clamps against (bootleg/media/transcode.py) -- so callers clamp
+    into the clip's duration here too, rather than reject. This also makes
+    the negative case explicit instead of relying on ffmpeg to silently
+    clamp it (which produced a duplicate cached file per distinct negative
+    value, all byte-identical to frame-0.jpg).
+
+    Clamping to `duration_ms - 1` alone still reproduces the bug: at 30fps
+    (2000ms/60 frames) the true last frame lands at ~1966.67ms, so 1999ms
+    falls in the same post-last-frame gap the bug lives in (measured:
+    1967ms fails, 1966ms succeeds; at a synthetic 10fps 1901ms fails,
+    1900ms succeeds). The margin has to account for the source's own frame
+    period, not just its reported duration.
+
+    duration_ms/fps come from the sources row rather than a fresh probe():
+    they are read once at ingest, from the original, and never re-timed --
+    make_proxy passes no -r and only scales -- so they hold equally well
+    for frame.jpg's proxy read and preview.jpg's original read.
+    """
+    fps, duration_ms = source["fps"], source["duration_ms"]
+    margin_ms = int(1000 / fps) + 1 if fps > 0 else max(1, duration_ms // 2)
+    return max(0, duration_ms - margin_ms)
 
 
 @router.get("/media/{session_id}/{idx}/frame.jpg")
@@ -320,31 +362,7 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     if not proxy.is_file():
         raise HTTPException(status_code=404, detail="Proxy not found")
 
-    # Scrubbing past a clip's end (or before its start) is ordinary UI
-    # behaviour in the quad editor. Past end-of-stream, ffmpeg fails with
-    # exit 234 and a misleading "Non full-range YUV is non-standard"
-    # message -- the same end-of-stream encoder bug make_thumbs already
-    # documents and clamps against (bootleg/media/transcode.py) -- so clamp
-    # into the clip's duration here too, rather than reject. This also
-    # makes the negative case explicit instead of relying on ffmpeg to
-    # silently clamp it (which produced a duplicate cached file per
-    # distinct negative value, all byte-identical to frame-0.jpg).
-    #
-    # Clamping to `duration_ms - 1` alone still reproduces the bug: at
-    # 30fps (2000ms/60 frames) the true last frame lands at ~1966.67ms, so
-    # 1999ms falls in the same post-last-frame gap the bug lives in
-    # (measured: 1967ms fails, 1966ms succeeds; at a synthetic 10fps
-    # 1901ms fails, 1900ms succeeds). The margin has to account for the
-    # source's own frame period, not just its reported duration.
-    #
-    # duration_ms/fps come from the sources row rather than probe(proxy):
-    # make_proxy passes no -r and only scales, so the proxy's duration and
-    # frame rate match the recorded values already in the database.
-    fps = source["fps"]
-    duration_ms = source["duration_ms"]
-    margin_ms = int(1000 / fps) + 1 if fps > 0 else max(1, duration_ms // 2)
-    last_safe_ms = max(0, duration_ms - margin_ms)
-    at_ms = max(0, min(at_ms, last_safe_ms))
+    at_ms = max(0, min(at_ms, _last_safe_ms(source)))
 
     dst = src_dir / f"frame-{at_ms}.jpg"
     # A crash-retry ingest reuses the same source_dir and overwrites
@@ -374,5 +392,58 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
         # Starlette sending the body, and so eviction becomes
         # access-time-based rather than write-time-based -- a frame still
         # being scrubbed through stays hot instead of aging out.
+        os.utime(dst, None)
+    return FileResponse(dst, media_type="image/jpeg")
+
+
+@router.get("/media/{session_id}/{idx}/preview.jpg")
+def api_preview(
+    session_id: str, idx: int, request: Request, at_ms: int = 0, rot: int = 0
+):
+    """Serve a rotated frame from the ORIGINAL, for the setup wizard.
+
+    The wizard asks for rotation and a play region before build_proxy ever
+    runs (see handle_ingest), so there is no proxy.mp4 to read a frame
+    from yet -- only the original the source was ingested with. Caching
+    keys on rotation as well as at_ms (`preview-{rot}-{at_ms}.jpg`) because
+    the wizard's grid requests the same timestamp at every candidate
+    rotation.
+    """
+    conn, library = _conn(request), _library(request)
+    source = conn.execute(
+        "SELECT * FROM sources WHERE session_id = ? AND idx = ?", (session_id, idx)
+    ).fetchone()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    try:
+        rotation_filter(rot)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    src_dir = library.source_dir(session_id, idx)
+    original = _original_path(src_dir)
+    if original is None:
+        raise HTTPException(status_code=404, detail="Original not available")
+
+    at_ms = max(0, min(at_ms, _last_safe_ms(source)))
+    dst = src_dir / f"preview-{rot}-{at_ms}.jpg"
+    if not dst.exists():
+        with _PREVIEW_SLOTS:
+            # Re-check inside the semaphore: nine grid requests queued
+            # behind the same two slots would otherwise each spawn their
+            # own ffmpeg for a timestamp/rotation the first one to get
+            # through already wrote.
+            if not dst.exists():
+                try:
+                    extract_frame(
+                        original, dst, at_ms=at_ms, rotation_deg=rot,
+                        hwaccel=detect_accel().hwaccel,
+                    )
+                except (TranscodeError, ProbeError) as exc:
+                    raise HTTPException(
+                        status_code=409, detail="Source is still being processed"
+                    ) from exc
+        _evict_old_frames(src_dir, pattern="preview-*.jpg")
+    else:
         os.utime(dst, None)
     return FileResponse(dst, media_type="image/jpeg")
