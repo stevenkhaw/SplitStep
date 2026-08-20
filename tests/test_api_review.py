@@ -267,6 +267,31 @@ def test_scores_clamps_step_ms_to_one_for_duplicate_leading_timestamps(client, l
     assert body["step_ms"] == 1
 
 
+def test_scores_with_non_finite_threshold_is_422(client, library, seeded):
+    """Pydantic accepts nan/inf/1e400 for a bare float query param; without
+    an explicit range, a cleared numeric input in the UI serializing to
+    "NaN" would sail through as a valid float and only blow up later in
+    Starlette's JSON renderer. ge=0.0/le=1.0 turns it into a clean 422
+    here instead, since nan >= 0.0 is False.
+    """
+    _write_features(library, seeded["session_id"], seeded["idx"], n=40)
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores?threshold=NaN")
+    assert r.status_code == 422
+
+
+def test_resegment_with_non_finite_threshold_is_422(client, seeded):
+    # A raw float("inf")/float("nan") can't even be sent here: httpx's own
+    # JSON encoder rejects non-finite floats client-side (allow_nan=False)
+    # before a request is made at all. The string form is what a client
+    # sending a stringified numeric field would actually put on the wire,
+    # and pydantic parses "NaN" into a non-finite float same as it would
+    # from a query string -- so this still exercises the ge/le constraint.
+    r = client.post(
+        f"/api/sources/{seeded['source_id']}/resegment", json={"threshold": "NaN"}
+    )
+    assert r.status_code == 422
+
+
 def test_resegment_drops_a_reviewed_session_back_to_ready(client, conn, library, seeded):
     """replace_rallies inserts every new rally with reviewed_at NULL and
     carries starred/rejected across by overlap, but never reviewed_at.

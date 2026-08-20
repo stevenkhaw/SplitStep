@@ -2,9 +2,9 @@ import os
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
@@ -55,7 +55,12 @@ class BoundsBody(BaseModel):
 
 
 class ResegmentBody(BaseModel):
-    threshold: float = SegmentParams().threshold
+    # ge/le are not just documentation: a NaN or +/-inf threshold (e.g. a
+    # cleared numeric input in the UI serializing to "NaN") would otherwise
+    # sail through as a valid float and blow up Starlette's JSON renderer
+    # later. `nan >= 0.0` and `inf <= 1.0` are both False, so pydantic turns
+    # every non-finite value into a clean 422 here instead.
+    threshold: float = Field(default=SegmentParams().threshold, ge=0.0, le=1.0)
 
 
 class PresetBody(BaseModel):
@@ -187,7 +192,7 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
 
 @router.get("/api/sources/{source_id}/scores")
 def api_scores(source_id: str, request: Request,
-               threshold: float = SegmentParams().threshold):
+               threshold: float = Query(default=SegmentParams().threshold, ge=0.0, le=1.0)):
     conn = _conn(request)
     library = _library(request)
     source = get_source(conn, source_id)
