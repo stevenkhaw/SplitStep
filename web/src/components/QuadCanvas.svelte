@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { movePoint, pointFromClient, polygonClipPath } from '../lib/quad'
   import { formatTs, frameStep } from '../lib/time'
 
@@ -18,6 +19,22 @@
   let dragging = $state<number | null>(null)
   let wrap = $state<HTMLDivElement>()
   let frameError = $state(false)
+
+  // The slider's live readout during a drag. `timeMs` is the committed
+  // value -- it only moves on `onchange` (release), since each distinct
+  // value is one ffmpeg extraction against a 4K original. Without a
+  // separate draft, the timecode text next to the slider would freeze at
+  // the pre-drag value for the whole drag even though the thumb itself
+  // (native browser behavior, unrelated to this binding) tracks the
+  // pointer the entire time -- found live: the thumb moved, the numbers
+  // next to it didn't. `draftMs` re-syncs to `timeMs` via the effect below
+  // whenever the commit lands, whether that came from this slider's own
+  // `onchange`, the frame-step buttons, or a grid-tile click elsewhere in
+  // the wizard.
+  let draftMs = $state(untrack(() => timeMs))
+  $effect(() => {
+    draftMs = timeMs
+  })
 
   // Slider granularity of one frame, so keyboard arrows on the slider step
   // frame by frame the same way the frame buttons do.
@@ -141,6 +158,7 @@
     max={maxMs}
     step={stepMs}
     value={timeMs}
+    oninput={(e) => (draftMs = e.currentTarget.valueAsNumber)}
     onchange={(e) => onseek(e.currentTarget.valueAsNumber)}
     class="min-w-0 flex-1 accent-blue-500"
     aria-label="frame timestamp"
@@ -162,7 +180,7 @@
     1s &raquo;
   </button>
   <span class="w-20 shrink-0 text-right font-mono text-xs text-neutral-400">
-    {formatTs(timeMs)}
+    {formatTs(draftMs)}
   </span>
 </div>
 

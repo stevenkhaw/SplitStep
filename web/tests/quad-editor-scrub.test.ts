@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatTs } from '../src/lib/time'
 import type { Source } from '../src/lib/types'
 
 // Same mocking approach as resegment-panel.test.ts: QuadEditor imports
@@ -20,6 +21,9 @@ const mockApi = {
   proxyUrl: () => 'about:blank',
   frameUrl: (sessionId: string, idx: number, atMs = 0) =>
     `/media/${sessionId}/${idx}/frame.jpg?at_ms=${atMs}`,
+  getSource: vi.fn(),
+  setup: vi.fn(),
+  previewUrl: () => 'about:blank',
 }
 
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
@@ -40,6 +44,7 @@ function source(overrides: Partial<Source> = {}): Source {
     has_original: 1,
     court_preset_id: null,
     status: 'ready',
+    rotation_deg: 0,
     ...overrides,
   }
 }
@@ -86,6 +91,12 @@ describe('QuadEditor frame scrubbing', () => {
     const el = target.querySelector('input[type="range"]')
     if (!el) throw new Error('scrub slider not found')
     return el as HTMLInputElement
+  }
+
+  function readout(): string {
+    const el = target.querySelector('span.text-right')
+    if (!el) throw new Error('timecode readout not found')
+    return el.textContent?.trim() ?? ''
   }
 
   it('opens past t=0, where phone footage is usually still black', () => {
@@ -135,6 +146,25 @@ describe('QuadEditor frame scrubbing', () => {
 
     el.dispatchEvent(new Event('change', { bubbles: true }))
     flushSync()
+    expect(frameAtMs()).toBe(90000)
+  })
+
+  it('keeps the timecode readout live during a drag, independent of the frame fetch', () => {
+    open()
+    expect(readout()).toBe(formatTs(30000))
+
+    const el = slider()
+    el.value = '90000'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    // The readout follows every `input` event -- the thumb's live position
+    // -- even though no frame has been requested for it yet.
+    expect(readout()).toBe(formatTs(90000))
+    expect(frameAtMs()).toBe(30000)
+
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    expect(readout()).toBe(formatTs(90000))
     expect(frameAtMs()).toBe(90000)
   })
 
