@@ -186,3 +186,52 @@ def test_run_ffmpeg_converts_a_timeout_to_transcode_error(monkeypatch):
     with pytest.raises(TranscodeError) as exc:
         run_ffmpeg(["-i", "whatever"], timeout=0.01)
     assert "timed out" in str(exc.value)
+
+
+def test_make_proxy_output_carries_no_rotation_side_data_at_zero_rotation(tmp_path, big_video):
+    """The proxy output must not carry the source's Display Matrix side data.
+
+    A rotation-aware player (including every browser <video> element, which is
+    how this proxy is played back in the review UI) would apply the matrix on
+    top of already-correct pixels and show the footage sideways. The output
+    must carry rotation=0 (no rotation), not the source's original matrix.
+    """
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(big_video),
+         "-c", "copy", str(tagged)],
+        check=True, capture_output=True,
+    )
+    out = tmp_path / "proxy.mp4"
+    make_proxy(tagged, out, rotation_deg=0)
+    side_data = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream_side_data=rotation", "-of", "default=nw=1",
+         str(out)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "rotation=" not in side_data
+
+
+def test_make_proxy_output_carries_no_rotation_side_data_at_nonzero_rotation(tmp_path, big_video):
+    """The proxy output must strip the source's Display Matrix even with rotation.
+
+    When the output has been physically transposed (pixels rotated), the
+    Display Matrix must not be present -- rotation-aware players would apply
+    the matrix on top of the already-transposed pixels, showing sideways video.
+    """
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-display_rotation", "90", "-i", str(big_video),
+         "-c", "copy", str(tagged)],
+        check=True, capture_output=True,
+    )
+    out = tmp_path / "proxy.mp4"
+    make_proxy(tagged, out, rotation_deg=90)
+    side_data = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream_side_data=rotation", "-of", "default=nw=1",
+         str(out)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "rotation=" not in side_data

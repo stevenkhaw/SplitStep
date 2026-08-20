@@ -71,6 +71,9 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: i
     if accel.hwaccel:
         args += ["-hwaccel", accel.hwaccel]
     args += [
+        # Strip stale Display Matrix side data so rotation-aware players
+        # (e.g. browser <video> elements in the review UI) don't double-rotate.
+        "-display_rotation", "0",
         "-i", str(src),
         "-vf", vf,
         "-c:v", accel.h264_encoder,
