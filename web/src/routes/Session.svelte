@@ -184,13 +184,20 @@
     />
   {/if}
 
-  <ResegmentPanel
-    sources={detail.sources}
-    rallies={detail.rallies}
-    onresegmented={() =>
-      api.getSession(id).then((d) => {
-        detail = d
-        rallyRevision += 1
-      })}
-  />
+  <!--
+    Only render ResegmentPanel for sources that have features cached (ready
+    sources). Passing needs_setup sources would attempt to call api.scores()
+    on a source with no features file, a guaranteed failure.
+  -->
+  {#if readySources.length > 0}
+    <ResegmentPanel
+      sources={readySources}
+      rallies={detail.rallies}
+      onresegmented={() =>
+        api.getSession(id).then((d) => {
+          detail = d
+          rallyRevision += 1
+        })}
+    />
+  {/if}
 {/if}

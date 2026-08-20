@@ -11,6 +11,7 @@
   // user saw for the entire fetch, indistinguishable from a genuinely empty
   // library.
   let loading = $state(true)
+  let clickBusy = $state(false)
 
   $effect(() => {
     let cancelled = false
@@ -40,22 +41,28 @@
   })
 
   async function handleSessionClick(session: Session) {
-    if (session.status === 'needs_setup') {
-      try {
-        const detail = await api.getSession(session.id)
-        const firstSourceId = detail.sources[0]?.id
-        if (firstSourceId) {
-          navigate(`/setup/${firstSourceId}`)
-        } else {
-          // Fallback to session page if no sources
+    if (clickBusy) return
+    clickBusy = true
+    try {
+      if (session.status === 'needs_setup') {
+        try {
+          const detail = await api.getSession(session.id)
+          const firstSourceId = detail.sources[0]?.id
+          if (firstSourceId) {
+            navigate(`/setup/${firstSourceId}`)
+          } else {
+            // Fallback to session page if no sources
+            navigate(`/s/${session.id}`)
+          }
+        } catch (e) {
+          console.error('Failed to navigate to setup:', e)
           navigate(`/s/${session.id}`)
         }
-      } catch (e) {
-        console.error('Failed to navigate to setup:', e)
+      } else {
         navigate(`/s/${session.id}`)
       }
-    } else {
-      navigate(`/s/${session.id}`)
+    } finally {
+      clickBusy = false
     }
   }
 </script>
