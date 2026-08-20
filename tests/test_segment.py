@@ -343,6 +343,18 @@ def test_subject_mode_gate_closes_when_only_strangers_are_present():
     assert segment(stream, SUBJECT) == []
 
 
+def test_subject_mode_gate_is_inclusive_at_the_boundary():
+    """near.h exactly equal to subject_min_h must still open the gate.
+
+    The boundary is what separates "your player" from an adjacent-court
+    figure, so which side of it is inclusive (`>=`, not `>`) is a real
+    decision and not an accident -- pin it directly instead of only testing
+    values comfortably on one side.
+    """
+    stream = _subject_frames(40, hits_every=7, near_h=SUBJECT.subject_min_h)
+    assert max(score_series(stream, SUBJECT)) > 0.0
+
+
 def test_subject_mode_ignores_the_far_box_entirely():
     """Speed comes from near.v alone. A far box reporting v=0 -- what every
     re-acquisition after a gap reports, 22% of far boxes on real footage --
@@ -367,7 +379,10 @@ def test_params_for_frames_picks_subject_on_real_footage(ground_features):
     params = params_for_frames(ground_features)
     assert params.profile == "subject"
     assert params.threshold == 0.25
-    assert params.close_gap_s == 2.0
+    # Not asserting close_gap_s here: both profiles currently default to
+    # 2.0, so this would pass even if SUBJECT_CLOSE_GAP_S were dropped from
+    # the subject branch entirely. threshold is the field that actually
+    # distinguishes the two profiles' params.
     assert params.subject_min_h == pytest.approx(0.1116, abs=0.0005)
 
 

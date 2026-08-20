@@ -60,8 +60,13 @@ class SegmentParams:
         # Subject mode gates on presence instead of scoring it, so w_both is
         # not part of the sum. This is why the two profiles' thresholds are
         # not comparable numbers: 0.25 subject, 0.45 pair.
-        base = self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
-        return base if self.profile == "subject" else base + self.w_both
+        if self.profile == "subject":
+            return self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
+        # Not `base + self.w_both` reusing the sum above: float addition is
+        # not associative, so re-associating this sum would shift every
+        # pair-mode score by an ULP for no benefit. This term order matches
+        # the original pair-mode expression bit-for-bit.
+        return self.w_both + self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
 
 
 @dataclass(frozen=True)
@@ -243,11 +248,16 @@ def segment(frames: list[FeatureFrame], params: SegmentParams) -> list[Interval]
     return out
 
 
-# Subject mode's own defaults. Fitted against audio-impact clusters on the one
-# real ground-level source (59 clusters, median 8.0 s, 59% coverage); these
-# give 61 intervals, median 7.6 s, 63% coverage. That fit is partly circular --
+# Subject mode's own defaults. Fitted against audio-impact clusters on the
+# one real ground-level source, the full 19.5-minute recording (59 clusters,
+# median 8.0 s, 59% coverage); these give 61 intervals, median 7.6 s, 63%
+# coverage, also over that full recording. That fit is partly circular --
 # audio drives both the score and the labels -- so treat them as provisional
 # until the visual spot-check in the plan's validation task is done.
+# (test_real_ground_footage_segments_into_rallies asserts different numbers
+# -- 16 intervals, median 7.0 s -- because it runs on the 4-minute fixture
+# slice in tests/fixtures/ground_level_source01.jsonl, not the full source
+# above; that is a different corpus, not a contradiction.)
 SUBJECT_THRESHOLD = 0.25
 SUBJECT_CLOSE_GAP_S = 2.0
 
