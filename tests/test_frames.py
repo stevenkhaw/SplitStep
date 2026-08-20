@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from bootleg.media.frames import extract_frame
-from bootleg.media.probe import probe
+from bootleg.media.probe import ProbeError, probe
 
 
 @pytest.fixture
@@ -43,3 +43,18 @@ def test_extract_frame_creates_parent_directories(clip, tmp_path):
     dst = tmp_path / "a" / "b" / "frame.jpg"
     extract_frame(clip, dst)
     assert dst.exists()
+
+
+def test_probe_timeout_is_converted_to_probe_error(tmp_path, monkeypatch):
+    """probe() takes an optional timeout, the same pattern run_ffmpeg
+    already uses in transcode.py, so a caller inside a request handler is
+    never exposed to a raw subprocess.TimeoutExpired -- only a ProbeError
+    it already knows how to handle.
+    """
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr("bootleg.media.probe.subprocess.run", _timeout)
+
+    with pytest.raises(ProbeError):
+        probe(tmp_path / "wedged.mp4", timeout=0.01)

@@ -41,17 +41,28 @@ def _pick_fps(*rates: str | None) -> float:
     return 0.0
 
 
-def probe(path: Path) -> MediaInfo:
+def probe(path: Path, timeout: float | None = None) -> MediaInfo:
+    """Read a media file's format/stream info via ffprobe.
+
+    `timeout` is None by default so today's background-job call sites
+    (`make_thumbs`) are unaffected. A caller inside a request handler should
+    pass a short timeout instead -- every route runs on Starlette's shared
+    anyio worker-thread pool, so a wedged ffprobe there (e.g. against a
+    spun-down external drive) would otherwise tie up a request-handling
+    thread indefinitely. Mirrors `run_ffmpeg`'s handling in transcode.py.
+    """
     try:
         proc = subprocess.run(
             ["ffprobe", "-v", "error", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=timeout,
         )
     except FileNotFoundError as exc:
         raise ProbeError(
             "ffprobe not found on PATH. Install it: brew install ffmpeg"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ProbeError(f"ffprobe timed out after {timeout}s for {path}") from exc
     if proc.returncode != 0:
         raise ProbeError(f"ffprobe failed for {path}: {proc.stderr.strip()}")
 
