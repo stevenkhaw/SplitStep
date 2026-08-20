@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fractionToMs, msToFraction, nearestHandle } from '../lib/timeline'
+  import { MIN_RALLY_MS, fractionToMs, msToFraction, nearestHandle } from '../lib/timeline'
   import { clamp } from '../lib/time'
   import type { Rally } from '../lib/types'
 
@@ -14,13 +14,31 @@
     /** Fired once, when a drag releases -- this is what should be persisted. */
     oncommit: (startMs: number, endMs: number) => void
     onscrub: (ms: number) => void
+    /** Fired the instant a handle-drag begins, before any pointermove --
+     * this is the parent's cue to freeze whatever coordinate space
+     * windowStartMs/windowEndMs represent for the duration of the drag (see
+     * TimelineMode's frozen window, Finding 3: without this, the window
+     * recenters under the pointer mid-drag and each move amplifies the
+     * last). Not fired for a scrub click, which is a single discrete jump,
+     * not a drag. */
+    ondragstart?: () => void
+    /** Fired once a drag ends -- on a normal release (after oncommit) or on
+     * a pointercancel (no oncommit). The parent's cue to release whatever
+     * it froze in ondragstart. */
+    ondragend?: () => void
   }
 
-  let { rally, neighbours, windowStartMs, windowEndMs, onchange, oncommit, onscrub }: Props =
-    $props()
-
-  // A dragged boundary can never cross its opposite edge by less than this.
-  const MIN_RALLY_MS = 100
+  let {
+    rally,
+    neighbours,
+    windowStartMs,
+    windowEndMs,
+    onchange,
+    oncommit,
+    onscrub,
+    ondragstart,
+    ondragend,
+  }: Props = $props()
 
   let band = $state<HTMLDivElement>()
   let playheadEl = $state<HTMLDivElement>()
@@ -66,6 +84,7 @@
       dragStartMs = rally.start_ms
       dragEndMs = rally.end_ms
       band.setPointerCapture(e.pointerId)
+      ondragstart?.()
     } else {
       onscrub(windowStartMs + fractionToMs(f, span))
     }
@@ -82,10 +101,26 @@
     onchange(dragStartMs, dragEndMs)
   }
 
-  function onPointerUp(e: PointerEvent) {
-    if (dragging) oncommit(dragStartMs, dragEndMs)
+  // Shared by a normal release and a cancelled drag -- both end the drag the
+  // same way locally (clear `dragging`, release capture, tell the parent to
+  // stop freezing); only a normal release also commits.
+  function endDrag(e: PointerEvent) {
+    const wasDragging = dragging !== null
     dragging = null
     band?.releasePointerCapture(e.pointerId)
+    if (wasDragging) ondragend?.()
+  }
+
+  function onPointerUp(e: PointerEvent) {
+    if (dragging) oncommit(dragStartMs, dragEndMs)
+    endDrag(e)
+  }
+
+  // Without this, a cancelled drag (e.g. the OS interrupts with its own
+  // gesture, or the pointer leaves the window) leaves `dragging` set, so the
+  // next hover over the band keeps moving the handle with no button held.
+  function onPointerCancel(e: PointerEvent) {
+    endDrag(e)
   }
 </script>
 
@@ -95,6 +130,7 @@
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
+  onpointercancel={onPointerCancel}
   role="slider"
   tabindex="0"
   aria-label="rally boundaries"
@@ -121,9 +157,19 @@
     <div class="absolute -top-0.5 -bottom-0.5 -right-1 w-2 rounded bg-blue-400"></div>
   </div>
 
+  <!--
+    No reactive `style` binding here, deliberately (Finding 3): this
+    element's position is written imperatively-only via setPlayheadFraction,
+    called up to ~60Hz from VideoDeck's onprogress. A `style={...}`
+    expression derived from `rally`/the window props would re-render (and
+    silently clobber) that write every time either changes -- which,
+    mid-drag, is every pointermove. The static string below is the initial
+    position only, overwritten before first paint by TimelineMode's mount
+    effect.
+  -->
   <div
     bind:this={playheadEl}
     class="pointer-events-none absolute inset-y-0 w-0.5 bg-red-500"
-    style={`left:${frac(rally.start_ms) * 100}%`}
+    style="left: 0%"
   ></div>
 </div>
