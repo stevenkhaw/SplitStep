@@ -7,8 +7,11 @@ import pytest
 from bootleg.config import Library
 from bootleg.db.presets import create_preset
 from bootleg.db.schema import connect, migrate
+from bootleg.detect.features import FeatureFrame, read_features
 from bootleg.detect.geometry import Quad
 from bootleg.jobs.handlers import handle_ingest
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -72,3 +75,16 @@ def registered_source(library, conn, sample_video):
 def a_preset(conn):
     quad = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
     return create_preset(conn, "test_court", quad)
+
+
+@pytest.fixture(scope="session")
+def ground_features() -> list[FeatureFrame]:
+    """A 4-minute slice of real ground-level footage (source 01, t=200-440 s).
+
+    Committed as source, not generated: every tuning constant in the detector
+    was previously fitted against synthetic streams that hand every player
+    v=2.0 -- roughly 8x anything real -- and that is precisely what produced
+    the one-hit-per-clip bug this module exists to fix. Assertions that matter
+    are made against this file, not against hand-written frames.
+    """
+    return read_features(FIXTURES / "ground_level_source01.jsonl")
