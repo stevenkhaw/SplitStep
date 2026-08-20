@@ -104,13 +104,31 @@
       })
   }
 
+  // Plain bookkeeping, not $state: reading/writing it must never itself
+  // create or satisfy a reactive dependency. It exists only so the effect
+  // below can tell a genuine source switch (picking a rally that belongs to
+  // a different source) apart from `source` merely getting a new object
+  // identity for the *same* id, which comparing derived-`source` reference
+  // identity alone would conflate with a switch.
+  let scoredSourceId: string | undefined
+
   // The scores endpoint costs real time (~83ms at one-hour scale: parsing
   // features.jsonl + scoring), so it is fetched on mount and whenever the
   // rally's source changes -- never per-render. `threshold` is read
   // untracked here so a slider drag cannot retrigger this effect; threshold
   // changes go through the separately debounced path below instead.
+  //
+  // A genuine switch to a different source resets `threshold` to null
+  // first, so the call below omits it and asks the API to resolve *that*
+  // source's own profile default -- first call is per source, not just
+  // once per mount. Carrying over the previous source's numeric value here
+  // would be sent as an explicit override, which the server just echoes
+  // back (see loadScores' comment above), silently wrong-scale whenever
+  // the two sources sit on different camera-view profiles.
   $effect(() => {
     if (!source) return
+    if (source.id !== scoredSourceId) threshold = null
+    scoredSourceId = source.id
     loadScores(source.id, untrack(() => threshold))
   })
 

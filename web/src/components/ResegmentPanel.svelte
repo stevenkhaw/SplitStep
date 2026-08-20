@@ -58,12 +58,34 @@
       })
   }
 
+  // Plain bookkeeping, not $state: reading/writing it must never itself
+  // create or satisfy a reactive dependency. It exists only so the effect
+  // below can tell a genuine source switch apart from `source` merely
+  // getting a new object identity for the *same* id -- which happens after
+  // this panel's own resegment call re-fetches the session and Session.svelte
+  // hands `sources` back as a brand-new array (see Session.svelte's
+  // `onresegmented`). Comparing derived-`source` reference identity would
+  // treat that incidental churn as a switch too and needlessly null out
+  // (and re-fetch) a threshold the user is still looking at.
+  let scoredSourceId: string | undefined
+
   // Fetched on mount and whenever the selected source changes -- never per
   // render. `threshold` is read untracked so this effect's only dependency
   // is `source`; threshold-driven refetches go through the debounced path
   // below instead (same split TimelineMode's preview slider uses).
+  //
+  // A genuine switch to a different source resets `threshold` to null
+  // first, so the call below omits it and asks the API to resolve *that*
+  // source's own profile default -- first call is per source, not just
+  // once per mount. Carrying over the previous source's numeric value here
+  // would be sent as an explicit override, which the server just echoes
+  // back (see loadScores' comment above), silently wrong-scale whenever
+  // the two sources sit on different camera-view profiles.
   $effect(() => {
-    if (source) loadScores(source.id, untrack(() => threshold))
+    if (!source) return
+    if (source.id !== scoredSourceId) threshold = null
+    scoredSourceId = source.id
+    loadScores(source.id, untrack(() => threshold))
   })
 
   // The scores endpoint costs real time (~83ms at one-hour scale: parsing
