@@ -97,10 +97,37 @@ the frame. The problem is the feature set, not the gate's shape.
 - Spec §7's fit table, and the 0.25 threshold derived from it.
 - Spec §9's exclusion of the audio detector from scope.
 
-## Unexploited signal found while investigating
+## The stereo lead was tested. It is also a dead end.
 
-`extract_pcm` forces `-ac 1`. Both `original.mov` and `proxy.mp4` carry **stereo** audio
-(AAC, 48 kHz, 2 channels). Our court's impacts are close and roughly on-axis; neighbouring
-courts are off to the sides. A phone's mic spacing is small, so the separation may be
-weak — but the channel information is currently being discarded before anything can look
-at it. Worth testing before concluding the audio path is a dead end.
+`extract_pcm` forces `-ac 1`, and both `original.mov` and `proxy.mp4` carry stereo (AAC,
+48 kHz, 2 channels), so directional information was being discarded before anything could
+look at it. The channels are genuinely distinct — inter-channel correlation over the rally
+window is **-0.297**, not the ~1.0 of a dual-mono file — so the test was worth running.
+
+Impacts in both labelled windows were localised two ways. Plain cross-correlation gave
+median |ITD| of 21-23 samples in both windows, which *exceeds the physical maximum* for a
+phone's ~10 cm mic spacing (~14 samples at 48 kHz) — it was tracking reverberation, not
+direction. Repeating with GCC-PHAT (phase-only, the standard fix for reverberant spaces)
+and a lag search bounded to +/-16 samples:
+
+| window | median \|lag\| | at bound | peak sharpness | near-centre (\|lag\|<=3, \|ILD\|<2 dB) |
+|---|---|---|---|---|
+| setup 5-31 s (no play by us) | 1.0 | 0% | 0.242 | 27% (19 of 71) |
+| rally 912-929 s (our play) | 1.0 | 0% | 0.282 | 38% (19 of 50) |
+
+The method works — lags are tight, none pinned at the search bound, peaks sharp enough to
+indicate a real direct path. But **both windows centre on a lag of 1 sample**: near and far
+impacts alike arrive effectively on-axis. The near-centre fractions differ in the right
+direction, 27% against 38%, but that is 19 impacts against 19 on populations of 71 and 50
+— roughly 1.3 sigma, not significant.
+
+The phone's mics are too close together to resolve sources at court distances. Stereo does
+not rescue the audio path.
+
+## Conclusion
+
+Subject mode has no working discriminator on this footage. Neither of its two inputs
+carries the signal: the audio detector measures the venue rather than the player, in mono
+or in stereo, and near-player motion separates by only +0.10. This is a capture problem
+and a feature-set problem, not a tuning problem. Raising the camera so both players are
+genuinely visible (the pair model's assumption) is the intervention most likely to work.
