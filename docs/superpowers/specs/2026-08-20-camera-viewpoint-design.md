@@ -1,7 +1,10 @@
 # BootlegVision — Camera Viewpoint and Subject-Mode Segmentation
 
 **Date:** 2026-08-20
-**Status:** Approved, ready for implementation planning
+**Status:** Implemented. **§5, §7 and §9 are SUPERSEDED** — subject mode was validated
+on 2026-08-20 and failed. Read
+`docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before acting on
+anything in this document. §4 was also amended during implementation (see §4).
 **Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` (§5 detection)
 **Supersedes for ground-level sources:** the two-player scoring model in `detect/segment.py`
 
@@ -76,6 +79,7 @@ class ViewGeometry:
     foot_separation: float    # measured median, kept for diagnostics
     subject_min_h: float      # derived per-source box-height floor
     frames_measured: int
+    pairs_measured: int       # added by the §4 amendment: the gate counts pairs
     low_confidence: bool
 
 def analyze_view(frames: list[FeatureFrame]) -> ViewGeometry: ...
@@ -112,13 +116,36 @@ player (0.227 median) and the horizon strangers (0.055 median, 0.099 p90).
 Deriving it means it scales with camera height and lens rather than being tuned
 to one clip.
 
-**Degenerate cases.** Fewer than 50 frames carrying a near box → return
-`subject` with `low_confidence=True` and log a warning; a source where the far
-player is rarely seen *is* a subject-mode source, and the warning covers the
-other reading (a wrong quad, where nothing is detected and neither profile
-helps). No frames at all → `segment()` already returns `[]`. A degenerate
+**Confidence gate.** *(Amended 2026-08-20 during implementation — see the
+amendment note below.)* The classification is a median over **paired** frames,
+so the number of pairs is what decides whether it can be trusted. The near-box
+count only says whether the source has usable detections at all.
+
+1. No pairs at all → `subject`, `foot_separation = 0.0`. `low_confidence` is
+   true only if fewer than 50 frames carried a near box. A far player never
+   seen across a long source is the clearest possible subject signal, not a
+   weak reading; across a very short source we genuinely do not know.
+2. Fewer than 20 pairs (4 s of paired observation at 5 fps) → `subject`,
+   `low_confidence=True`. Too few paired samples for a median to mean anything.
+3. Otherwise → the median separation decides, `low_confidence=False`.
+
+A low-confidence result is logged as a warning from `params_for_frames`, so it
+fires for the detect job, the CLI and the API alike. The warning also covers
+the other reading of a sparse stream: a wrong court quad, where almost nothing
+is detected and neither profile can help.
+
+No frames at all → `segment()` already returns `[]`. A degenerate
 `median(near.h) == 0` floors `subject_min_h` to a small constant so the gate
 cannot open on every box.
+
+> **Amendment note.** As first written, this section gated on "fewer than 50
+> frames carrying a near box". That measures the wrong quantity: an 8-second
+> source with 40 frames, *every one* of them carrying both boxes at an
+> unambiguous 0.5 separation, was forced to `subject` with `low_confidence`
+> despite the geometry being about as clear as it gets. Forty paired samples is
+> ample for a median. The flaw surfaced when wiring the call sites (Task 4) —
+> a pre-existing CLI test caught it — and the gate was moved onto the pair
+> count rather than bending the test to fit.
 
 ## 5. Subject-mode scoring
 
@@ -154,6 +181,13 @@ reported exactly `far.v == 0`.
 lateral displacement is 0.0048 vs 0.0032 per 200 ms — a separation of only
 +0.10 at the best cut, because the player still walks around between points.
 Audio carries the discrimination; motion and the gate constrain it.
+
+> **SUPERSEDED 2026-08-20.** The premise of that last sentence is false. Audio
+> does not carry the discrimination: impacts fire at 0.62/s in a window where
+> nobody is playing on our court against 0.65/s during a confirmed rally, at
+> every prominence floor tested, and stereo localisation fails too. Subject mode
+> therefore has *neither* a strong signal nor a weak one — the weak motion term
+> is all that is left. See the validation document.
 
 ### Subject-mode defaults
 
@@ -203,6 +237,13 @@ Ground truth is audio impacts clustered with a <3 s gap: 566 detected hits,
 | additive presence | 0.45 | 1.5 | 67 | 8.8 s | 68% |
 | pair model, as it behaved before this work | 0.45 | 1.5 | 54 | 3.9 s | 22% |
 
+> **SUPERSEDED 2026-08-20.** The circularity flagged below turned out to be the
+> smaller problem. The "truth" row is not truth: clustering audio impacts measures
+> the *venue's* activity, because the detector fires at the same rate whether or
+> not anyone is playing on our court. Every number in this table is a fit against
+> that non-signal. **Do not re-fit against audio-impact clusters.** The 0.25
+> threshold that came out of it is retained only as a labelled placeholder.
+
 **This fit is partly circular** — audio drives both the score and the labels, so
 these numbers cannot be the last word. See §8.
 
@@ -221,11 +262,21 @@ these numbers cannot be the last word. See §8.
 - **Non-circular check:** extract ~6 detected intervals as clips and confirm by
   eye that they are rallies with sensible boundaries. Required before the
   subject-mode numbers in §7 are treated as validated.
+  **DONE 2026-08-20 — and it FAILED.** Two of six intervals were the operator
+  setting the camera down and walking back to stop recording, and confidence is
+  inverted (known-false 0.40/0.46 against known-true 0.36/0.39) so no threshold
+  separates them. This check did its job: it caught a model built on a phantom
+  before it shipped as working. Findings in
+  `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md`.
 
 ## 9. Out of scope
 
 - Recovering the opponent at ground level (§2 non-goals).
 - Any change to the audio detector. 566 hits at 28.9/min, ~9.6 per rally
   cluster, is a believable structure and is not implicated in this bug.
+  > **SUPERSEDED 2026-08-20.** "Believable structure" was pattern-matching, not
+  > measurement. The detector *is* implicated: it cannot tell our court from the
+  > neighbouring ones, in mono or in stereo, and that is now the single largest
+  > obstacle to segmenting ground-level footage. Scoping it out was wrong.
 - Storing the classification in the database. Recomputation is cheap and
   avoids a migration; revisit only if a manual override is wanted.

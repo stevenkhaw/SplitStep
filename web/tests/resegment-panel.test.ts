@@ -95,6 +95,116 @@ describe('ResegmentPanel', () => {
     el.dispatchEvent(new Event('input', { bubbles: true }))
   }
 
+  it('adopts the threshold the API reports instead of a hardcoded default', async () => {
+    // subject-mode profile: threshold lives on a different scale (0.25) than
+    // the old hardcoded pair-mode default (0.45) -- the slider must start
+    // where the resolved value actually is, not at a constant.
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.25, scores: [0.1, 0.9] })
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources: [source('src1', 1)], rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
+
+    // The first call must omit the threshold entirely -- that's how the UI
+    // asks the API to resolve the per-source profile default.
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined)
+    expect(slider().value).toBe('0.25')
+  })
+
+  it('resets the threshold to null and re-queries without one when the selected source changes', async () => {
+    // src1 resolves to a pair-mode default (0.45), src2 to a subject-mode
+    // default (0.25) -- exactly the mixed-profile session the review
+    // flagged: switching sources must re-ask the API for the *new*
+    // source's own default, not silently reapply the old one.
+    mockApi.scores.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'src1'
+          ? { step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] }
+          : { step_ms: 200, threshold: 0.25, scores: [0.2, 0.8] },
+      ),
+    )
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1), source('src2', 2)],
+        rallies: [rally()],
+        onresegmented: vi.fn(),
+      },
+    })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined))
+    flushSync()
+    expect(slider().value).toBe('0.45')
+
+    mockApi.scores.mockClear()
+    const select = target.querySelector('select') as HTMLSelectElement
+    select.value = 'src2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+
+    // The reset to null is synchronous -- the slider is disabled the
+    // instant the source changes, before the (mocked, async) response for
+    // src2 has had any chance to resolve.
+    expect(slider().disabled).toBe(true)
+    expect(mockApi.scores).toHaveBeenCalledWith('src2', undefined)
+
+    await vi.waitFor(() => expect(slider().value).toBe('0.25'))
+    expect(slider().disabled).toBe(false)
+  })
+
+  it('ignores a stale /scores response that resolves after switching to a different source', async () => {
+    // /scores' cost scales with features.jsonl's length, so responses do not
+    // land in request order: switch from a long source to a short one and
+    // the long one's (src1's) response routinely arrives *after* the short
+    // one's (src2's) -- this is the expected case, not a rare interleaving.
+    // Without the scoredSourceId guard, src1's late response would win the
+    // last write to `threshold` and hand the UI a pair-mode 0.45 for a
+    // subject-mode source, silently sendable to POST /resegment.
+    let resolveSrc1!: (v: { step_ms: number; threshold: number; scores: number[] }) => void
+    let resolveSrc2!: (v: { step_ms: number; threshold: number; scores: number[] }) => void
+    mockApi.scores.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) => {
+          if (id === 'src1') resolveSrc1 = resolve
+          else resolveSrc2 = resolve
+        }),
+    )
+
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1), source('src2', 2)],
+        rallies: [rally()],
+        onresegmented: vi.fn(),
+      },
+    })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined))
+
+    // Switch before src1's (slow) response has arrived.
+    const select = target.querySelector('select') as HTMLSelectElement
+    select.value = 'src2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src2', undefined))
+
+    // src2's (short-source) response lands first, as it routinely would.
+    resolveSrc2({ step_ms: 200, threshold: 0.25, scores: [0.2, 0.8] })
+    await vi.waitFor(() => expect(slider().value).toBe('0.25'))
+
+    // src1's stale response lands late, after the switch it no longer
+    // belongs to. It must not overwrite the src2 value now on screen.
+    resolveSrc1({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    await Promise.resolve()
+    await Promise.resolve()
+    flushSync()
+
+    expect(slider().value).toBe('0.25')
+  })
+
   it('debounces the threshold slider: a burst of input collapses into one scores call', async () => {
     vi.useFakeTimers()
     instance = mount(ResegmentPanel, {
@@ -137,6 +247,11 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    // The button is disabled until the initial /scores response resolves
+    // the threshold (see the null-window handling) -- a real user can't
+    // click it any sooner, and neither can this test.
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement
     button.click()
@@ -166,6 +281,8 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement
     button.click()
@@ -189,6 +306,8 @@ describe('ResegmentPanel', () => {
         onresegmented,
       },
     })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
     flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement

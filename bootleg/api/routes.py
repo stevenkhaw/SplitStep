@@ -28,7 +28,7 @@ from bootleg.db.sessions import (
 )
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
+from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
 from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
@@ -65,7 +65,7 @@ class ResegmentBody(BaseModel):
     # sail through as a valid float and blow up Starlette's JSON renderer
     # later. `nan >= 0.0` and `inf <= 1.0` are both False, so pydantic turns
     # every non-finite value into a clean 422 here instead.
-    threshold: float = Field(default=SegmentParams().threshold, ge=0.0, le=1.0)
+    threshold: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class PresetBody(BaseModel):
@@ -184,7 +184,8 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
     if not path.exists():
         raise HTTPException(status_code=409, detail="Source has not been detected yet")
 
-    intervals = segment(read_features(path), SegmentParams(threshold=body.threshold))
+    frames = read_features(path)
+    intervals = segment(frames, params_for_frames(frames, threshold=body.threshold))
     count = replace_rallies(conn, source["session_id"], source_id, intervals)
     # replace_rallies inserts every new rally with reviewed_at NULL and
     # carries starred/rejected across by overlap, but never reviewed_at --
@@ -202,7 +203,7 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
 
 @router.get("/api/sources/{source_id}/scores")
 def api_scores(source_id: str, request: Request,
-               threshold: float = Query(default=SegmentParams().threshold, ge=0.0, le=1.0)):
+               threshold: float | None = Query(default=None, ge=0.0, le=1.0)):
     conn = _conn(request)
     library = _library(request)
     source = get_source(conn, source_id)
@@ -214,11 +215,11 @@ def api_scores(source_id: str, request: Request,
         raise HTTPException(status_code=409, detail="Source has not been detected yet")
 
     frames = read_features(path)
-    params = SegmentParams(threshold=threshold)
+    params = params_for_frames(frames, threshold=threshold)
     step_ms = sample_interval_ms(frames)
     return {
         "step_ms": step_ms,
-        "threshold": threshold,
+        "threshold": params.threshold,
         "scores": [round(s, 4) for s in score_series(frames, params)],
     }
 

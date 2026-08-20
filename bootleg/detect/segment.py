@@ -1,7 +1,11 @@
+import logging
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from bootleg.detect.features import FeatureFrame, Player
+from bootleg.detect.viewpoint import Profile, ViewGeometry, analyze_view
+
+log = logging.getLogger(__name__)
 
 # Body-lengths/sec that counts as "fully moving". Measured, not guessed:
 # on the first real source the near player's speed runs p50=0.11, p75=0.25,
@@ -13,6 +17,31 @@ from bootleg.detect.features import FeatureFrame, Player
 # an audio impact ever cleared it, and every clip came out one hit long.
 MAX_SPEED = 0.7
 MAX_HIT_RATE = 2.0  # impacts in the trailing second that counts as "full"
+
+# PLACEHOLDER, not a validated default -- read
+# docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md before
+# touching this. 0.25 came from fitting against audio-impact clusters on the
+# one real ground-level source (59 clusters, median 8.0 s, 59% coverage over
+# the full 19.5-minute recording), which produced 61 intervals at median
+# 7.6 s, 63% coverage on that same source -- a close match that looked like
+# confirmation. (test_real_ground_footage_segments_into_rallies pins 16
+# intervals, median 7.0 s, on the 4-minute fixture slice in
+# tests/fixtures/ground_level_source01.jsonl -- a different, smaller corpus,
+# not a contradiction.)
+#
+# The validation task then frame-inspected six of those 61 clips and found
+# the fitting target itself was wrong: audio impacts fire at 0.62/s when
+# nobody is playing on our court versus 0.65/s during a confirmed rally --
+# the detector measures a busy multi-court venue, not this player.
+# Confidence came out inverted as a result: the two clips that were clearly
+# false (camera setup, camera teardown) scored 0.40 and 0.46, higher than
+# the two clips that were clearly true (a serve, a rally) at 0.36 and 0.39.
+# No threshold separates true from false on this footage. Subject mode ships
+# enabled anyway as a deliberate decision -- do not re-fit against
+# audio-impact clusters; any future refit needs footage labelled by
+# something other than the audio detector itself.
+SUBJECT_THRESHOLD = 0.25
+SUBJECT_CLOSE_GAP_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -44,8 +73,27 @@ class SegmentParams:
     pad_start_s: float = 0.3
     pad_end_s: float = 0.5
 
+    # Which scoring shape to use. "pair" is the original two-player model.
+    # "subject" is for a camera low enough that the far half of the court
+    # collapses onto the horizon, where the second-largest box is not the
+    # opponent but whoever is on the next court -- see
+    # docs/superpowers/specs/2026-08-20-camera-viewpoint-design.md.
+    profile: Profile = "pair"
+    # Minimum box height that counts as your player, in subject mode. Derived
+    # per source by analyze_view; 0.0 here because pair mode never reads it.
+    subject_min_h: float = 0.0
+
     @property
     def weight_total(self) -> float:
+        # Subject mode gates on presence instead of scoring it, so w_both is
+        # not part of the sum. This is why the two profiles' thresholds are
+        # not comparable numbers: 0.25 subject, 0.45 pair.
+        if self.profile == "subject":
+            return self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
+        # Not `base + self.w_both` reusing the sum above: float addition is
+        # not associative, so re-associating this sum would shift every
+        # pair-mode score by an ULP for no benefit. This term order matches
+        # the original pair-mode expression bit-for-bit.
         return self.w_both + self.w_speed + self.w_lateral + self.w_hits + self.w_regularity
 
 
@@ -83,7 +131,40 @@ def _lateral_fraction(near: Player | None, prev_near: Player | None) -> float:
     return dx / total
 
 
+def _subject_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
+    """Score a frame where only your own player is reliably visible.
+
+    Presence is a gate, not a term. Your player is on court 83% of the time on
+    real footage -- including between points, walking to the baseline, picking
+    up balls -- so an additive presence term handed out a third of the score
+    for free on nearly every frame. As a gate it earns nothing and the audio
+    and motion terms have to carry the frame on their own.
+
+    The gate also replaces the `if not both` guard that keeps audio from
+    segmenting an empty court: a box has to be your player's size before any
+    impact counts, and people on adjacent courts sit at the horizon at roughly
+    a quarter of that height.
+    """
+    if f.near is None or f.near.h < p.subject_min_h:
+        return 0.0
+
+    speed = _clamp01(f.near.v / MAX_SPEED)
+    hits = _clamp01(f.hits / MAX_HIT_RATE)
+    reg = _clamp01(f.hit_reg)
+
+    score = (
+        p.w_speed * speed
+        + p.w_lateral * lateral
+        + p.w_hits * hits
+        + p.w_regularity * reg
+    )
+    return _clamp01(score / p.weight_total)
+
+
 def _raw_score(f: FeatureFrame, p: SegmentParams, lateral: float) -> float:
+    if p.profile == "subject":
+        return _subject_score(f, p, lateral)
+
     both = 1.0 if (f.near is not None and f.far is not None) else 0.0
 
     if both:
@@ -193,3 +274,64 @@ def segment(frames: list[FeatureFrame], params: SegmentParams) -> list[Interval]
             confidence=round(confidence, 4),
         ))
     return out
+
+
+def params_for_frames(
+    frames: list[FeatureFrame], *, threshold: float | None = None
+) -> SegmentParams:
+    """Build the right SegmentParams for a source, from the source itself.
+
+    Every caller that segments -- the detect handler, the CLI, both API routes
+    -- goes through here, for the same reason setup.py::queue_setup exists:
+    HTTP and terminal must not be able to drift on which model a source gets.
+
+    `threshold=None` means "use the profile's default", which is what the UI
+    wants on first load; the two profiles' thresholds are on different scales
+    and hardcoding either one in a caller is a bug.
+    """
+    view: ViewGeometry = analyze_view(frames)
+    if view.low_confidence:
+        # analyze_view sets this for two independent reasons, and only the
+        # two counts it returns tell them apart: too few frames carried a
+        # near-player box to say a far player is genuinely absent
+        # (frames_measured under MIN_FRAMES_FOR_CONFIDENCE), or a far player
+        # did show up but too rarely for the paired-frame median to be
+        # trusted (pairs_measured under MIN_PAIRS_FOR_CONFIDENCE, which can
+        # fire even with frames_measured well past its own floor). Either
+        # way analyze_view assumed subject mode as the safe default, and
+        # either way it can also mean a wrong court quad: with the play
+        # region misplaced, near/far boxes go missing for the same reason,
+        # so a source landing here is worth a human glance at its preset,
+        # not just a shrug that it happens to be ground-level footage.
+        log.warning(
+            "low-confidence viewpoint classification (%d frames carried a "
+            "near-player box, %d of those were paired with a far box); "
+            "assuming subject mode -- check the source's court quad if it "
+            "is not actually ground-level footage",
+            view.frames_measured,
+            view.pairs_measured,
+        )
+    if view.profile == "subject":
+        params = SegmentParams(
+            profile="subject",
+            subject_min_h=view.subject_min_h,
+            threshold=SUBJECT_THRESHOLD,
+            close_gap_s=SUBJECT_CLOSE_GAP_S,
+        )
+    else:
+        params = SegmentParams()
+    # Profile choice changes segment() output more than any weight does, and
+    # it is picked per-source from footage the operator never looks at
+    # directly -- so a detect job's log needs to say which model it used and
+    # why, not just that it ran. foot_separation is the number the pair/
+    # subject decision turns on; subject_min_h is the derived gate that only
+    # matters when the decision comes out "subject".
+    log.info(
+        "segmenting with profile=%s foot_separation=%.4f subject_min_h=%.4f",
+        params.profile,
+        view.foot_separation,
+        params.subject_min_h,
+    )
+    if threshold is not None:
+        params = replace(params, threshold=threshold)
+    return params

@@ -30,8 +30,9 @@ export const api = {
 
   resegment: (sourceId: string, threshold: number) =>
     post(`/api/sources/${sourceId}/resegment`, { threshold }),
-  scores: (sourceId: string, threshold: number) =>
-    req<ScoreSeries>(`/api/sources/${sourceId}/scores?threshold=${threshold}`),
+  scores: (sourceId: string, threshold?: number) =>
+    req<ScoreSeries>(`/api/sources/${sourceId}/scores`
+      + (threshold === undefined ? '' : `?threshold=${threshold}`)),
 
   listPresets: () => req<Preset[]>('/api/court_presets'),
   createPreset: (name: string, points: [number, number][]) =>

@@ -23,7 +23,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.audio import detect_hits, extract_pcm, hits_to_grid
 from bootleg.detect.features import read_features, write_features
 from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import SegmentParams, segment
+from bootleg.detect.segment import params_for_frames, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler
 from bootleg.media.files import find_original
@@ -301,7 +301,7 @@ def handle_detect(library: Library, payload: dict) -> None:
         frames = build_features(boxes, quad, grid, STEP_MS)
         write_features(features_path, frames)
 
-    intervals = segment(frames, SegmentParams())
+    intervals = segment(frames, params_for_frames(frames))
     replace_rallies(conn, source["session_id"], source["id"], intervals)
 
     set_source_status(conn, source["id"], "ready")

@@ -10,6 +10,7 @@ from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
     create_session,
+    find_or_create_session_for_date,
     get_source,
     list_sessions,
     list_sources,
@@ -19,7 +20,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
-from bootleg.jobs.handlers import handle_build_proxy, handle_detect, handle_ingest
+from bootleg.jobs.handlers import HANDLERS, handle_build_proxy, handle_detect, handle_ingest
 from bootleg.media.probe import ProbeError, probe
 from bootleg.watcher import scan_inbox
 
@@ -977,3 +978,23 @@ def test_played_on_falls_back_to_the_files_local_mtime(tmp_path):
     os.utime(f, (when, when))
 
     assert _played_on(None, f) == "2026-08-18"
+
+
+def test_detect_uses_subject_mode_on_ground_level_features(
+    library, conn, ground_features
+):
+    """The detect handler must pick the profile from the features, not assume
+    pair. Wired wrong, a ground-level source silently gets the two-player
+    model and every clip comes out one hit long again.
+    """
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T19:00:00Z", duration_ms=240_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_2373.MOV",
+    )
+    write_features(library.source_dir(session_id, idx) / "features.jsonl",
+                   ground_features)
+    HANDLERS["detect"](library, {"source_id": source_id, "reuse_features": True})
+
+    rallies = list_rallies(conn, session_id)
+    assert len(rallies) == 16

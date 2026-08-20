@@ -28,11 +28,6 @@
 
   const ZOOM_SPAN_MS = 40000
   const SCORE_DEBOUNCE_MS = 150
-  // Mirrors SegmentParams.threshold in bootleg/detect/segment.py -- the
-  // slider must start where a fresh detect run already landed, or the
-  // first nudge silently resegments at a different value than the
-  // rallies on screen were cut at.
-  const DEFAULT_THRESHOLD = 0.45
 
   let currentId = $state(untrack(() => rallyId))
   let rallies = $state<Rally[]>(untrack(() => [...(initialRallies ?? detail.rallies)]))
@@ -40,7 +35,11 @@
   let zoomBand = $state<ZoomBand>()
   let scores = $state<number[]>([])
   let scoreStepMs = $state(200)
-  let threshold = $state(DEFAULT_THRESHOLD)
+  // Null until the first /scores response supplies it. The two camera
+  // profiles put the threshold on different scales (0.25 subject, 0.45 pair),
+  // so a constant here is wrong for half of all sources -- the API resolves
+  // it per source and this is where that answer lands.
+  let threshold = $state<number | null>(null)
 
   // Falls back to the first rally when `currentId` no longer exists in
   // `rallies` -- Session.svelte remounts this component fresh (via `{#key}`)
@@ -87,25 +86,60 @@
     frozenWindow = null
   }
 
-  function loadScores(sourceId: string, th: number) {
+  function loadScores(sourceId: string, th: number | null) {
     api
-      .scores(sourceId, th)
+      .scores(sourceId, th ?? undefined)
       .then((s) => {
+        // /scores' cost scales with features.jsonl's length, so responses
+        // are not guaranteed to land in request order: switch (via
+        // OverviewBand) from a long source to a short one and the long
+        // one's response routinely arrives second. scoredSourceId is
+        // reassigned synchronously before this call goes out (see the
+        // $effect below), so by the time any response lands it names
+        // whichever source is *currently* selected -- a mismatch means a
+        // later switch already superseded this one.
+        if (sourceId !== scoredSourceId) return
         scores = s.scores
         scoreStepMs = s.step_ms
+        // Only adopt the server's echoed threshold when we asked it to
+        // resolve the profile default (th === null). Writing it back
+        // unconditionally -- including for an explicit slider value we
+        // already applied locally in onThresholdInput -- is itself a race:
+        // a debounced response for an in-flight drag can land after the
+        // user has moved the slider further and snap the thumb backward.
+        if (th === null) threshold = s.threshold
       })
       .catch(() => {
+        if (sourceId !== scoredSourceId) return
         scores = []
       })
   }
+
+  // Plain bookkeeping, not $state: reading/writing it must never itself
+  // create or satisfy a reactive dependency. It exists only so the effect
+  // below can tell a genuine source switch (picking a rally that belongs to
+  // a different source) apart from `source` merely getting a new object
+  // identity for the *same* id, which comparing derived-`source` reference
+  // identity alone would conflate with a switch.
+  let scoredSourceId: string | undefined
 
   // The scores endpoint costs real time (~83ms at one-hour scale: parsing
   // features.jsonl + scoring), so it is fetched on mount and whenever the
   // rally's source changes -- never per-render. `threshold` is read
   // untracked here so a slider drag cannot retrigger this effect; threshold
   // changes go through the separately debounced path below instead.
+  //
+  // A genuine switch to a different source resets `threshold` to null
+  // first, so the call below omits it and asks the API to resolve *that*
+  // source's own profile default -- first call is per source, not just
+  // once per mount. Carrying over the previous source's numeric value here
+  // would be sent as an explicit override, which the server just echoes
+  // back (see loadScores' comment above), silently wrong-scale whenever
+  // the two sources sit on different camera-view profiles.
   $effect(() => {
     if (!source) return
+    if (source.id !== scoredSourceId) threshold = null
+    scoredSourceId = source.id
     loadScores(source.id, untrack(() => threshold))
   })
 
@@ -259,13 +293,15 @@
         writePlayhead(ms)
       }}
     />
-    <ScoreCurve
-      {scores}
-      {threshold}
-      stepMs={scoreStepMs}
-      windowStartMs={effectiveWin.startMs}
-      windowEndMs={effectiveWin.endMs}
-    />
+    {#if threshold !== null}
+      <ScoreCurve
+        {scores}
+        {threshold}
+        stepMs={scoreStepMs}
+        windowStartMs={effectiveWin.startMs}
+        windowEndMs={effectiveWin.endMs}
+      />
+    {/if}
 
     <div class="flex items-center gap-2 pt-1">
       <span class="text-[11px] text-neutral-500">preview threshold</span>
@@ -274,12 +310,15 @@
         min="0.05"
         max="0.95"
         step="0.01"
-        value={threshold}
+        value={threshold ?? 0.05}
         oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
-        class="flex-1"
+        disabled={threshold === null}
+        class="flex-1 disabled:opacity-40"
         aria-label="preview threshold"
       />
-      <span class="w-10 font-mono text-[11px] text-neutral-500">{threshold.toFixed(2)}</span>
+      <span class="w-10 font-mono text-[11px] text-neutral-500">
+        {threshold === null ? '…' : threshold.toFixed(2)}
+      </span>
     </div>
 
     <p class="font-mono text-[11px] text-neutral-500">

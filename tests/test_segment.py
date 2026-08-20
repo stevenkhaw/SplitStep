@@ -1,9 +1,16 @@
 import itertools
+import logging
+import statistics
 
 import pytest
 
 from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.segment import SegmentParams, score_series, segment
+from bootleg.detect.segment import (
+    SegmentParams,
+    params_for_frames,
+    score_series,
+    segment,
+)
 
 SAMPLE_MS = 200  # 5 fps
 
@@ -292,3 +299,150 @@ def test_far_player_dropout_does_not_split_a_rally(params):
     """
     stream = rally_frames(60, hit_every=7, gap_at=range(25, 34))
     assert len(segment(stream, params)) == 1
+
+
+# -- Subject mode ----------------------------------------------------------
+
+SUBJECT = SegmentParams(profile="subject", subject_min_h=0.1116, threshold=0.25,
+                        close_gap_s=2.0)
+
+
+def _subject_frames(n: int, *, near_h: float = 0.23, hits_every: int = 0,
+                    moving: bool = True) -> list[FeatureFrame]:
+    """Ground-level frames: one big near box, plus a horizon-sized stranger."""
+    out = []
+    for i in range(n):
+        cx = 0.5 + (i % 2) * (0.010 if moving else 0.0)
+        out.append(FeatureFrame(
+            i * SAMPLE_MS, 2,
+            Player(cx, 0.845, near_h, 0.25 if moving else 0.0),
+            Player(0.7, 0.840, 0.055, 0.1),     # stranger on the next court
+            hits=1 if (hits_every and i % hits_every == 0) else 0,
+            hit_reg=0.25))
+    return out
+
+
+def test_subject_mode_scores_a_rally_above_threshold():
+    scores = score_series(_subject_frames(40, hits_every=7), SUBJECT)
+    assert max(scores) >= SUBJECT.threshold
+
+
+def test_subject_mode_gate_closes_when_only_strangers_are_present():
+    """The adjacent-court guard. Horizon-sized boxes plus loud, regular audio
+    must score exactly 0 -- not merely below threshold -- because the gate
+    never opens. This is the mutation-effective form: delete the gate and the
+    audio terms alone carry these frames straight over any threshold.
+    """
+    stream = [
+        FeatureFrame(i * SAMPLE_MS, 3,
+                     Player(0.7, 0.840, 0.055, 0.4),   # too small to be yours
+                     Player(0.3, 0.841, 0.050, 0.4),
+                     hits=2, hit_reg=1.0)
+        for i in range(60)
+    ]
+    assert max(score_series(stream, SUBJECT)) == 0.0
+    assert segment(stream, SUBJECT) == []
+
+
+def test_subject_mode_gate_is_inclusive_at_the_boundary():
+    """near.h exactly equal to subject_min_h must still open the gate.
+
+    The boundary is what separates "your player" from an adjacent-court
+    figure, so which side of it is inclusive (`>=`, not `>`) is a real
+    decision and not an accident -- pin it directly instead of only testing
+    values comfortably on one side.
+    """
+    stream = _subject_frames(40, hits_every=7, near_h=SUBJECT.subject_min_h)
+    assert max(score_series(stream, SUBJECT)) > 0.0
+
+
+def test_subject_mode_ignores_the_far_box_entirely():
+    """Speed comes from near.v alone. A far box reporting v=0 -- what every
+    re-acquisition after a gap reports, 22% of far boxes on real footage --
+    must not drag the score down, which is exactly what min(near.v, far.v)
+    did before."""
+    with_far = score_series(_subject_frames(40, hits_every=7), SUBJECT)
+    without = [FeatureFrame(f.t_ms, 1, f.near, None, f.hits, f.hit_reg)
+               for f in _subject_frames(40, hits_every=7)]
+    assert score_series(without, SUBJECT) == with_far
+
+
+def test_subject_mode_presence_alone_is_not_enough():
+    """Standing on court between points: gate open, but nothing moving and no
+    audio. As an additive term presence was worth 0.303 of the score on 83% of
+    real frames; as a gate it is worth nothing."""
+    idle = _subject_frames(60, hits_every=0, moving=False)
+    assert max(score_series(idle, SUBJECT)) < SUBJECT.threshold
+    assert segment(idle, SUBJECT) == []
+
+
+def test_params_for_frames_picks_subject_on_real_footage(ground_features):
+    params = params_for_frames(ground_features)
+    assert params.profile == "subject"
+    assert params.threshold == 0.25
+    # Not asserting close_gap_s here: both profiles currently default to
+    # 2.0, so this would pass even if SUBJECT_CLOSE_GAP_S were dropped from
+    # the subject branch entirely. threshold is the field that actually
+    # distinguishes the two profiles' params.
+    assert params.subject_min_h == pytest.approx(0.1116, abs=0.0005)
+
+
+def test_params_for_frames_picks_pair_on_separated_players():
+    params = params_for_frames(frames("A" * 200))
+    assert params.profile == "pair"
+    assert params.threshold == 0.45
+
+
+def test_params_for_frames_honours_an_explicit_threshold(ground_features):
+    """The re-segment slider overrides the profile default but not the profile."""
+    params = params_for_frames(ground_features, threshold=0.4)
+    assert params.threshold == 0.4
+    assert params.profile == "subject"
+
+
+def test_params_for_frames_warns_on_low_confidence_classification(caplog):
+    """Fewer than 50 frames with a near box means the profile guess is a
+    coin flip, not a measurement -- see analyze_view's MIN_FRAMES_FOR_CONFIDENCE.
+    That has to reach a human somehow, since the caller (detect handler, CLI,
+    API) has no other signal that the source might need a look, e.g. a wrong
+    court quad silently starving it of near-player boxes."""
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("O" * 10))
+    assert any("low-confidence" in r.message for r in caplog.records)
+
+
+def test_params_for_frames_warns_on_pair_scarce_low_confidence(caplog):
+    """low_confidence has a second, independent cause: pairs present but too
+    few to trust their median (analyze_view's MIN_PAIRS_FOR_CONFIDENCE), which
+    can fire with frames_measured well past MIN_FRAMES_FOR_CONFIDENCE -- the
+    branch the frames-scarce test above does not exercise. 100 'O' frames
+    plus 15 'A' frames put frames_measured at 115 (comfortably over the
+    50-frame floor) but pairs_measured at 15 (under the 20-pair floor), so a
+    warning that only ever named frames_measured would misdescribe this case
+    as near-box scarcity when the real cause is pair scarcity."""
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("O" * 100 + "A" * 15))
+    assert any("low-confidence" in r.message for r in caplog.records)
+    assert any("15 of those were paired" in r.message for r in caplog.records)
+
+
+def test_params_for_frames_does_not_warn_on_a_confident_classification(caplog):
+    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+        params_for_frames(frames("A" * 200))
+    assert caplog.records == []
+
+
+def test_real_ground_footage_segments_into_rallies(ground_features):
+    """End to end on the golden fixture. Regression pin, not a correctness
+    check: this asserts subject mode keeps producing 16 intervals at a 7.0 s
+    median on this fixture, distinct from the pair model's wrong 3.9 s. The
+    8.0 s figure once cited alongside these numbers as "the true median" was
+    read off audio-impact clusters; the validation task (see
+    docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md) found
+    those clusters track the venue's ambient noise rather than this player's
+    rallies, so landing near 8.0 s is not evidence of correctness -- only a
+    changed 16/7.0 s here is a signal worth investigating."""
+    intervals = segment(ground_features, params_for_frames(ground_features))
+    durations = sorted((iv.end_ms - iv.start_ms) / 1000 for iv in intervals)
+    assert len(intervals) == 16
+    assert statistics.median(durations) == pytest.approx(7.0, abs=0.5)
