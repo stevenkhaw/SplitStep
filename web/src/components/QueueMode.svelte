@@ -1,17 +1,23 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { isEditableTarget } from '../lib/keyboard'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
   import { createToaster } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { QueueAction } from '../lib/queue'
-  import type { SessionDetail, Source } from '../lib/types'
+  import type { Rally, SessionDetail, Source } from '../lib/types'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
     detail: SessionDetail
-    onopen_timeline: (rallyId: string) => void
+    /** `liveRallies` is this session's live-merged snapshot (see
+     * QueueController.liveSnapshot) -- passed along so TimelineMode's
+     * OverviewBand can color a rally starred/rejected earlier in this queue
+     * session correctly, instead of seeding from `detail.rallies`' stale
+     * server-snapshot flags. */
+    onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
   }
 
   let { detail, onopen_timeline }: Props = $props()
@@ -124,6 +130,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    if (isEditableTarget(e.target)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
     switch (e.key) {
       case 's':
@@ -167,7 +174,7 @@
         break
       case 't':
       case 'T':
-        if (current) onopen_timeline(current.id)
+        if (current) onopen_timeline(current.id, queue.liveSnapshot(detail.rallies))
         break
     }
   }
@@ -175,11 +182,24 @@
 
 <svelte:window onkeydown={onKey} />
 
-{#if !current}
+{#if stats.total === 0}
+  <!-- Finding 5: zero rallies and "finished reviewing" are otherwise
+       indistinguishable (`new QueueController([]).current` is undefined
+       either way). Naming the actual cause here -- nothing detected yet, or
+       the threshold produced none -- points at what to do next instead of
+       misreporting a session that was never reviewed as reviewed. -->
+  <section class="rounded-lg border border-neutral-800 p-8 text-center">
+    <h2 class="text-lg font-semibold">No rallies to review</h2>
+    <p class="mt-2 font-mono text-sm text-neutral-400">
+      Nothing has been detected for this session yet, or the current threshold produced zero
+      rallies. Re-segment at a lower threshold below, or wait for detection to finish.
+    </p>
+  </section>
+{:else if !current}
   <section class="rounded-lg border border-neutral-800 p-8 text-center">
     <h2 class="text-lg font-semibold">Session reviewed</h2>
     <p class="mt-2 font-mono text-sm text-neutral-400">
-      {queue.total} seen · ★{queue.starredCount} starred · ✕{queue.rejectedCount} rejected
+      {stats.total} seen · ★{stats.starredCount} starred · ✕{stats.rejectedCount} rejected
     </p>
     <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
          reel" here. Both need clip export, which is Plan 3. -->
