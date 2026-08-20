@@ -64,6 +64,13 @@ bv detect <source_id> --now
 
 ## Scoring function, for interpreting results
 
+There are two scoring profiles now, chosen automatically per source by
+`detect/viewpoint.py::analyze_view` from the median vertical gap between the two
+largest person boxes. Build params with `params_for_frames()` — never
+`SegmentParams()` directly, or you silently get pair mode.
+
+**`pair`** — camera high enough that the two players sit at visibly different depths:
+
 ```
 score(t) = w_both·both_present
          + w_speed·min(near_v, far_v)        both players moving, not one retrieving a ball
@@ -73,18 +80,33 @@ score(t) = w_both·both_present
          - w_outside·either_outside_region
 ```
 
-Defaults: `w_both=1.0, w_speed=0.9, w_lateral=0.3, w_hits=0.7, w_reg=0.4, w_outside=1.2, threshold=0.45`.
+`w_both=1.0, w_speed=0.9, w_lateral=0.3, w_hits=0.7, w_reg=0.4, w_outside=1.2,
+threshold=0.45, close_gap_s=2.0`. **Never validated against real footage** — no
+two-player source exists yet.
 
-Post-processing: rolling median (~1 s), threshold, close gaps < 2.0 s, drop segments < 1.5 s (kept low deliberately — a 3 s floor discarded aces), pad −0.3 s / +0.5 s.
+**`subject`** — camera low enough that the far half of the court collapses onto the
+horizon. Presence is a gate rather than a term:
 
-A synthetic active-rally frame scores **0.7909** against the 0.45 threshold — but that
-number is close to meaningless, because the fixtures hand every player `v=2.0`, roughly
-8x anything measured on real footage. On the first real source
-(`sessions/2026-08-18/sources/01`, 19.5 min) the median *smoothed* score for a frame with
-both players visible and no impact in the trailing second is **0.4119**, and only **43%**
-of such frames clear the threshold. `MAX_SPEED` and `threshold` were recalibrated against
-that source on 2026-08-20; the score still separates rally from non-rally far more weakly
-than the synthetic figure suggests. See the comments in `detect/segment.py`.
+```
+score(t) = 0                                             if no box >= subject_min_h
+         = (w_speed·near_v + w_lateral·lateral
+            + w_hits·hit_rate + w_reg·hit_regularity)
+           / (w_speed + w_lateral + w_hits + w_reg)      otherwise
+```
+
+`threshold=0.25, close_gap_s=2.0`, `subject_min_h = 0.5 × median(near.h)`. The two
+thresholds are **not comparable** — subject's denominator drops `w_both`.
+
+**The 0.25 is a placeholder, not a fitted value.** See "Known weakness" below.
+
+Post-processing (both profiles): rolling median (~1 s), threshold, close gaps < 2.0 s,
+drop segments < 1.5 s (kept low deliberately — a 3 s floor discarded aces),
+pad −0.3 s / +0.5 s.
+
+Ignore synthetic-fixture scores when reasoning about any of this. The fixtures hand every
+player `v=2.0`, roughly 8x anything measured on real footage, and calibrating against them
+is what produced the one-hit-per-clip bug. Calibrate against
+`tests/fixtures/ground_level_source01.jsonl`, which is a real slice.
 
 ## Likely failure modes and what they mean
 
@@ -96,22 +118,49 @@ than the synthetic figure suggests. See the comments in `detect/segment.py`.
   ~0.01 of its possible 0.27 and only the ~1 s audio-impact window ever cleared the
   threshold. Before touching weights, measure `min(near.v, far.v)` against `MAX_SPEED` on
   the actual footage.
-- **Almost nothing detected** → check the play region first; if the quad is wrong, `n_in_region` is 0 and nothing can score.
+- **Almost nothing detected** → check the play region first; if the quad is wrong, `n_in_region` is 0 and nothing can score. In `subject` mode the quad does nothing at all — `w_outside` never fires there, the box-height gate replaces it.
+- **A ground-level source classified as `pair`** → the court quad is probably admitting adjacent courts, which inflates the measured foot separation. Check `analyze_view(frames)` directly.
+- **Camera setup or teardown detected as a rally** → known and unfixed in `subject` mode. See "Known weakness" below.
 - **Warmup detected as rallies** → that's intended. A rally is defined as continuous hitting; warmup counts.
 
-## Known weakness: far-player dropout
+## Known weakness: `subject` mode is unvalidated and known to be wrong
 
-The single biggest source of score noise is not the weights. On the first real source YOLO
-finds a near player but no far one on **38%** of sampled frames, and `both` going false
-zeroes the score outright *and* fires `w_outside`. Worse, when the far player is
-re-acquired, `_to_player` sees `prev is None` and reports `v=0`, so `min(near.v, far.v)`
-collapses to 0 for that frame regardless of how fast either player is moving — 22% of
-frames that do have a far player report exactly `far.v == 0`.
+**Read `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before you tune
+anything here.** An earlier version of this file blamed a "far-player dropout" — YOLO
+losing the far player on 38% of frames. That diagnosis was wrong. Those frames were not
+dropouts: at a camera a foot off the ground the "far player" was **people on adjacent
+courts**, and `split_near_far` was electing whichever stranger happened to be
+second-largest.
 
-This is why the 2026-08-20 retune leaned on `close_gap_s` as much as on `MAX_SPEED`: the
-gaps are being bridged rather than scored correctly. Fixing the dropout (tracker, box
-persistence across a frame or two, or carrying the last known far position) would do more
-for segmentation quality than any further weight tuning.
+Six detected intervals from the one real source were inspected frame by frame. Two are
+unambiguous false positives — the operator setting the camera down, and walking back to
+stop recording. Two are real. Two could not be settled from stills. Worse, **confidence is
+inverted**: the known-false clips score 0.40 and 0.46, the known-true ones 0.36 and 0.39,
+so no threshold separates them.
+
+The cause is that neither of `subject` mode's two inputs carries signal on this footage:
+
+- **Audio measures the venue, not the player.** Impacts fire at 0.62/s during a window
+  where nobody is playing on our court, against 0.65/s during a confirmed rally — the same
+  to within noise, at every prominence floor tested. Stereo does not help either; both
+  windows localise to a median GCC-PHAT lag of 1 sample, because the phone's mics are far
+  too close together to resolve sources at court distances.
+- **Near-player motion barely separates.** In-rally vs between-point median lateral
+  displacement is 0.0048 against 0.0032 per 200 ms. The player walks, retrieves balls and
+  repositions between points, and that looks like playing.
+
+`subject` mode ships enabled anyway, because on this footage it still beats the
+alternative: `pair` mode produced 3.9 s one-hit clips at 22% coverage while scoring
+strangers as the opponent. This codebase is recall-biased — rejecting a false rally is one
+keystroke — so over-inclusion is the cheaper error. That is a judgement call, not a
+validated result.
+
+**What would actually fix it:** raise the camera. A fence-mounted phone puts the two
+players at genuinely different depths, which is the assumption `pair` mode is built on and
+the only configuration with a real signal to work with. `analyze_view` will detect the
+change and switch profiles on its own. Tuning weights or thresholds against ground-level
+footage will not help, and re-fitting against audio clusters actively misleads — that
+ground truth is the venue's activity, not yours.
 
 ## Diagnostics
 
