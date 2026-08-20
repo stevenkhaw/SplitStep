@@ -33,6 +33,7 @@ from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError, rotation_filter
+from bootleg.setup import queue_setup
 
 from .media import range_response
 
@@ -86,6 +87,11 @@ class PresetCreateBody(BaseModel):
             if not all(0.0 <= c <= 1.0 for c in point):
                 raise ValueError("points are normalized and must be within 0-1")
         return v
+
+
+class SetupBody(BaseModel):
+    rotation_deg: int
+    preset_id: str
 
 
 def _conn(request: Request) -> sqlite3.Connection:
@@ -226,6 +232,33 @@ def api_set_preset(source_id: str, body: PresetBody, request: Request):
         raise HTTPException(status_code=404, detail="Preset not found")
     set_source_preset(conn, source_id, body.preset_id)
     return {"ok": True}
+
+
+@router.get("/api/sources/{source_id}")
+def api_get_source(source_id: str, request: Request):
+    source = get_source(_conn(request), source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return dict(source)
+
+
+@router.post("/api/sources/{source_id}/setup")
+def api_setup(source_id: str, body: SetupBody, request: Request):
+    """Apply a wizard decision: rotation, play region, then rebuild.
+
+    Errors map by kind rather than by message: a bad angle is the caller's
+    malformed input (400), a missing row is a 404, and a source with a job
+    already running is a conflict the caller can retry (409).
+    """
+    try:
+        job_id = queue_setup(_conn(request), source_id, body.rotation_deg, body.preset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"job_id": job_id}
 
 
 @router.get("/api/jobs")

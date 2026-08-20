@@ -417,3 +417,58 @@ def test_preview_rotation_reaches_the_pixels(client, registered_source, tmp_path
     assert w0 > h0
     assert h90 > w90
     assert w0 / h0 == pytest.approx(h90 / w90, rel=0.02)
+
+
+@pytest.fixture
+def a_preset(conn):
+    quad = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
+    return create_preset(conn, "test_court", quad)
+
+
+def test_get_source_returns_the_row(client, registered_source):
+    r = client.get(f"/api/sources/{registered_source.id}")
+    assert r.status_code == 200
+    assert r.json()["status"] == "needs_setup"
+    assert r.json()["rotation_deg"] in (0, 90, 180, 270)
+
+
+def test_get_source_404s_for_an_unknown_id(client):
+    assert client.get("/api/sources/nope").status_code == 404
+
+
+def test_setup_stores_both_and_queues_a_build(client, registered_source, a_preset):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 90, "preset_id": a_preset},
+    )
+    assert r.status_code == 200
+    assert r.json()["job_id"]
+    assert client.get(f"/api/sources/{registered_source.id}").json()["rotation_deg"] == 90
+
+
+def test_setup_rejects_a_non_right_angle(client, registered_source, a_preset):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 45, "preset_id": a_preset},
+    )
+    assert r.status_code == 400
+
+
+def test_setup_404s_on_an_unknown_preset(client, registered_source):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": "nope"},
+    )
+    assert r.status_code == 404
+
+
+def test_setup_409s_while_a_job_is_running(client, registered_source, a_preset, conn):
+    conn.execute(
+        "UPDATE sources SET status='detecting' WHERE id=?", (registered_source.id,)
+    )
+    conn.commit()
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": a_preset},
+    )
+    assert r.status_code == 409
