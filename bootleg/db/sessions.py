@@ -2,9 +2,19 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
+from bootleg.media.transcode import rotation_filter
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _check_rotation(rotation_deg: int) -> int:
+    # rotation_filter is the single source of truth for what is legal; a
+    # CHECK constraint would surface a bad value as an opaque IntegrityError
+    # from three layers down instead of a message naming the four options.
+    rotation_filter(rotation_deg)
+    return rotation_deg
 
 
 def create_session(conn: sqlite3.Connection, session_id: str,
@@ -38,6 +48,7 @@ def add_source(
     height: int,
     fps: float,
     original_name: str | None,
+    rotation_deg: int = 0,
 ) -> tuple[str, int]:
     row = conn.execute(
         "SELECT COALESCE(MAX(idx),0) AS max_idx,"
@@ -50,9 +61,9 @@ def add_source(
 
     conn.execute(
         "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
-        "width,height,fps,original_name,status) VALUES (?,?,?,?,?,?,?,?,?,?,'ingesting')",
+        "width,height,fps,original_name,rotation_deg,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ingesting')",
         (source_id, session_id, idx, recorded_at, offset_ms, duration_ms,
-         width, height, fps, original_name),
+         width, height, fps, original_name, _check_rotation(rotation_deg)),
     )
     conn.commit()
     return source_id, idx
@@ -157,5 +168,13 @@ def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) 
     """
     conn.execute(
         "UPDATE sources SET court_preset_id = ? WHERE id = ?", (preset_id, source_id)
+    )
+    conn.commit()
+
+
+def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: int) -> None:
+    conn.execute(
+        "UPDATE sources SET rotation_deg=? WHERE id=?",
+        (_check_rotation(rotation_deg), source_id),
     )
     conn.commit()
