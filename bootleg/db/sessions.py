@@ -220,3 +220,19 @@ def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: 
         (_check_rotation(rotation_deg), source_id),
     )
     conn.commit()
+
+
+def set_source_setup(
+    conn: sqlite3.Connection, source_id: str, rotation_deg: int, preset_id: str
+) -> None:
+    """Update rotation and preset in a single write, validating rotation first.
+
+    If validation fails, no columns are written. If the write succeeds but a
+    caller later fails to enqueue the job, the source stays updated: re-running
+    setup detects and recovers that window (the job is idempotent).
+    """
+    conn.execute(
+        "UPDATE sources SET rotation_deg = ?, court_preset_id = ? WHERE id = ?",
+        (_check_rotation(rotation_deg), preset_id, source_id),
+    )
+    conn.commit()

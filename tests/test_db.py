@@ -312,3 +312,41 @@ def test_set_source_rotation_rejects_a_non_right_angle(tmp_path):
     )
     with pytest.raises(ValueError, match="0, 90, 180 or 270"):
         set_source_rotation(conn, source_id, 45)
+
+
+def test_set_source_setup_writes_both_columns(tmp_path):
+    from bootleg.db.sessions import set_source_setup
+    conn = connect(tmp_path / "l.db")
+    migrate(conn)
+    session_id = find_or_create_session_for_date(conn, "2026-08-20")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-20", duration_ms=1000,
+        width=1920, height=1080, fps=30.0, original_name="a.mov",
+    )
+    preset_id = create_preset(conn, "court", SAMPLE_QUAD)
+
+    set_source_setup(conn, source_id, 180, preset_id)
+
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == 180
+    assert row["court_preset_id"] == preset_id
+
+
+def test_set_source_setup_rejects_illegal_rotation_without_writing(tmp_path):
+    from bootleg.db.sessions import set_source_setup
+    conn = connect(tmp_path / "l.db")
+    migrate(conn)
+    session_id = find_or_create_session_for_date(conn, "2026-08-20")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-20", duration_ms=1000,
+        width=1920, height=1080, fps=30.0, original_name="a.mov",
+    )
+    preset_id = create_preset(conn, "court", SAMPLE_QUAD)
+    original_row = get_source(conn, source_id)
+
+    with pytest.raises(ValueError, match="0, 90, 180 or 270"):
+        set_source_setup(conn, source_id, 45, preset_id)
+
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == original_row["rotation_deg"]
+    assert row["court_preset_id"] == original_row["court_preset_id"]

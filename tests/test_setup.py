@@ -70,3 +70,46 @@ def test_queue_setup_refuses_a_source_mid_job(conn):
     source_id = _source(conn, status="detecting")
     with pytest.raises(RuntimeError, match="detecting"):
         queue_setup(conn, source_id, 0, _preset(conn))
+
+
+def test_queue_setup_illegal_rotation_with_unknown_preset_raises_ValueError(conn):
+    """Validation order: rotation (caller's input) checked before preset (DB lookup)."""
+    source_id = _source(conn)
+    with pytest.raises(ValueError, match="0, 90, 180 or 270"):
+        queue_setup(conn, source_id, 45, "nope")
+
+
+def test_queue_setup_illegal_rotation_leaves_source_unchanged_and_queues_nothing(conn):
+    """A failed rotation validation must not write any columns or queue a job."""
+    source_id = _source(conn)
+    original_row = get_source(conn, source_id)
+    original_rotation = original_row["rotation_deg"]
+    original_preset = original_row["court_preset_id"]
+    original_job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+    with pytest.raises(ValueError):
+        queue_setup(conn, source_id, 45, _preset(conn))
+
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == original_rotation
+    assert row["court_preset_id"] == original_preset
+    new_job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert new_job_count == original_job_count
+
+
+def test_queue_setup_unknown_preset_leaves_source_unchanged_and_queues_nothing(conn):
+    """A failed preset validation must not write any columns or queue a job."""
+    source_id = _source(conn)
+    original_row = get_source(conn, source_id)
+    original_rotation = original_row["rotation_deg"]
+    original_preset = original_row["court_preset_id"]
+    original_job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+    with pytest.raises(LookupError, match="preset"):
+        queue_setup(conn, source_id, 90, "nope")
+
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == original_rotation
+    assert row["court_preset_id"] == original_preset
+    new_job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert new_job_count == original_job_count
