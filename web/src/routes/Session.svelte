@@ -6,7 +6,7 @@
   import TimelineMode from '../components/TimelineMode.svelte'
   import { api } from '../lib/api'
   import { navigate } from '../lib/router.svelte'
-  import type { Rally, SessionDetail } from '../lib/types'
+  import type { Rally, SessionDetail, Source } from '../lib/types'
 
   interface Props {
     id: string
@@ -37,6 +37,13 @@
   // "QuadEditor's onassigned has the same shape"). See the `{#key}` below
   // for where this is consumed.
   let rallyRevision = $state(0)
+
+  const needsSetupSources = $derived(detail?.sources.filter((s) => s.status === 'needs_setup') ?? [])
+  const readySources = $derived(detail?.sources.filter((s) => s.status !== 'needs_setup') ?? [])
+
+  function openSetupWizard(source: Source) {
+    navigate(`/setup/${source.id}`)
+  }
 
   $effect(() => {
     // Reruns only when `id` itself changes (its only reactive read) --
@@ -113,6 +120,28 @@
 {:else if !detail}
   <p class="text-sm text-neutral-400">Loading…</p>
 {:else}
+  {#if needsSetupSources.length > 0}
+    <div class="mb-4 space-y-2 rounded-lg border border-blue-700/50 bg-blue-500/5 p-4">
+      <h2 class="text-sm font-semibold text-blue-300">Set up sources</h2>
+      <p class="text-xs text-blue-200/80">
+        These sources need setup before detection can begin. Pick the rotation and play region for
+        each.
+      </p>
+      <ul class="mt-2 space-y-1">
+        {#each needsSetupSources as source (source.id)}
+          <li>
+            <button
+              class="inline-block rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500"
+              onclick={() => openSetupWizard(source)}
+            >
+              Set up source {source.idx}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+
   <!--
     Keyed on a revision counter, not the rallies array's identity -- see
     `rallyRevision` above for which callers bump it and why. QueueController
@@ -143,12 +172,17 @@
     the panel that just triggered it. Its props still update reactively
     when `detail` is replaced -- QueueMode/TimelineMode are the ones that
     need a forced remount (see the comment on `{#key}` above), not this.
+
+    Only render QuadEditor for sources that have a proxy (not needs_setup).
+    A needs_setup source has no proxy on disk, so frame.jpg would 404.
   -->
-  <QuadEditor
-    sessionId={id}
-    sources={detail.sources}
-    onassigned={() => api.getSession(id).then((d) => (detail = d))}
-  />
+  {#if readySources.length > 0}
+    <QuadEditor
+      sessionId={id}
+      sources={readySources}
+      onassigned={() => api.getSession(id).then((d) => (detail = d))}
+    />
+  {/if}
 
   <ResegmentPanel
     sources={detail.sources}

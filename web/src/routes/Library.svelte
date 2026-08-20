@@ -38,6 +38,26 @@
       cancelled = true
     }
   })
+
+  async function handleSessionClick(session: Session) {
+    if (session.status === 'needs_setup') {
+      try {
+        const detail = await api.getSession(session.id)
+        const firstSourceId = detail.sources[0]?.id
+        if (firstSourceId) {
+          navigate(`/setup/${firstSourceId}`)
+        } else {
+          // Fallback to session page if no sources
+          navigate(`/s/${session.id}`)
+        }
+      } catch (e) {
+        console.error('Failed to navigate to setup:', e)
+        navigate(`/s/${session.id}`)
+      }
+    } else {
+      navigate(`/s/${session.id}`)
+    }
+  }
 </script>
 
 <header class="mb-6 flex items-baseline justify-between">
@@ -59,7 +79,8 @@
       <li>
         <button
           class="flex w-full items-baseline justify-between py-3 text-left hover:bg-neutral-900"
-          onclick={() => navigate(`/s/${s.id}`)}
+          onclick={() => handleSessionClick(s)}
+          aria-label={s.status === 'needs_setup' ? 'set up' : undefined}
         >
           <span class="font-medium">{s.title}</span>
           <span class="font-mono text-xs text-neutral-400">
