@@ -25,6 +25,7 @@ from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler
+from bootleg.media.files import find_original
 from bootleg.media.probe import display_size, probe
 from bootleg.media.transcode import make_proxy, make_thumbs
 
@@ -198,7 +199,7 @@ def handle_build_proxy(library: Library, payload: dict) -> None:
         raise ValueError(f"No such source: {payload['source_id']}")
 
     src_dir = library.source_dir(source["session_id"], source["idx"])
-    original = _original_path(src_dir)
+    original = find_original(src_dir)
     if original is None:
         raise ValueError(f"No original on disk for source {source['id']}")
 
@@ -227,11 +228,6 @@ def handle_build_proxy(library: Library, payload: dict) -> None:
         jobq.enqueue(conn, "detect", {"source_id": source["id"]})
 
 
-def _original_path(src_dir: Path) -> Path | None:
-    matches = sorted(src_dir.glob("original.*"))
-    return matches[0] if matches else None
-
-
 def _quad_for(conn: sqlite3.Connection, source: sqlite3.Row) -> Quad:
     if source["court_preset_id"]:
         row = conn.execute(
@@ -253,7 +249,7 @@ def _audio_source(src_dir: Path, proxy: Path, source: sqlite3.Row) -> Path:
     the proxy only once the original has been reclaimed (has_original=0).
     """
     if source["has_original"]:
-        original = _original_path(src_dir)
+        original = find_original(src_dir)
         if original is not None:
             return original
     return proxy

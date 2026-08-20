@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import threading
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -28,7 +29,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import SegmentParams, sample_interval_ms, score_series, segment
-from bootleg.jobs.handlers import _original_path
+from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError, rotation_filter
@@ -273,6 +274,9 @@ FRAME_CACHE_KEEP = 20
 # swapping. The setup wizard's nine-frame rotation/timestamp grid fires
 # nine preview requests at once; the rest queue on this semaphore rather
 # than all nine landing on the kernel's memory pressure handler together.
+# This bounds concurrency; it does NOT make same-key requests safe against
+# each other -- see the write-to-temp-then-rename in api_preview for what
+# actually guarantees a reader is never served a torn file.
 _PREVIEW_SLOTS = threading.Semaphore(2)
 
 
@@ -374,7 +378,11 @@ def api_frame(session_id: str, idx: int, request: Request, at_ms: int = 0):
     # regenerates instead of silently serving the stale file.
     if not dst.exists() or dst.stat().st_mtime <= proxy.stat().st_mtime:
         try:
-            extract_frame(proxy, dst, at_ms=at_ms)
+            # Pinned rather than left to extract_frame's default: that
+            # default is tuned for preview.jpg's 4K original reads (see
+            # frames.py), and this route's own wedged-drive scenario above
+            # needs the same 30s grace it always has, unaffected by that.
+            extract_frame(proxy, dst, at_ms=at_ms, timeout=30.0)
         except (TranscodeError, ProbeError) as exc:
             # ProbeError and TranscodeError are unrelated exception classes,
             # but extract_frame's underlying ffmpeg call can surface either
@@ -421,7 +429,7 @@ def api_preview(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     src_dir = library.source_dir(session_id, idx)
-    original = _original_path(src_dir)
+    original = find_original(src_dir)
     if original is None:
         raise HTTPException(status_code=404, detail="Original not available")
 
@@ -429,20 +437,40 @@ def api_preview(
     dst = src_dir / f"preview-{rot}-{at_ms}.jpg"
     if not dst.exists():
         with _PREVIEW_SLOTS:
-            # Re-check inside the semaphore: nine grid requests queued
-            # behind the same two slots would otherwise each spawn their
-            # own ffmpeg for a timestamp/rotation the first one to get
-            # through already wrote.
+            # This re-check only spares an extraction for the third and
+            # later request queued behind the same two slots: the first two
+            # requests for this exact rot/at_ms can both already be past the
+            # outer dst.exists() check above and both take a permit before
+            # either has written dst, so both still reach extract_frame
+            # below. What makes that safe is not this check but where each
+            # writer extracts to -- see below.
             if not dst.exists():
+                # Extract to a temp path unique to this call (not just this
+                # rot/at_ms) and os.replace() it onto dst. os.replace is
+                # atomic within a filesystem: a reader racing this either
+                # sees no file yet, the old file, or the complete new one --
+                # never bytes from an in-progress ffmpeg write. Two writers
+                # for the same key can still both run ffmpeg (see above),
+                # but they land on two distinct temp paths and only one
+                # rename wins; neither can produce a torn dst. The leading
+                # dot keeps it out of the "preview-*.jpg" glob eviction
+                # scans; the trailing .jpg is load-bearing -- ffmpeg's
+                # output muxer is inferred from the destination filename's
+                # extension (run_ffmpeg passes no explicit -f), so the temp
+                # path has to end in .jpg too or extraction itself fails.
+                tmp = src_dir / f".{dst.stem}.{uuid.uuid4().hex}{dst.suffix}"
                 try:
                     extract_frame(
-                        original, dst, at_ms=at_ms, rotation_deg=rot,
+                        original, tmp, at_ms=at_ms, rotation_deg=rot,
                         hwaccel=detect_accel().hwaccel,
                     )
+                    os.replace(tmp, dst)
                 except (TranscodeError, ProbeError) as exc:
                     raise HTTPException(
                         status_code=409, detail="Source is still being processed"
                     ) from exc
+                finally:
+                    tmp.unlink(missing_ok=True)
         _evict_old_frames(src_dir, pattern="preview-*.jpg")
     else:
         os.utime(dst, None)
