@@ -2,8 +2,9 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
+  import { isEditableTarget } from '../lib/keyboard'
   import { formatTs, frameStep } from '../lib/time'
-  import { msToFraction, toSessionMs, zoomWindow } from '../lib/timeline'
+  import { clampMinGap, msToFraction, toSessionMs, zoomWindow } from '../lib/timeline'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
@@ -13,17 +14,24 @@
   interface Props {
     detail: SessionDetail
     rallyId: string
+    /** Overrides the initial `rallies` seed, e.g. QueueMode's live-merged
+     * snapshot (see QueueController.liveSnapshot) so a rally starred/
+     * rejected earlier in this queue session renders correctly in
+     * OverviewBand instead of `detail.rallies`' stale server-snapshot
+     * flags (Finding: OverviewBand colored from a snapshot). Falls back to
+     * `detail.rallies` for any other caller (e.g. a direct mount in tests). */
+    initialRallies?: Rally[]
     onclose: () => void
   }
 
-  let { detail, rallyId, onclose }: Props = $props()
+  let { detail, rallyId, initialRallies, onclose }: Props = $props()
 
   const ZOOM_SPAN_MS = 40000
   const SCORE_DEBOUNCE_MS = 150
   const DEFAULT_THRESHOLD = 0.45
 
   let currentId = $state(untrack(() => rallyId))
-  let rallies = $state<Rally[]>(untrack(() => [...detail.rallies]))
+  let rallies = $state<Rally[]>(untrack(() => [...(initialRallies ?? detail.rallies)]))
   let deck = $state<VideoDeck>()
   let zoomBand = $state<ZoomBand>()
   let scores = $state<number[]>([])
@@ -42,17 +50,38 @@
       ? zoomWindow((rally.start_ms + rally.end_ms) / 2, ZOOM_SPAN_MS, source.duration_ms)
       : { startMs: 0, endMs: 0 },
   )
+
+  // Snapshot of `win`, held fixed for the duration of a ZoomBand drag (see
+  // onZoomDragStart/onZoomDragEnd below). Finding 3: `win` recenters on
+  // every pointermove (its midpoint depends on `rally.start_ms/end_ms`,
+  // which `updateBoundsLocal` reassigns each frame), so without freezing it
+  // the coordinate space ZoomBand measures the pointer against shifts by
+  // half of every move -- each move amplifies the last, and the handle ends
+  // up travelling roughly 2x the pointer. `effectiveWin` is what every
+  // consumer below renders against; `win` itself is only ever read to take
+  // a snapshot from or to recompute once a drag ends.
+  let frozenWindow = $state<{ startMs: number; endMs: number } | null>(null)
+  const effectiveWin = $derived(frozenWindow ?? win)
+
   const neighbours = $derived(
     rally
       ? rallies.filter(
           (r) =>
             r.source_id === rally.source_id &&
             r.id !== rally.id &&
-            r.end_ms >= win.startMs &&
-            r.start_ms <= win.endMs,
+            r.end_ms >= effectiveWin.startMs &&
+            r.start_ms <= effectiveWin.endMs,
         )
       : [],
   )
+
+  function onZoomDragStart(): void {
+    frozenWindow = { startMs: win.startMs, endMs: win.endMs }
+  }
+
+  function onZoomDragEnd(): void {
+    frozenWindow = null
+  }
 
   function loadScores(sourceId: string, th: number) {
     api
@@ -95,13 +124,24 @@
   // mode every frame -- the same reasoning as QueueMode's progress bar.
   function writePlayhead(ms: number): void {
     if (!rally) return
-    zoomBand?.setPlayheadFraction(msToFraction(ms - win.startMs, Math.max(1, win.endMs - win.startMs)))
+    zoomBand?.setPlayheadFraction(
+      msToFraction(ms - effectiveWin.startMs, Math.max(1, effectiveWin.endMs - effectiveWin.startMs)),
+    )
   }
 
   $effect(() => {
-    // Reset the playhead to the rally's start whenever the focused rally
-    // (or its zoom window) changes.
-    if (rally) writePlayhead(rally.start_ms)
+    // Reset the playhead to the rally's start only when the *focused*
+    // rally changes (currentId) -- not on every bounds edit. `rally` is a
+    // new object reference on every `rallies = rallies.map(...)` call
+    // inside updateBoundsLocal (i.e. every drag frame); depending on it
+    // directly (as this used to) reran the effect on each of those and
+    // yanked the playhead back to the rally's start mid-drag. `currentId`
+    // is a plain state primitive that changes only via OverviewBand's
+    // onpick, so it's stable across a bounds edit.
+    currentId
+    untrack(() => {
+      if (rally) writePlayhead(rally.start_ms)
+    })
   })
 
   // Local-only: updates the boundary box position during a drag. Must not
@@ -116,16 +156,27 @@
 
   // The persisted counterpart -- called once per discrete action: a drag
   // release (ZoomBand's `oncommit`) or a `[`/`]` keypress, never mid-drag.
+  //
+  // Runs every commit through clampMinGap regardless of source: a
+  // drag-committed pair already satisfies it (ZoomBand's own per-frame
+  // clamp), so this is a no-op there, but the keyboard path below calls
+  // this directly with an unclamped playhead position -- without this, `[`
+  // with the playhead parked past the rally's current end_ms (or `]` with
+  // it parked before start_ms) would persist an inverted rally
+  // (Finding 7). Applying it here, rather than duplicating a clamp at each
+  // keyboard case, is what makes both paths share one rule.
   async function commitBounds(startMs: number, endMs: number): Promise<void> {
-    updateBoundsLocal(startMs, endMs)
+    const clamped = clampMinGap(startMs, endMs)
+    updateBoundsLocal(clamped.startMs, clamped.endMs)
     try {
-      await api.setBounds(currentId, Math.round(startMs), Math.round(endMs))
+      await api.setBounds(currentId, Math.round(clamped.startMs), Math.round(clamped.endMs))
     } catch (e) {
       console.error('failed to save bounds', e)
     }
   }
 
   function onKey(e: KeyboardEvent) {
+    if (isEditableTarget(e.target)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
     if (!rally || !source) return
     switch (e.key) {
@@ -181,8 +232,8 @@
       {rallies}
       sources={detail.sources}
       currentId={rally.id}
-      windowStartMs={toSessionMs(detail.sources, rally.source_id, win.startMs)}
-      windowEndMs={toSessionMs(detail.sources, rally.source_id, win.endMs)}
+      windowStartMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.startMs)}
+      windowEndMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.endMs)}
       onpick={(id) => (currentId = id)}
     />
   </section>
@@ -193,10 +244,12 @@
       bind:this={zoomBand}
       {rally}
       {neighbours}
-      windowStartMs={win.startMs}
-      windowEndMs={win.endMs}
+      windowStartMs={effectiveWin.startMs}
+      windowEndMs={effectiveWin.endMs}
       onchange={updateBoundsLocal}
       oncommit={commitBounds}
+      ondragstart={onZoomDragStart}
+      ondragend={onZoomDragEnd}
       onscrub={(ms) => {
         deck?.seekTo(ms)
         writePlayhead(ms)
@@ -206,8 +259,8 @@
       {scores}
       {threshold}
       stepMs={scoreStepMs}
-      windowStartMs={win.startMs}
-      windowEndMs={win.endMs}
+      windowStartMs={effectiveWin.startMs}
+      windowEndMs={effectiveWin.endMs}
     />
 
     <div class="flex items-center gap-2 pt-1">
