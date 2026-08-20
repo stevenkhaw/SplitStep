@@ -566,6 +566,54 @@ def test_ingest_retry_after_the_original_moved_reaches_needs_setup_again(
     assert conn.execute("SELECT status FROM sources").fetchone()[0] == "needs_setup"
 
 
+def test_ingest_recovery_does_not_rewind_an_advanced_source(
+    library, conn, dropped_video
+):
+    """Regression test for the defect this fix addresses. When a requeued
+    ingest job finds the source already moved with original.* on disk, the
+    recovery path must not unconditionally rewind its status. A source that
+    has been set up, built, and detected has advanced from 'ingesting' to
+    'needs_setup' to 'building' to 'ingested' to 'detecting' to 'ready', and
+    the recovery must not drag it back to 'needs_setup' -- that would drop
+    a reviewed session out of the review UI and back into setup. Only sources
+    still at 'ingesting' when recovered should be advanced to 'needs_setup';
+    an already-advanced source has completed, and the requeue is redundant.
+    """
+    # First ingest: file goes from inbox to source dir, status becomes needs_setup.
+    handle_ingest(library, {"path": str(dropped_video)})
+    session = list_sessions(conn)[0]
+    source = list_sources(conn, session["id"])[0]
+    source_id = source["id"]
+    session_id = session["id"]
+    assert source["status"] == "needs_setup"
+    assert session["status"] == "needs_setup"
+
+    # Simulate the source being set up and detected: advance to ready.
+    handlers.set_source_status(conn, source_id, "ready")
+    handlers.set_session_status(conn, session_id, "ready")
+
+    # Verify the state is ready before the recovery attempt.
+    source_before = get_source(conn, source_id)
+    assert source_before["status"] == "ready"
+    session_before = conn.execute(
+        "SELECT status FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    assert session_before["status"] == "ready"
+
+    # Replay the same ingest payload: the inbox path is now gone (already
+    # moved into source dir), so the recovery path fires. It should NOT
+    # rewind the status just because the original.* file still exists.
+    handle_ingest(library, {"path": str(dropped_video)})
+
+    # Verify the source and session are STILL at ready, not rewound.
+    source_after = get_source(conn, source_id)
+    assert source_after["status"] == "ready"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    assert session_after["status"] == "ready"
+
+
 def test_ingest_stores_rotation_and_display_dimensions(library, tmp_path, sample_video):
     tagged = tmp_path / "tagged.mov"
     subprocess.run(

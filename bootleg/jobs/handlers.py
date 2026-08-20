@@ -126,8 +126,16 @@ def handle_ingest(library: Library, payload: dict) -> None:
             if existing is not None:
                 moved_dir = library.source_dir(existing["session_id"], existing["idx"])
                 if any(moved_dir.glob("original.*")):
-                    set_source_status(conn, existing["id"], "needs_setup")
-                    set_session_status(conn, existing["session_id"], "needs_setup")
+                    # A redundantly requeued job can find the original already
+                    # moved, but the source may have since advanced well beyond
+                    # 'ingesting' -- it may be 'ready' with rallies attached. The
+                    # status write must be conditional: only advance a source that
+                    # is still stranded at 'ingesting' (where this very crash left
+                    # it). If it has already moved on, an earlier attempt completed,
+                    # and this requeue is redundant; return without rewinding.
+                    if existing["status"] == "ingesting":
+                        set_source_status(conn, existing["id"], "needs_setup")
+                        set_session_status(conn, existing["session_id"], "needs_setup")
                     return
             raise FileNotFoundError(
                 f"ingest payload names a missing inbox file with no completed "
