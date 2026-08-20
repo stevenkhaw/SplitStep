@@ -106,10 +106,16 @@ def cmd_setup(args) -> int:
     migrate(conn)
     preset_id = args.preset
     if preset_id is None:
+        # Fetch the source to check both existence and assigned preset.
+        # Distinguish missing source from source-exists-but-no-preset so we
+        # report the right problem to the user.
         row = conn.execute(
             "SELECT court_preset_id FROM sources WHERE id=?", (args.source_id,)
         ).fetchone()
-        preset_id = row["court_preset_id"] if row else None
+        if row is None:
+            print(f"no such source: {args.source_id}", file=sys.stderr)
+            return 1
+        preset_id = row["court_preset_id"]
         if not preset_id:
             print("no --preset given and none assigned; see `bootleg preset list`",
                   file=sys.stderr)
@@ -124,6 +130,14 @@ def cmd_setup(args) -> int:
         # Two run_once calls: build_proxy, then the detect it enqueued.
         Worker(lib, HANDLERS).run_once()
         Worker(lib, HANDLERS).run_once()
+        # Check if any jobs for this source failed. If so, print the error
+        # and return non-zero so the caller knows the rebuild didn't succeed.
+        failed_jobs = jobq.get_failed_jobs_for_source(conn, args.source_id)
+        for job in failed_jobs:
+            if job["error"]:
+                print(job["error"], file=sys.stderr)
+        if failed_jobs:
+            return 1
     return 0
 
 

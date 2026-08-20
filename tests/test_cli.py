@@ -312,6 +312,52 @@ def test_setup_command_rejects_a_bad_rotation(library, registered_source, a_pres
     assert "0, 90, 180 or 270" in capsys.readouterr().err
 
 
+def test_setup_unknown_source_no_preset(library, a_preset, capsys):
+    """Unknown source without --preset should report the unknown source, not missing preset."""
+    code = main([
+        "--library", str(library.root), "setup", "no-such-source",
+        "--rotation", "90",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no such source: no-such-source" in err
+    # Must NOT say "no --preset given"
+    assert "no --preset given" not in err
+
+
+def test_setup_existing_source_no_assigned_preset(library, registered_source, capsys):
+    """Existing source with no assigned preset should report missing preset, not unknown source."""
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no --preset given and none assigned" in err
+    # Must NOT say "no such source"
+    assert "no such source" not in err
+
+
+def test_setup_now_with_failing_job(library, registered_source, a_preset, capsys, monkeypatch):
+    """--now should return non-zero if a queued job fails."""
+    from bootleg.jobs import handlers
+
+    # Make make_proxy raise to simulate a job failure
+    def failing_make_proxy(*args, **kwargs):
+        raise RuntimeError("simulated build_proxy failure")
+
+    monkeypatch.setattr(handlers, "make_proxy", failing_make_proxy)
+
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset, "--now",
+    ])
+    assert code != 0
+    err = capsys.readouterr().err
+    # Error from the failed job should appear in stderr
+    assert "simulated build_proxy failure" in err
+
+
 def test_doctor_lists_source_rotation(library, registered_source, capsys):
     main(["--library", str(library.root), "doctor"])
     out = capsys.readouterr().out

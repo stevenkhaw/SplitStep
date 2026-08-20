@@ -101,3 +101,20 @@ def reclaim_stale(conn: sqlite3.Connection, older_than_s: int = 120) -> int:
     )
     conn.commit()
     return cur.rowcount
+
+
+def get_failed_jobs_for_source(
+    conn: sqlite3.Connection, source_id: str
+) -> list[sqlite3.Row]:
+    """Return all failed jobs for a source_id.
+
+    Queries the payload's source_id field to match against the source_id
+    parameter, using json_extract so that a source_id that is a prefix of
+    another's (e.g. 'src-1' vs 'src-10') cannot false-match.
+    """
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE status='failed'"
+        " AND json_extract(payload, '$.source_id') = ?",
+        (source_id,),
+    ).fetchall()
+    return rows
