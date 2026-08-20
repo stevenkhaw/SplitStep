@@ -54,15 +54,22 @@
           // first source stays 'ready'. Opening the wizard on sources[0]
           // would land on the reviewed source; confirming there rebuilds it
           // and discards its hand-edited rally boundaries. Open on whichever
-          // source actually needs setup, falling back to sources[0] only
-          // when none does (shouldn't happen given the session's own
-          // status, but keeps this from throwing on an empty match).
-          const target = detail.sources.find((s) => s.status === 'needs_setup') ?? detail.sources[0]
-          const firstSourceId = target?.id
-          if (firstSourceId) {
-            navigate(`/setup/${firstSourceId}`)
+          // source actually needs setup.
+          //
+          // No source may match at all, and that is a real, reachable case
+          // -- not just defensive empty-array handling: handle_build_proxy
+          // sets the newly-ingested SOURCE to 'building' *before* the
+          // SESSION flips to 'detecting' once the transcode finishes (7+
+          // minutes on 4K). For that whole window the session still reads
+          // 'needs_setup' (so this affordance is still showing) while its
+          // only unset-up source has already moved past that status. Landing
+          // on the session page instead of guessing a source is what keeps
+          // "did my clip finish yet?" from reopening the wizard on an
+          // already-reviewed source.
+          const target = detail.sources.find((s) => s.status === 'needs_setup')
+          if (target) {
+            navigate(`/setup/${target.id}`)
           } else {
-            // Fallback to session page if no sources
             navigate(`/s/${session.id}`)
           }
         } catch (e) {

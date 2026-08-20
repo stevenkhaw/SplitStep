@@ -158,6 +158,27 @@ describe('Setup wizard', () => {
     expect(mockApi.setup).toHaveBeenCalledWith('src1', 0, 'p1')
   })
 
+  // Finding: a preset created by this attempt's createPreset() call lived
+  // only in start()'s local `presetId`, not in `selectedPresetId`, so a
+  // setup() failure left selectedPresetId at null. Every retry then hit the
+  // `!presetId` branch again and inserted another orphaned "<session>
+  // source <idx>" preset row -- createPreset called once per retry instead
+  // of once total.
+  it('reuses the preset created by a failed attempt on retry, instead of creating another one', async () => {
+    await open()
+    click('use default play region')
+    mockApi.setup.mockRejectedValueOnce(new Error('network error'))
+    click('start detection')
+    await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
+
+    click('start detection') // retry after the failure
+    await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(2))
+
+    expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
+    expect(mockApi.setup).toHaveBeenNthCalledWith(1, 'src1', 90, 'p1')
+    expect(mockApi.setup).toHaveBeenNthCalledWith(2, 'src1', 90, 'p1')
+  })
+
   // Finding: Confirm always called createPreset, even when the user just
   // clicked an existing preset button (which only copies its coordinates).
   // No dedupe and no unique name constraint on court_presets meant every

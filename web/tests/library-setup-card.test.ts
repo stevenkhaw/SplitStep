@@ -213,6 +213,85 @@ describe('Library', () => {
     expect(mockNavigate).not.toHaveBeenCalledWith('/setup/src-ready')
   })
 
+  it('a needs_setup session whose only unset-up source has moved on to building navigates to the session page, not the wizard', async () => {
+    // handle_build_proxy sets the newly-ingested SOURCE to 'building' before
+    // the SESSION flips to 'detecting' once the transcode finishes (7+
+    // minutes on 4K). For that whole window the session still reads
+    // 'needs_setup' -- so Library still shows its "set up" affordance -- but
+    // no source matches 'needs_setup': the other source is 'ready' and this
+    // one is 'building'. Opening the wizard on sources[0] would land on the
+    // already-reviewed 'ready' source; confirming there rebuilds it and
+    // discards its hand-edited rally boundaries via replace_rallies.
+    mockApi.listSessions.mockResolvedValue([
+      {
+        id: 's-transcoding',
+        title: 'Transcoding Session',
+        played_on: '2026-08-19',
+        status: 'needs_setup',
+        rally_count: 3,
+        starred_count: 1,
+      },
+    ])
+    mockApi.getSession.mockResolvedValue({
+      session: {
+        id: 's-transcoding',
+        title: 'Transcoding Session',
+        played_on: '2026-08-19',
+        status: 'needs_setup',
+      },
+      sources: [
+        {
+          id: 'src-ready',
+          session_id: 's-transcoding',
+          idx: 1,
+          recorded_at: '2026-08-19T00:00:00Z',
+          offset_ms: 0,
+          duration_ms: 60000,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          has_original: 1,
+          court_preset_id: 'p1',
+          status: 'ready',
+          rotation_deg: 0,
+        },
+        {
+          id: 'src-building',
+          session_id: 's-transcoding',
+          idx: 2,
+          recorded_at: '2026-08-19T00:05:00Z',
+          offset_ms: 60000,
+          duration_ms: 60000,
+          width: 3840,
+          height: 2160,
+          fps: 30,
+          has_original: 1,
+          court_preset_id: null,
+          status: 'building',
+          rotation_deg: 0,
+        },
+      ],
+      rallies: [],
+    })
+
+    instance = mount(Library, { target, props: {} })
+    flushSync()
+
+    await vi.waitFor(() => {
+      const btn = target.querySelector('button[aria-label="set up"]')
+      expect(btn).not.toBeNull()
+    })
+
+    const button = target.querySelector('button[aria-label="set up"]') as HTMLButtonElement
+    button.click()
+    flushSync()
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/s/s-transcoding')
+    })
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/setup\//))
+  })
+
   it('clicking ready session navigates directly to session page', async () => {
     mockApi.listSessions.mockResolvedValue([
       {

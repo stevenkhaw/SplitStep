@@ -86,6 +86,13 @@
         )
         if (!created.id) throw new Error('createPreset did not return an id')
         presetId = created.id
+        // Assigned immediately -- before the api.setup() call below, which
+        // can still fail. Leaving this only in the local `presetId` meant a
+        // failed setup() left selectedPresetId at null, so every retry hit
+        // the `!presetId` branch again and inserted another orphaned preset
+        // row indistinguishable from the last. Setting it here means a
+        // retry reuses the row this attempt already created.
+        selectedPresetId = presetId
       }
       await api.setup(source.id, rotation, presetId)
       window.location.hash = `/s/${source.session_id}`
