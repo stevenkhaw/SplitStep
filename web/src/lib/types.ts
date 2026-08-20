@@ -20,6 +20,7 @@ export interface Source {
   has_original: number
   court_preset_id: string | null
   status: string
+  rotation_deg: number
 }
 
 export interface Rally {

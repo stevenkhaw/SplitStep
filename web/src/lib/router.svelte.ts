@@ -1,8 +1,14 @@
-export type Route = { name: 'library' } | { name: 'session'; id: string }
+export type Route =
+  | { name: 'library' }
+  | { name: 'session'; id: string }
+  | { name: 'setup'; id: string }
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '')
   const parts = path.split('/').filter(Boolean)
+  if (parts.length === 2 && parts[0] === 'setup') {
+    return { name: 'setup', id: parts[1] }
+  }
   if (parts.length === 2 && parts[0] === 's') {
     return { name: 'session', id: parts[1] }
   }

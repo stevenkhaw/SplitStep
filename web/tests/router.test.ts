@@ -51,3 +51,9 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#/s/foo')
   })
 })
+
+describe('parseHash - setup route', () => {
+  it('parses the setup route', () => {
+    expect(parseHash('#/setup/abc123')).toEqual({ name: 'setup', id: 'abc123' })
+  })
+})

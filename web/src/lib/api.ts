@@ -1,4 +1,4 @@
-import type { Job, Preset, ScoreSeries, Session, SessionDetail } from './types'
+import type { Job, Preset, ScoreSeries, Session, SessionDetail, Source } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -44,4 +44,13 @@ export const api = {
   proxyUrl: (sessionId: string, idx: number) => `/media/${sessionId}/${idx}/proxy.mp4`,
   frameUrl: (sessionId: string, idx: number, atMs = 0) =>
     `/media/${sessionId}/${idx}/frame.jpg?at_ms=${atMs}`,
+
+  getSource: (id: string) => req<Source>(`/api/sources/${id}`),
+  setup: (id: string, rotation_deg: number, preset_id: string) =>
+    req<{ job_id: string }>(`/api/sources/${id}/setup`, {
+      method: 'POST',
+      body: JSON.stringify({ rotation_deg, preset_id }),
+    }),
+  previewUrl: (sessionId: string, idx: number, atMs: number, rot: number) =>
+    `/media/${sessionId}/${idx}/preview.jpg?at_ms=${atMs}&rot=${rot}`,
 }
