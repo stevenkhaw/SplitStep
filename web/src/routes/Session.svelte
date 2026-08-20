@@ -1,5 +1,6 @@
 <script lang="ts">
   import QueueMode from '../components/QueueMode.svelte'
+  import QuadEditor from '../components/QuadEditor.svelte'
   import ResegmentPanel from '../components/ResegmentPanel.svelte'
   import TimelineMode from '../components/TimelineMode.svelte'
   import { api } from '../lib/api'
@@ -88,6 +89,12 @@
     when `detail` is replaced -- QueueMode/TimelineMode are the ones that
     need a forced remount (see the comment on `{#key}` above), not this.
   -->
+  <QuadEditor
+    sessionId={id}
+    sources={detail.sources}
+    onassigned={() => api.getSession(id).then((d) => (detail = d))}
+  />
+
   <ResegmentPanel
     sources={detail.sources}
     rallies={detail.rallies}

@@ -16,9 +16,12 @@ const mockApi = {
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),
-  listPresets: vi.fn(),
-  createPreset: vi.fn(),
-  setPreset: vi.fn(),
+  // QuadEditor (Task 14) fetches presets unconditionally on mount, just
+  // like ResegmentPanel fetches scores -- needs a resolved Promise, not
+  // just a spy, or mounting Session.svelte throws (`.then` of undefined).
+  listPresets: vi.fn().mockResolvedValue([]),
+  createPreset: vi.fn().mockResolvedValue({ id: 'preset1' }),
+  setPreset: vi.fn().mockResolvedValue({ ok: true }),
   jobs: vi.fn().mockResolvedValue([]),
   proxyUrl: () => 'about:blank',
   frameUrl: () => 'about:blank',
