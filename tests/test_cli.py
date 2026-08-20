@@ -290,3 +290,29 @@ def test_source_set_preset_unknown_preset_returns_1(library, seeded_source, caps
                seeded_source["source_id"], "no-such-preset"])
     assert rc == 1
     assert "no such preset" in capsys.readouterr().err
+
+
+# -- setup ---------------------------------------------------------------
+
+def test_setup_command_queues_a_build(library, registered_source, a_preset, capsys):
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "90", "--preset", a_preset,
+    ])
+    assert code == 0
+    assert "queued build_proxy" in capsys.readouterr().out
+
+
+def test_setup_command_rejects_a_bad_rotation(library, registered_source, a_preset, capsys):
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id,
+        "--rotation", "45", "--preset", a_preset,
+    ])
+    assert code == 1
+    assert "0, 90, 180 or 270" in capsys.readouterr().err
+
+
+def test_doctor_lists_source_rotation(library, registered_source, capsys):
+    main(["--library", str(library.root), "doctor"])
+    out = capsys.readouterr().out
+    assert "rotation" in out

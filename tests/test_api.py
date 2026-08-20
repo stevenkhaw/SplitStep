@@ -1,7 +1,6 @@
 import sqlite3
 import subprocess
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -10,19 +9,11 @@ from fastapi.testclient import TestClient
 from bootleg.api.app import create_app
 from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies, replace_rallies, set_star
-from bootleg.db.schema import connect, migrate
+from bootleg.db.schema import connect
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import Interval
-from bootleg.jobs.handlers import handle_ingest
 from bootleg.media.transcode import TranscodeError
-
-
-@pytest.fixture
-def conn(library):
-    c = connect(library.db_path)
-    migrate(c)
-    return c
 
 
 @pytest.fixture
@@ -44,46 +35,6 @@ def seeded(library, conn):
     replace_rallies(conn, session_id, source_id,
                     [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7)])
     return {"session_id": session_id, "source_id": source_id, "idx": idx}
-
-
-@pytest.fixture
-def sample_video(tmp_path):
-    """2 second 320x240 30fps clip with a 440Hz tone."""
-    out = tmp_path / "sample.mp4"
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
-         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)],
-        check=True, capture_output=True,
-    )
-    return out
-
-
-@dataclass
-class RegisteredSource:
-    session_id: str
-    id: str
-    idx: int
-    dir: Path
-
-
-@pytest.fixture
-def registered_source(library, conn, sample_video):
-    """A source the way the setup wizard finds it: `handle_ingest` has run,
-    the original is on disk in the session tree, and no proxy exists yet
-    (see handle_ingest's docstring -- both wait on the wizard). preview.jpg
-    exists for exactly this pre-proxy state.
-    """
-    dropped = library.inbox / "IMG_9000.MOV"
-    dropped.write_bytes(sample_video.read_bytes())
-    handle_ingest(library, {"path": str(dropped)})
-    row = conn.execute("SELECT * FROM sources").fetchone()
-    return RegisteredSource(
-        session_id=row["session_id"],
-        id=row["id"],
-        idx=row["idx"],
-        dir=library.source_dir(row["session_id"], row["idx"]),
-    )
 
 
 def test_list_sessions_includes_counts(client, seeded):
@@ -417,12 +368,6 @@ def test_preview_rotation_reaches_the_pixels(client, registered_source, tmp_path
     assert w0 > h0
     assert h90 > w90
     assert w0 / h0 == pytest.approx(h90 / w90, rel=0.02)
-
-
-@pytest.fixture
-def a_preset(conn):
-    quad = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
-    return create_preset(conn, "test_court", quad)
 
 
 def test_get_source_returns_the_row(client, registered_source):
