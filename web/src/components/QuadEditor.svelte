@@ -10,6 +10,13 @@
     pointFromClient,
     polygonClipPath,
   } from '../lib/quad'
+  import {
+    DEFAULT_SCRUB_MS,
+    clamp,
+    formatTs,
+    frameStep,
+    lastSafeFrameMs,
+  } from '../lib/time'
   import type { Preset, Source } from '../lib/types'
 
   interface Props {
@@ -28,6 +35,42 @@
   // this is intentional (state_referenced_locally).
   let sourceId = $state(untrack(() => sources[0]?.id ?? ''))
   let source = $derived(sources.find((s) => s.id === sourceId))
+
+  /**
+   * Phone footage routinely opens on a black frame -- the record button is
+   * hit before the phone is propped against the fence -- and a black frame
+   * is useless for dragging a play region over. Open a little way in
+   * instead, clamped so a clip shorter than that still lands on a real
+   * frame rather than past its end.
+   */
+  function openAt(s: Source | undefined): number {
+    if (!s) return 0
+    return Math.min(DEFAULT_SCRUB_MS, lastSafeFrameMs(s.duration_ms, s.fps))
+  }
+
+  // The timestamp the displayed frame was extracted at. Separate from
+  // `scrubMs` on purpose: every distinct value here costs one ffmpeg
+  // extraction on the server, so a slider drag updates the readout
+  // continuously but only commits (and fetches) on release.
+  let frameMs = $state(untrack(() => openAt(sources[0])))
+  let scrubMs = $state(untrack(() => openAt(sources[0])))
+  let frameError = $state(false)
+
+  const maxMs = $derived(source ? lastSafeFrameMs(source.duration_ms, source.fps) : 0)
+  // Slider granularity of one frame, so keyboard arrows on the slider step
+  // frame by frame the same way the frame buttons do.
+  const stepMs = $derived(source && source.fps > 0 ? Math.max(1, Math.round(1000 / source.fps)) : 1)
+
+  function seek(ms: number): void {
+    const next = Math.round(clamp(ms, 0, maxMs))
+    scrubMs = next
+    frameMs = next
+    frameError = false
+  }
+
+  function stepFrames(dir: 1 | -1): void {
+    seek(frameStep(frameMs, source?.fps ?? 0, dir))
+  }
 
   let points = $state<[number, number][]>(clonePoints(DEFAULT_QUAD_POINTS))
   let name = $state('')
@@ -66,6 +109,10 @@
     // below for that preset loads its exact points (see assignExisting).
     sourceId = id
     points = clonePoints(DEFAULT_QUAD_POINTS)
+    const next = sources.find((s) => s.id === id)
+    scrubMs = openAt(next)
+    frameMs = openAt(next)
+    frameError = false
     name = ''
     status = null
     error = null
@@ -203,10 +250,12 @@
         rounded.
       -->
       <img
-        src={api.frameUrl(sessionId, source.idx)}
-        alt="first frame of source {source.idx}"
+        src={api.frameUrl(sessionId, source.idx, frameMs)}
+        alt="source {source.idx} at {formatTs(frameMs)}"
         class="block w-full h-auto rounded"
         draggable="false"
+        onerror={() => (frameError = true)}
+        onload={() => (frameError = false)}
       />
       <div
         class="pointer-events-none absolute inset-0 bg-blue-400/20"
@@ -225,6 +274,71 @@
         ></button>
       {/each}
     </div>
+
+    <!--
+      The frame this region is drawn over is scrubbable, not fixed at t=0:
+      phone footage habitually starts on a black or pocketed frame, and a
+      region cannot be placed against one. The buttons step by exactly one
+      frame (and by a second) for lining a corner up against a player's
+      feet; the slider covers the clip. Server-side each distinct timestamp
+      is one ffmpeg extraction, so the slider only fetches on release
+      (`onchange`) while `oninput` just moves the readout.
+    -->
+    <div class="mt-2 flex items-center gap-2">
+      <button
+        class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
+               hover:bg-neutral-800"
+        onclick={() => seek(frameMs - 1000)}
+        aria-label="back one second"
+      >
+        &laquo; 1s
+      </button>
+      <button
+        class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
+               hover:bg-neutral-800"
+        onclick={() => stepFrames(-1)}
+        aria-label="previous frame"
+      >
+        &lsaquo; fr
+      </button>
+      <input
+        type="range"
+        min="0"
+        max={maxMs}
+        step={stepMs}
+        value={scrubMs}
+        oninput={(e) => (scrubMs = e.currentTarget.valueAsNumber)}
+        onchange={(e) => seek(e.currentTarget.valueAsNumber)}
+        class="min-w-0 flex-1 accent-blue-500"
+        aria-label="frame timestamp"
+      />
+      <button
+        class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
+               hover:bg-neutral-800"
+        onclick={() => stepFrames(1)}
+        aria-label="next frame"
+      >
+        fr &rsaquo;
+      </button>
+      <button
+        class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
+               hover:bg-neutral-800"
+        onclick={() => seek(frameMs + 1000)}
+        aria-label="forward one second"
+      >
+        1s &raquo;
+      </button>
+      <span class="w-20 shrink-0 text-right font-mono text-xs text-neutral-400">
+        {formatTs(scrubMs)}
+      </span>
+    </div>
+
+    {#if frameError}
+      <p class="mt-2 font-mono text-xs text-amber-300">
+        No frame at {formatTs(frameMs)} -- the proxy may still be transcoding. Try again, or
+        scrub somewhere else.
+      </p>
+    {/if}
 
     <div class="mt-3 flex items-center gap-2">
       <input

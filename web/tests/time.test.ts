@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { clamp, formatDuration, formatTs, frameStep } from '../src/lib/time'
+import {
+  clamp,
+  formatDuration,
+  formatTs,
+  frameStep,
+  lastSafeFrameMs,
+} from '../src/lib/time'
 
 describe('formatTs', () => {
   it('formats under a minute', () => {
@@ -52,5 +58,25 @@ describe('clamp', () => {
     expect(clamp(5, 0, 10)).toBe(5)
     expect(clamp(-1, 0, 10)).toBe(0)
     expect(clamp(11, 0, 10)).toBe(10)
+  })
+})
+
+describe('lastSafeFrameMs', () => {
+  it('backs off by one frame period plus a millisecond', () => {
+    // The 30fps case measured against ffmpeg in api_frame's comment:
+    // 1967ms fails on a 2000ms clip, 1966ms succeeds.
+    expect(lastSafeFrameMs(2000, 30)).toBe(1966)
+  })
+
+  it('matches the server clamp at a synthetic 10fps', () => {
+    expect(lastSafeFrameMs(2000, 10)).toBe(1899)
+  })
+
+  it('falls back to half the duration when fps is unknown', () => {
+    expect(lastSafeFrameMs(2000, 0)).toBe(1000)
+  })
+
+  it('never returns a negative timestamp for a clip shorter than the margin', () => {
+    expect(lastSafeFrameMs(10, 30)).toBe(0)
   })
 })
