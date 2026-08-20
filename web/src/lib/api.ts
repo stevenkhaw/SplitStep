@@ -52,5 +52,5 @@ export const api = {
       body: JSON.stringify({ rotation_deg, preset_id }),
     }),
   previewUrl: (sessionId: string, idx: number, atMs: number, rot: number) =>
-    `/media/${sessionId}/${idx}/preview.jpg?at_ms=${atMs}&rot=${rot}`,
+    `/media/${sessionId}/${idx}/preview.jpg?at_ms=${Math.round(atMs)}&rot=${rot}`, // Round to int: server parses as int and caches one JPEG per distinct value
 }
