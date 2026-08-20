@@ -102,18 +102,44 @@ def get_source_by_original_name(
     ).fetchone()
 
 
+def find_ingesting_sources_by_original_name(
+    conn: sqlite3.Connection, original_name: str
+) -> list[sqlite3.Row]:
+    """Find every source row named original_name that is still stuck at
+    status='ingesting', with no session_id to scope the search.
+
+    Used when a requeued ingest job finds its inbox path already gone, as
+    the first thing to check before falling back to
+    find_source_by_original_name's broader, unscoped match. Filtering to
+    'ingesting' is what makes a row identifiable as *this* crash's source:
+    two sessions can hold a source with the same original_name (a phone
+    reusing IMG_0001.MOV across days), but only a source stranded by a
+    crash between the move and the status write is still sitting at
+    'ingesting' -- a source that finished ingest is already at
+    'needs_setup' or beyond. Checking this narrower, unambiguous set first
+    is what lets a genuine crash victim win over an unrelated, already-
+    finished source that merely happens to share its name.
+    """
+    return conn.execute(
+        "SELECT * FROM sources WHERE original_name = ? AND status = 'ingesting'"
+        " ORDER BY idx",
+        (original_name,),
+    ).fetchall()
+
+
 def find_source_by_original_name(
     conn: sqlite3.Connection, original_name: str
 ) -> sqlite3.Row | None:
-    """Find a source row by original_name alone, with no session_id to
-    scope the search.
+    """Find a source row by original_name alone, with no session_id or
+    status to scope the search.
 
-    Used when a requeued ingest job finds its inbox path already gone: the
-    payload it was handed carries only a file path, not the session the
-    earlier attempt filed it under, so get_source_by_original_name's
-    session-scoped lookup isn't available. Callers use this to tell "the
-    earlier attempt already finished, reaffirm its status" apart from "this
-    file never existed at all".
+    Fallback used only once find_ingesting_sources_by_original_name has
+    come back empty, i.e. no source anywhere is currently mid-crash-
+    recovery for this name -- so there is no still-'ingesting' row this
+    unscoped match could wrongly out-rank. What's left at that point is the
+    case where the earlier attempt already finished (its row has moved on
+    to 'needs_setup' or beyond) and reclaim_stale() requeued the same
+    payload anyway: this reaffirms that already-completed row.
     """
     return conn.execute(
         "SELECT * FROM sources WHERE original_name = ? ORDER BY idx LIMIT 1",

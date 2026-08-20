@@ -5,7 +5,14 @@ import pytest
 from bootleg.db.presets import create_preset
 from bootleg.db.rallies import list_rallies
 from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import get_source, list_sessions, list_sources, set_source_preset
+from bootleg.db.sessions import (
+    add_source,
+    create_session,
+    get_source,
+    list_sessions,
+    list_sources,
+    set_source_preset,
+)
 from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.geometry import Quad
 from bootleg.jobs import handlers
@@ -369,6 +376,112 @@ def test_retry_after_a_crash_between_the_move_and_the_status_write_reaches_needs
     assert len(sources) == 1  # reused, not duplicated
     assert sources[0]["status"] == "needs_setup"
     assert sessions[0]["status"] == "needs_setup"
+
+
+def test_retry_after_a_crash_does_not_claim_a_same_named_source_in_another_session(
+    library, conn, dropped_video, monkeypatch
+):
+    """Two sessions can hold a source with the same original_name -- a
+    phone reusing IMG_0001.MOV across days. Reproduces the reviewer's
+    finding: a name-only recovery lookup has no session to scope by, so it
+    can resolve to whichever same-named row insertion order happens to put
+    first -- silently reaffirming an unrelated, already-finished session
+    instead of the one that actually crashed, and leaving the real crashed
+    source stranded at 'ingesting' forever. Session A is a complete,
+    unrelated ingest sitting at 'needs_setup'; session B crashes between
+    the move and the status write with the *same* original_name. Session
+    B's retry must reach 'needs_setup' and session A's row must not move
+    at all -- not just its status, nothing about it.
+    """
+    session_a = create_session(conn, "session-a", "2024-01-01", "2024-01-01")
+    source_a_id, idx_a = add_source(
+        conn, session_a,
+        recorded_at="2024-01-01T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_0001.mp4",
+    )
+    handlers.set_source_status(conn, source_a_id, "needs_setup")
+    handlers.set_session_status(conn, session_a, "needs_setup")
+    a_dir = library.source_dir(session_a, idx_a)
+    a_dir.mkdir(parents=True)
+    (a_dir / "original.mp4").write_bytes(b"session a's original")
+    source_a_before = dict(get_source(conn, source_a_id))
+
+    # Session B: dropped_video is also named IMG_0001.mp4 (the fixture's
+    # fixed name), so find_or_create_session_for_date -- keyed off today's
+    # date, not session A's 2024-01-01 -- creates a second, distinct
+    # session for it.
+    payload = {"path": str(dropped_video)}
+    real_set_source_status = handlers.set_source_status
+    calls = {"n": 0}
+
+    def crash_on_first_needs_setup(conn, source_id, status):
+        if status == "needs_setup":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _SimulatedCrash()
+        return real_set_source_status(conn, source_id, status)
+
+    monkeypatch.setattr(handlers, "set_source_status", crash_on_first_needs_setup)
+
+    with pytest.raises(_SimulatedCrash):
+        handle_ingest(library, payload)
+
+    monkeypatch.setattr(handlers, "set_source_status", real_set_source_status)
+
+    # reclaim_stale()'s retry: the same payload, inbox path now gone.
+    handle_ingest(library, payload)
+
+    sessions = list_sessions(conn)
+    assert len(sessions) == 2
+    session_b = next(s for s in sessions if s["id"] != session_a)
+    sources_b = list_sources(conn, session_b["id"])
+    assert len(sources_b) == 1
+    assert sources_b[0]["status"] == "needs_setup"
+    assert session_b["status"] == "needs_setup"
+
+    # Session A must be completely untouched by session B's recovery.
+    assert dict(get_source(conn, source_a_id)) == source_a_before
+
+
+def test_ingest_raises_when_the_missing_file_matches_two_ingesting_sources(
+    library, conn
+):
+    """Two sources stranded at 'ingesting' with the same original_name
+    (two independent crashes racing each other) is genuinely ambiguous --
+    the recovery lookup must not guess which one to finish. Both must be
+    left exactly as they were rather than one being silently claimed.
+    """
+    session_a = create_session(conn, "session-a", "2024-01-01", "2024-01-01")
+    session_b = create_session(conn, "session-b", "2024-01-02", "2024-01-02")
+
+    source_a_id, idx_a = add_source(
+        conn, session_a,
+        recorded_at="2024-01-01T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_0001.mp4",
+    )
+    (library.source_dir(session_a, idx_a)).mkdir(parents=True)
+    (library.source_dir(session_a, idx_a) / "original.mp4").write_bytes(b"a")
+
+    source_b_id, idx_b = add_source(
+        conn, session_b,
+        recorded_at="2024-01-02T00:00:00+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_0001.mp4",
+    )
+    (library.source_dir(session_b, idx_b)).mkdir(parents=True)
+    (library.source_dir(session_b, idx_b) / "original.mp4").write_bytes(b"b")
+
+    ghost = library.inbox / "IMG_0001.mp4"
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        handle_ingest(library, {"path": str(ghost)})
+    assert source_a_id in str(excinfo.value)
+    assert source_b_id in str(excinfo.value)
+
+    assert get_source(conn, source_a_id)["status"] == "ingesting"
+    assert get_source(conn, source_b_id)["status"] == "ingesting"
 
 
 def test_ingest_of_a_missing_inbox_file_with_no_matching_source_raises(library, conn):

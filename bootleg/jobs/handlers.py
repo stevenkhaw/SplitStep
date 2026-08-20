@@ -10,6 +10,7 @@ from bootleg.db.rallies import replace_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
+    find_ingesting_sources_by_original_name,
     find_or_create_session_for_date,
     find_source_by_original_name,
     get_source,
@@ -97,7 +98,31 @@ def handle_ingest(library: Library, payload: dict) -> None:
             # really landed and finish the write it already earned), or the
             # path may never have existed at all (not recoverable -- fail
             # loudly rather than return as if the job had succeeded).
-            existing = find_source_by_original_name(conn, src.name)
+            #
+            # Two sessions can hold a source with the same original_name (a
+            # phone reusing IMG_0001.MOV across days), so name alone can't
+            # tell "the crashed job" apart from "an unrelated finished job
+            # that happens to share a name". Status can: a source stranded
+            # by this exact crash is always still 'ingesting' (the status
+            # add_source() writes), while a completed one has already moved
+            # on to 'needs_setup' or beyond. Checking 'ingesting' rows first
+            # is what lets a genuine crash victim win over a same-named
+            # source that merely finished around the same time -- only once
+            # no 'ingesting' row exists at all do we fall back to the
+            # broader unscoped match, for the case where reclaim_stale()
+            # redundantly requeues a job that already finished.
+            ingesting = find_ingesting_sources_by_original_name(conn, src.name)
+            if len(ingesting) > 1:
+                ids = ", ".join(sorted(c["id"] for c in ingesting))
+                raise FileNotFoundError(
+                    f"ingest payload names a missing inbox file matching "
+                    f"multiple 'ingesting' sources ({ids}); refusing to "
+                    f"guess which one to finish: {src}"
+                )
+            existing = (
+                ingesting[0] if ingesting
+                else find_source_by_original_name(conn, src.name)
+            )
             if existing is not None:
                 moved_dir = library.source_dir(existing["session_id"], existing["idx"])
                 if any(moved_dir.glob("original.*")):
