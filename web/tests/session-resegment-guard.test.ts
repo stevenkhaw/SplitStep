@@ -111,8 +111,12 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
 
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
 
-    expect(mockApi.scores).toHaveBeenCalledWith('src-ready', expect.any(Number))
-    expect(mockApi.scores).not.toHaveBeenCalledWith('src-setup', expect.any(Number))
+    // This is the initial mount fetch, so the threshold arg is undefined --
+    // that's how ResegmentPanel asks the API to resolve the per-source
+    // profile default (see resegment-panel.test.ts). The id filtering is
+    // what this test pins, not that argument.
+    expect(mockApi.scores).toHaveBeenCalledWith('src-ready', undefined)
+    expect(mockApi.scores).not.toHaveBeenCalledWith('src-setup', undefined)
   })
 
   it('renders no ResegmentPanel and never calls scores() when every source needs setup', async () => {

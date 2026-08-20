@@ -28,11 +28,6 @@
 
   const ZOOM_SPAN_MS = 40000
   const SCORE_DEBOUNCE_MS = 150
-  // Mirrors SegmentParams.threshold in bootleg/detect/segment.py -- the
-  // slider must start where a fresh detect run already landed, or the
-  // first nudge silently resegments at a different value than the
-  // rallies on screen were cut at.
-  const DEFAULT_THRESHOLD = 0.45
 
   let currentId = $state(untrack(() => rallyId))
   let rallies = $state<Rally[]>(untrack(() => [...(initialRallies ?? detail.rallies)]))
@@ -40,7 +35,11 @@
   let zoomBand = $state<ZoomBand>()
   let scores = $state<number[]>([])
   let scoreStepMs = $state(200)
-  let threshold = $state(DEFAULT_THRESHOLD)
+  // Null until the first /scores response supplies it. The two camera
+  // profiles put the threshold on different scales (0.25 subject, 0.45 pair),
+  // so a constant here is wrong for half of all sources -- the API resolves
+  // it per source and this is where that answer lands.
+  let threshold = $state<number | null>(null)
 
   // Falls back to the first rally when `currentId` no longer exists in
   // `rallies` -- Session.svelte remounts this component fresh (via `{#key}`)
@@ -87,12 +86,18 @@
     frozenWindow = null
   }
 
-  function loadScores(sourceId: string, th: number) {
+  function loadScores(sourceId: string, th: number | null) {
     api
-      .scores(sourceId, th)
+      .scores(sourceId, th ?? undefined)
       .then((s) => {
         scores = s.scores
         scoreStepMs = s.step_ms
+        // The server echoes back whatever threshold it resolved -- on the
+        // first call (th === null) that's the profile default; on every
+        // later call it's just the value we sent. Adopting it either way
+        // keeps this the single place `threshold` gets written from a
+        // response, instead of only doing it conditionally on th === null.
+        threshold = s.threshold
       })
       .catch(() => {
         scores = []
@@ -259,13 +264,15 @@
         writePlayhead(ms)
       }}
     />
-    <ScoreCurve
-      {scores}
-      {threshold}
-      stepMs={scoreStepMs}
-      windowStartMs={effectiveWin.startMs}
-      windowEndMs={effectiveWin.endMs}
-    />
+    {#if threshold !== null}
+      <ScoreCurve
+        {scores}
+        {threshold}
+        stepMs={scoreStepMs}
+        windowStartMs={effectiveWin.startMs}
+        windowEndMs={effectiveWin.endMs}
+      />
+    {/if}
 
     <div class="flex items-center gap-2 pt-1">
       <span class="text-[11px] text-neutral-500">preview threshold</span>
@@ -274,12 +281,15 @@
         min="0.05"
         max="0.95"
         step="0.01"
-        value={threshold}
+        value={threshold ?? 0.05}
         oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
-        class="flex-1"
+        disabled={threshold === null}
+        class="flex-1 disabled:opacity-40"
         aria-label="preview threshold"
       />
-      <span class="w-10 font-mono text-[11px] text-neutral-500">{threshold.toFixed(2)}</span>
+      <span class="w-10 font-mono text-[11px] text-neutral-500">
+        {threshold === null ? '…' : threshold.toFixed(2)}
+      </span>
     </div>
 
     <p class="font-mono text-[11px] text-neutral-500">

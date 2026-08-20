@@ -95,6 +95,25 @@ describe('ResegmentPanel', () => {
     el.dispatchEvent(new Event('input', { bubbles: true }))
   }
 
+  it('adopts the threshold the API reports instead of a hardcoded default', async () => {
+    // subject-mode profile: threshold lives on a different scale (0.25) than
+    // the old hardcoded pair-mode default (0.45) -- the slider must start
+    // where the resolved value actually is, not at a constant.
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.25, scores: [0.1, 0.9] })
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources: [source('src1', 1)], rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
+
+    // The first call must omit the threshold entirely -- that's how the UI
+    // asks the API to resolve the per-source profile default.
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined)
+    expect(slider().value).toBe('0.25')
+  })
+
   it('debounces the threshold slider: a burst of input collapses into one scores call', async () => {
     vi.useFakeTimers()
     instance = mount(ResegmentPanel, {
@@ -137,6 +156,11 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    // The button is disabled until the initial /scores response resolves
+    // the threshold (see the null-window handling) -- a real user can't
+    // click it any sooner, and neither can this test.
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement
     button.click()
@@ -166,6 +190,8 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement
     button.click()
@@ -189,6 +215,8 @@ describe('ResegmentPanel', () => {
         onresegmented,
       },
     })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
     flushSync()
 
     const button = target.querySelector('button') as HTMLButtonElement
