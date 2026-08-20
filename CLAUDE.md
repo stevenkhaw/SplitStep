@@ -129,13 +129,22 @@ players on the adjacent court score as your opponent. One manual step per
 source (wizard or `bootleg preset add` + `bootleg setup`). Re-run detect after
 assigning one — existing rallies do not change retroactively.
 
-The quad only defends `pair` mode. In `subject` mode `w_outside` never fires at
-all and the box-height gate replaces it, so drawing a tighter quad changes
-nothing there. It also cannot save a ground-level camera: at that height the
-opponent and the strangers behind the fence sit on the same horizon line, a few
-pixels apart, so no quad separates them. `analyze_view` is measured on the
-quad's output, so a quad that admits adjacent courts will inflate the foot
+The quad still matters in `subject` mode, just differently. `w_outside` never
+fires there — the box-height gate replaces that scoring term — but the quad is
+applied earlier and more fundamentally: `split_near_far` filters boxes by
+`_in_region` *before* electing near and far, so the quad decides which boxes
+exist at all, which one becomes `near`, and therefore where `subject_min_h`
+(half the median `near.h`) sits. A wrong quad leaves `near is None` on every
+frame and subject mode scores 0 everywhere.
+
+What the quad cannot do is save a ground-level camera. At that height the
+opponent and the strangers behind the fence sit on the same horizon line a few
+pixels apart, so no quad separates them. And because `analyze_view` measures
+the quad's output, a quad admitting adjacent courts inflates the foot
 separation and can push a ground-level source into `pair` mode by mistake.
+
+Changing a quad requires a full re-detect, not `--reuse-features`: the filter
+is applied when features are built, so cached features are already quad-shaped.
 
 ### Jobs
 

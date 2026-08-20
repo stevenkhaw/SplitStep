@@ -230,26 +230,40 @@ served from a single `bootleg serve` process.
 building via `-c copy` concat, the cross-session rally browser with filters,
 and Reclaim Space (removing originals once clips are exported).
 
-**The most important caveat: segmentation weights (both the audio detector's
-peakiness/prominence gates and the motion+audio scoring in `segment.py`) are
-tuned entirely on synthetic signals** — synthesized click trains, sine tones,
-and noise for audio; scripted motion fixtures for vision. They have not been
-validated against a single real tennis session. Concretely, still unverified:
+**The most important caveat: the detector does not currently produce
+trustworthy rally boundaries on ground-level footage.** One real 19.5-minute
+session was ingested and the detector validated against it on 2026-08-20. The
+result was negative, and the reasons are now measured rather than suspected:
 
-- Whether the current thresholds produce sensible rally boundaries on real
-  footage, or need retuning per-court/per-camera.
-- Whether audio impact detection works at all on a windy public court, where
-  the wind noise floor is not represented in any synthetic fixture.
-- Playback of a real 4K-source-derived 1080p proxy end to end in the UI —
-  everything above was exercised against short synthetic test clips
-  (`ffmpeg -f lavfi testsrc`/`sine`), not a real phone recording.
+- **Camera height decides everything.** With the phone about a foot off the
+  ground, the far half of the court compresses into a ~2%-tall band at the
+  horizon, so the "far player" the two-player model scored was whoever happened
+  to be standing on an adjacent court. `detect/viewpoint.py` now classifies each
+  source's viewpoint and routes low cameras to a different scoring profile.
+- **That replacement profile failed its own validation.** Camera setup and
+  teardown score as rallies, and confidence is *inverted* — the known-false
+  clips scored higher than the known-true ones — so no threshold separates them.
+- **Audio impact detection works; it just measures the wrong thing.** Not wind —
+  neighbours. Impacts fire at 0.62/sec when nobody is playing on our court
+  against 0.65/sec mid-rally. Stereo localisation was tested and also failed.
+- Still genuinely unverified: playback of a real 4K-derived 1080p proxy end to
+  end in the UI.
 
-Validating all of the above on real footage is the logical next step before
-trusting the tool's output — see "First real use" below.
+Tuning constants are now calibrated against `tests/fixtures/ground_level_source01.jsonl`,
+a committed slice of real footage — calibrating against synthetics is what
+produced the bug where every clip came out one hit long. Full findings:
+`docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md`.
+
+**The next step is a fence-mounted session**, not more tuning. Mounting the
+phone high enough to see both players at different depths is the only change
+that gives the detector a real signal; the viewpoint classifier will switch
+profiles on its own.
 
 ## First real use
 
-1. Shoot a session — 4K30, HDR off, AE/AF locked, phone as high as you can
+1. Shoot a session — 4K30, HDR off, AE/AF locked, phone **as high as you can**
+   (a fence mount, not propped on the court surface — this is the single
+   biggest determinant of whether detection works at all)
    mount it.
 2. Drop it in `_inbox/`, wait for ingest and detect.
 3. Open the session, drag the play region over the court, save it.
@@ -260,7 +274,11 @@ trusting the tool's output — see "First real use" below.
    it).
 6. Use the re-segment slider to sweep, watching the rally count and the
    score curve.
-7. When a threshold looks right, copy that source's `features.jsonl` to
-   `tests/fixtures/` with your hand-labeled intervals. That becomes the
-   regression guard for every future weight change — and the training set
-   for a learned segmenter, if one ever replaces the hand-tuned weights.
+7. Copy that source's `features.jsonl` to `tests/fixtures/` — done once already
+   as `ground_level_source01.jsonl`, a 1200-frame slice, which is what the
+   detector's constants are now calibrated against. **Hand-labelled intervals
+   are still missing**, and their absence is exactly what let the 2026-08-20
+   validation go wrong: audio-impact clusters were used as a stand-in for
+   ground truth, and they turned out to measure the venue rather than the
+   player. Labelling even a few minutes by hand would be worth more than any
+   further threshold sweep.

@@ -6,7 +6,10 @@ Copy everything below into a new chat.
 
 I'm working on **BootlegVision**, a local tennis video tool I built at `/Users/stevenkhaw/Documents/GitHub/BootlegVision`. It ingests phone footage of my tennis sessions, automatically cuts it into rallies, and lets me review them in a keyboard-driven pass — star the good ones, reject false positives, fix boundaries — then eventually compile starred rallies into highlight reels.
 
-**The code is complete and merged to `master`. What is NOT done is validating it against real footage.** That's what I need help with.
+**The code is complete. One real session has now been through it, and validating the
+detector against that footage produced a negative result** — read "Known weakness" below
+before you touch any tuning constant. The short version: at my camera height the detector
+cannot tell play from not-play, and the reason is not the weights.
 
 ## Setup
 
@@ -32,23 +35,44 @@ Machine: M2 MacBook Air, 8 GB RAM. ffmpeg 9.0.1. torch 2.13 with MPS. `detect_ac
 
 ## The actual task
 
-**The segmentation weights and threshold were tuned on synthetic signals only.** Nobody knows whether they produce sensible rallies on real footage. Three specific unknowns:
+The weights were originally tuned on synthetic signals only. One real 19.5-minute session
+has since been ingested and the detector validated against it on 2026-08-20. Two of the
+three original unknowns now have answers, and they are not the answers I wanted:
 
-1. Do the thresholds find actual rallies at my camera angle (phone, roughly 1 ft off the ground, behind the baseline, on public courts with adjacent games in frame)?
-2. Does audio impact detection survive wind? It's a secondary signal — an 800 Hz highpass plus a peakiness gate and a prominence floor. If it's useless the weights should fit to zero.
-3. Does a 4K-derived proxy play and scrub acceptably in the browser?
+1. **Do the thresholds find actual rallies at my camera angle** (phone ~1 ft off the
+   ground, behind the baseline, public courts with adjacent games in frame)? **No.** At
+   that height the far half of the court collapses onto the horizon, so the "far player"
+   the detector scored was whoever was standing on an adjacent court. The replacement
+   `subject` profile then failed its own validation: camera setup and teardown score as
+   rallies, and confidence is *inverted*, so no threshold separates true from false.
+2. **Does audio impact detection survive the environment?** The problem is not wind, it is
+   neighbours. Impacts fire at 0.62/sec when nobody is playing on my court against
+   0.65/sec mid-rally — the detector measures the venue. Stereo does not separate them
+   either; the phone's mics are too close together.
+3. **Does a 4K-derived proxy play and scrub acceptably in the browser?** Still open.
+
+**So the useful task now is not tuning.** It is either (a) shooting a fence-mounted
+session so the two-player `pair` model has a real signal to work with — `analyze_view`
+will switch profiles automatically — or (b) finding a discriminator that actually works at
+ground level (ball detection, pose-based swing detection). Sweeping thresholds against the
+existing source is a dead end, and re-fitting against audio-impact clusters is worse than
+a dead end because that ground truth is the venue's activity.
 
 ## Tuning loop
 
 Re-segmentation runs over cached features — no GPU, ~200 ms — so I can sweep freely:
 
 ```bash
-bv segment <source_id> --dry-run --threshold 0.35
-bv segment <source_id> --dry-run --threshold 0.45
-bv segment <source_id> --dry-run --threshold 0.55
+bv segment <source_id> --dry-run                    # the source's own profile default
+bv segment <source_id> --dry-run --threshold 0.30   # then sweep around it
 ```
 
-It prints each interval as `index  start → end  (duration)  conf`. I read that against my memory of the session.
+Run the bare form first. The two profiles put the threshold on **different scales** —
+0.45 for `pair`, 0.25 for `subject` — so a literal copied from one is meaningless in the
+other, and the summary line reports which value was actually used. It prints each interval
+as `index  start → end  (duration)  conf`. Read that against your memory of the session —
+and note that on the one real source, `conf` is *anti*-correlated with whether the clip is
+a real rally.
 
 **The design is deliberately recall-biased**: rejecting a false rally costs one keystroke, but a missed rally is unrecoverable without rescrubbing an hour. So I want the threshold that *slightly over-segments*, not the cleanest one.
 
@@ -56,7 +80,7 @@ The UI also has a re-segment slider that shows the rally count live, plus a scor
 
 ## Important: the play region
 
-Without a court quad, detection runs on the whole frame and `w_outside` — the largest single weight in the scoring function — never fires, so players on adjacent courts get picked up as my opponent. On the session page there's an editor: drag four corners over the area both players move in, extended to the bottom of the frame (at 1 ft camera height the near player's box is clipped by the frame edge). Save & assign, then re-run detection:
+Without a court quad, detection runs on the whole frame and `w_outside` never fires, so players on adjacent courts get picked up as my opponent. (In `subject` mode `w_outside` never fires regardless — but the quad still decides which boxes reach the detector at all, so it matters there too.) On the session page there's an editor: drag four corners over the area both players move in, extended to the bottom of the frame (at 1 ft camera height the near player's box is clipped by the frame edge). Save & assign, then re-run detection:
 
 ```bash
 bv detect <source_id> --now
@@ -118,7 +142,7 @@ is what produced the one-hit-per-clip bug. Calibrate against
   ~0.01 of its possible 0.27 and only the ~1 s audio-impact window ever cleared the
   threshold. Before touching weights, measure `min(near.v, far.v)` against `MAX_SPEED` on
   the actual footage.
-- **Almost nothing detected** → check the play region first; if the quad is wrong, `n_in_region` is 0 and nothing can score. In `subject` mode the quad does nothing at all — `w_outside` never fires there, the box-height gate replaces it.
+- **Almost nothing detected** → check the play region first; if the quad is wrong, `n_in_region` is 0 and nothing can score. This applies in **both** profiles: `split_near_far` filters boxes by the quad before electing near/far, so a wrong quad starves `subject` mode too (`near is None` everywhere → score 0 everywhere). What `subject` mode drops is only the `w_outside` scoring term. Fixing a quad needs a full re-detect — `--reuse-features` reuses features that were already quad-filtered.
 - **A ground-level source classified as `pair`** → the court quad is probably admitting adjacent courts, which inflates the measured foot separation. Check `analyze_view(frames)` directly.
 - **Camera setup or teardown detected as a rally** → known and unfixed in `subject` mode. See "Known weakness" below.
 - **Warmup detected as rallies** → that's intended. A rally is defined as continuous hitting; warmup counts.
