@@ -114,3 +114,63 @@ def test_display_size_is_unchanged_on_a_half_turn():
     from bootleg.media.probe import display_size
     assert display_size(3840, 2160, 0) == (3840, 2160)
     assert display_size(3840, 2160, 180) == (3840, 2160)
+
+
+# --- session dating -------------------------------------------------------
+#
+# A night session is the case that breaks naive dating: play at 20:39 local
+# and `creation_time` (always UTC) already reads as the next day.
+
+def test_recorded_at_prefers_apples_local_creationdate():
+    from bootleg.media.probe import _recorded_at
+
+    tags = {
+        "creation_time": "2026-08-19T00:39:16.000000Z",
+        "com.apple.quicktime.creationdate": "2026-08-18T20:39:15-0400",
+    }
+    # Kept in the offset it was shot in, not translated to the ingesting
+    # machine's timezone -- the evening it was played is a property of the
+    # recording, not of where it was later imported.
+    assert _recorded_at(tags).startswith("2026-08-18T20:39:15")
+
+
+def test_recorded_at_normalizes_the_offset_for_javascript():
+    from bootleg.media.probe import _recorded_at
+
+    # web/src/lib/timeline.ts calls Date.parse on this value. ECMAScript only
+    # guarantees +HH:MM, so Apple's "-0400" has to be re-emitted with a colon.
+    tags = {"com.apple.quicktime.creationdate": "2026-08-18T20:39:15-0400"}
+    assert _recorded_at(tags).endswith("-04:00")
+
+
+def test_recorded_at_converts_a_utc_only_clip_to_local():
+    from datetime import datetime
+
+    from bootleg.media.probe import _recorded_at
+
+    tags = {"creation_time": "2026-08-19T00:39:16.000000Z"}
+    got = _recorded_at(tags)
+    expected = datetime.fromisoformat("2026-08-19T00:39:16+00:00").astimezone()
+    assert got == expected.isoformat()
+
+
+def test_recorded_at_is_none_without_any_timestamp():
+    from bootleg.media.probe import _recorded_at
+
+    assert _recorded_at({}) is None
+
+
+def test_recorded_at_ignores_an_unparseable_timestamp():
+    from bootleg.media.probe import _recorded_at
+
+    assert _recorded_at({"creation_time": "not a date"}) is None
+
+
+def test_recorded_at_falls_back_when_the_apple_tag_is_malformed():
+    from bootleg.media.probe import _recorded_at
+
+    tags = {
+        "creation_time": "2026-08-19T00:39:16.000000Z",
+        "com.apple.quicktime.creationdate": "garbage",
+    }
+    assert _recorded_at(tags) is not None

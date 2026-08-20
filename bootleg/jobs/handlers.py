@@ -47,10 +47,19 @@ def _open(library: Library) -> sqlite3.Connection:
 
 
 def _played_on(recorded_at: str | None, fallback: Path) -> str:
+    """The date a session gets filed under: the local evening it was played.
+
+    `probe()` has already resolved `recorded_at` to local wall-clock time
+    (see _recorded_at), so its date part is the answer directly. The mtime
+    fallback -- for a clip whose metadata an editor or an `ffmpeg -c copy`
+    remux stripped -- is read in local time for the same reason: a session
+    played at 20:39 Eastern is a Tuesday session, and reading its timestamp
+    as UTC would file it on Wednesday.
+    """
     if recorded_at:
         return recorded_at[:10]
-    ts = datetime.fromtimestamp(fallback.stat().st_mtime, tz=UTC)
-    return ts.date().isoformat()
+    mtime = datetime.fromtimestamp(fallback.stat().st_mtime, tz=UTC)
+    return mtime.astimezone().date().isoformat()
 
 
 def _move_to_failed(library: Library, src: Path, message: str) -> None:

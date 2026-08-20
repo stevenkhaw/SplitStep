@@ -1,6 +1,7 @@
 import json
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 
@@ -69,6 +70,48 @@ def display_size(width: int, height: int, rotation_deg: int) -> tuple[int, int]:
     return (height, width) if rotation_deg in (90, 270) else (width, height)
 
 
+def _parse_timestamp(raw: str) -> datetime | None:
+    """Parse one of ffprobe's timestamp spellings, or give up quietly.
+
+    Both spellings this handles are already valid `fromisoformat` input on
+    3.11+: the trailing "Z" of `creation_time`, and the colon-less "-0400"
+    offset Apple writes. A file that has been through an editor can carry
+    anything at all in these tags, so an unparseable value is a normal
+    condition, not an error -- the caller falls back to the file's mtime.
+    """
+    try:
+        return datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _recorded_at(tags: dict) -> str | None:
+    """When the recording was made, in the wall-clock time of wherever it was.
+
+    `creation_time` is always UTC, and a tennis session played at 20:39
+    Eastern reads as 00:39 the NEXT day in UTC -- so dating a session by
+    slicing that string files every evening session a day late. iPhones also
+    write `com.apple.quicktime.creationdate`, which carries local time plus
+    the offset it was shot in, and that is what "which evening did I play"
+    means. Prefer it; it also stays right for footage shot in another
+    timezone, where the ingesting machine's clock would not be.
+
+    The result is re-emitted through `isoformat()` rather than passed
+    through, because Apple writes the offset as "-0400" while ECMAScript's
+    Date.parse only guarantees "+HH:MM" -- and web/src/lib/timeline.ts parses
+    this value to lay sources out on one timeline.
+    """
+    local = _parse_timestamp(tags.get("com.apple.quicktime.creationdate", ""))
+    if local is not None:
+        return local.isoformat()
+    utc = _parse_timestamp(tags.get("creation_time", ""))
+    if utc is not None:
+        # No offset to preserve, so the best available guess at local time is
+        # the machine doing the ingest.
+        return utc.astimezone().isoformat()
+    return None
+
+
 def probe(path: Path, timeout: float | None = None) -> MediaInfo:
     """Read a media file's format/stream info via ffprobe.
 
@@ -108,7 +151,7 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
     fps = _pick_fps(video.get("avg_frame_rate"), video.get("r_frame_rate"))
 
     tags = fmt.get("tags", {})
-    recorded_at = tags.get("creation_time")
+    recorded_at = _recorded_at(tags)
 
     return MediaInfo(
         duration_ms=round(duration_s * 1000),

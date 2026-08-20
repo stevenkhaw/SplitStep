@@ -949,3 +949,31 @@ def test_build_proxy_retried_after_the_first_run_does_not_duplicate_detect(
 
     jobs = conn.execute("SELECT * FROM jobs WHERE type='detect'").fetchall()
     assert len(jobs) == 1
+
+
+# --- session dating -------------------------------------------------------
+
+def test_played_on_uses_the_local_evening_not_the_utc_date():
+    from pathlib import Path
+
+    from bootleg.jobs.handlers import _played_on
+
+    # 20:39 on Tuesday the 18th, Eastern. UTC calls that Wednesday the 19th;
+    # the session belongs to the evening it was actually played.
+    assert _played_on("2026-08-18T20:39:15-04:00", Path("/nonexistent")) == "2026-08-18"
+
+
+def test_played_on_falls_back_to_the_files_local_mtime(tmp_path):
+    import os
+    from datetime import datetime
+
+    from bootleg.jobs.handlers import _played_on
+
+    f = tmp_path / "clip.mov"
+    f.write_bytes(b"x")
+    # A clip whose metadata was stripped (an editor re-encode, or an
+    # `ffmpeg -c copy` remux) has only its mtime left.
+    when = datetime(2026, 8, 18, 20, 39, 15).astimezone().timestamp()
+    os.utime(f, (when, when))
+
+    assert _played_on(None, f) == "2026-08-18"
