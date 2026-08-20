@@ -278,11 +278,13 @@ def test_retry_after_a_crash_before_the_move_reuses_the_committed_source_row(
     library, conn, dropped_video, monkeypatch
 ):
     """Register-only ingest moves the original right after add_source()
-    commits, and handles a requeue by returning early once the inbox path
-    is gone (see test_ingest_retry_after_the_original_moved_is_a_no_op). But
-    a crash can still land *before* that move finishes, leaving the source
-    row at 'ingesting' with the file still sitting at its original inbox
-    path. reclaim_stale() hands the exact same payload to a fresh
+    commits, and handles a requeue whose inbox path is already gone by
+    verifying the earlier move actually landed before reaffirming its
+    status (see
+    test_ingest_retry_after_the_original_moved_reaches_needs_setup_again).
+    But a crash can still land *before* that move finishes, leaving the
+    source row at 'ingesting' with the file still sitting at its original
+    inbox path. reclaim_stale() hands the exact same payload to a fresh
     handle_ingest() call; this asserts the retry reuses the already-
     committed source row instead of duplicating it.
     """
@@ -319,6 +321,72 @@ def test_retry_after_a_crash_before_the_move_reuses_the_committed_source_row(
     src_dir = library.source_dir(sessions[0]["id"], 1)
     assert (src_dir / "original.mp4").exists()
     assert not dropped_video.exists()
+
+
+# -- Fix: stranded source on crash between move and status write ------------
+
+def test_retry_after_a_crash_between_the_move_and_the_status_write_reaches_needs_setup(
+    library, conn, dropped_video, monkeypatch
+):
+    """Regression test for the defect this fix addresses. handle_ingest
+    moves the original and only then writes 'needs_setup'; a crash in that
+    window used to strand the source at add_source()'s 'ingesting' forever,
+    because the early-return guard saw the inbox path gone and assumed the
+    earlier attempt had already finished -- the false assumption this fix
+    replaces with a real check. Simulated the way the reviewer reproduced
+    it: set_source_status's first call with 'needs_setup' raises, standing
+    in for a crash that lands after the move but before the status write.
+    """
+    payload = {"path": str(dropped_video)}
+    real_set_source_status = handlers.set_source_status
+    calls = {"n": 0}
+
+    def crash_on_first_needs_setup(conn, source_id, status):
+        if status == "needs_setup":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _SimulatedCrash()
+        return real_set_source_status(conn, source_id, status)
+
+    monkeypatch.setattr(handlers, "set_source_status", crash_on_first_needs_setup)
+
+    with pytest.raises(_SimulatedCrash):
+        handle_ingest(library, payload)
+
+    # The move already landed; only the status write was lost to the crash.
+    assert not dropped_video.exists()
+    session = list_sessions(conn)[0]
+    assert list_sources(conn, session["id"])[0]["status"] == "ingesting"
+
+    monkeypatch.setattr(handlers, "set_source_status", real_set_source_status)
+
+    # reclaim_stale()'s retry: the same payload, inbox path now gone.
+    handle_ingest(library, payload)
+
+    sessions = list_sessions(conn)
+    assert len(sessions) == 1
+    sources = list_sources(conn, sessions[0]["id"])
+    assert len(sources) == 1  # reused, not duplicated
+    assert sources[0]["status"] == "needs_setup"
+    assert sessions[0]["status"] == "needs_setup"
+
+
+def test_ingest_of_a_missing_inbox_file_with_no_matching_source_raises(library, conn):
+    """A path that was never dropped into the inbox -- a typo'd payload, or
+    a file deleted out from under a still-queued job -- must not be mistaken
+    for "already ingested" just because src.exists() is False. Before this
+    fix the early-return guard could not tell the two cases apart and
+    returned as if the job had succeeded; it must now raise instead, so the
+    job lands in 'failed' with a readable error rather than vanishing
+    silently.
+    """
+    ghost = library.inbox / "IMG_9999.mp4"
+
+    with pytest.raises(FileNotFoundError):
+        handle_ingest(library, {"path": str(ghost)})
+
+    assert conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
 # -- Task 5: ingest becomes register-only ------------------------------------
@@ -363,7 +431,15 @@ def test_ingest_enqueues_nothing(library, sample_video):
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
 
 
-def test_ingest_retry_after_the_original_moved_is_a_no_op(library, sample_video):
+def test_ingest_retry_after_the_original_moved_reaches_needs_setup_again(
+    library, sample_video
+):
+    """Renamed from *_is_a_no_op: the retry is no longer a bare early
+    return -- it now verifies the earlier move actually completed before
+    reaffirming 'needs_setup', which is the write
+    test_retry_after_a_crash_between_the_move_and_the_status_write_reaches_needs_setup
+    shows can otherwise be lost to a crash.
+    """
     src = library.inbox / "IMG_0004.MOV"
     src.write_bytes(sample_video.read_bytes())
     handle_ingest(library, {"path": str(src)})
@@ -374,6 +450,7 @@ def test_ingest_retry_after_the_original_moved_is_a_no_op(library, sample_video)
 
     conn = connect(library.db_path)
     assert conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
+    assert conn.execute("SELECT status FROM sources").fetchone()[0] == "needs_setup"
 
 
 def test_ingest_stores_rotation_and_display_dimensions(library, tmp_path, sample_video):

@@ -11,6 +11,7 @@ from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
     find_or_create_session_for_date,
+    find_source_by_original_name,
     get_source,
     get_source_by_original_name,
     set_session_status,
@@ -89,10 +90,24 @@ def handle_ingest(library: Library, payload: dict) -> None:
 
     try:
         if not src.exists():
-            # A requeued job whose first attempt already moved the file.
-            # Nothing to redo: the source row is committed and the original
-            # is in place.
-            return
+            # A requeued job can find the inbox path gone for two different
+            # reasons, and a missing file alone can't tell them apart: the
+            # first attempt may have moved the original and then crashed
+            # before writing 'needs_setup' (recoverable -- verify the move
+            # really landed and finish the write it already earned), or the
+            # path may never have existed at all (not recoverable -- fail
+            # loudly rather than return as if the job had succeeded).
+            existing = find_source_by_original_name(conn, src.name)
+            if existing is not None:
+                moved_dir = library.source_dir(existing["session_id"], existing["idx"])
+                if any(moved_dir.glob("original.*")):
+                    set_source_status(conn, existing["id"], "needs_setup")
+                    set_session_status(conn, existing["session_id"], "needs_setup")
+                    return
+            raise FileNotFoundError(
+                f"ingest payload names a missing inbox file with no completed "
+                f"source to recover it from: {src}"
+            )
         info = probe(src)
         # The transcode's space is checked in build_proxy, where it happens.
         # A move needs only what the file already occupies.

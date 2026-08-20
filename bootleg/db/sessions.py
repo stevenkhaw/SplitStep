@@ -102,6 +102,25 @@ def get_source_by_original_name(
     ).fetchone()
 
 
+def find_source_by_original_name(
+    conn: sqlite3.Connection, original_name: str
+) -> sqlite3.Row | None:
+    """Find a source row by original_name alone, with no session_id to
+    scope the search.
+
+    Used when a requeued ingest job finds its inbox path already gone: the
+    payload it was handed carries only a file path, not the session the
+    earlier attempt filed it under, so get_source_by_original_name's
+    session-scoped lookup isn't available. Callers use this to tell "the
+    earlier attempt already finished, reaffirm its status" apart from "this
+    file never existed at all".
+    """
+    return conn.execute(
+        "SELECT * FROM sources WHERE original_name = ? ORDER BY idx LIMIT 1",
+        (original_name,),
+    ).fetchone()
+
+
 def set_source_status(conn: sqlite3.Connection, source_id: str, status: str) -> None:
     conn.execute("UPDATE sources SET status = ? WHERE id = ?", (status, source_id))
     conn.commit()
