@@ -19,6 +19,28 @@ def enqueue(conn: sqlite3.Connection, job_type: str, payload: dict) -> str:
     return job_id
 
 
+def has_pending_job(conn: sqlite3.Connection, job_type: str, source_id: str) -> bool:
+    """True if a job_type job for source_id is already 'queued' or
+    'running'.
+
+    Guards against a duplicate enqueue: reclaim_stale() can requeue a
+    handler that already ran to completion and enqueued its own follow-up
+    job (e.g. build_proxy enqueuing detect) if the worker dies after that
+    enqueue but before the original job's row is written 'done'. A second
+    copy of the follow-up job would then redo work that silently discards
+    state a human may have changed since the first copy ran (see
+    handle_detect / replace_rallies). Matches via json_extract on the
+    decoded payload, not the raw payload text, so a source_id that is a
+    prefix of another's (e.g. 'src-1' vs 'src-10') cannot false-match.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM jobs WHERE type = ? AND status IN ('queued', 'running')"
+        " AND json_extract(payload, '$.source_id') = ? LIMIT 1",
+        (job_type, source_id),
+    ).fetchone()
+    return row is not None
+
+
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
     # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML

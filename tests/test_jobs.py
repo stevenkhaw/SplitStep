@@ -9,6 +9,7 @@ from bootleg.db.jobs import (
     claim,
     enqueue,
     finish,
+    has_pending_job,
     heartbeat,
     reclaim_stale,
     set_progress,
@@ -238,3 +239,57 @@ def test_claim_is_atomic_across_connections(library):
                 assert claimed_by[0] != claimed_by[1]
     finally:
         setup_conn.close()
+
+
+# -- has_pending_job: guards the duplicate-detect defect described in
+# task-6-report.md -- reclaim_stale() can requeue build_proxy if a worker
+# dies after it enqueues 'detect' but before its own job row is marked
+# done, and a second 'detect' would silently discard hand-edited rally
+# boundaries (replace_rallies only preserves starred/rejected by overlap).
+
+def test_has_pending_job_true_when_a_queued_job_matches(conn):
+    enqueue(conn, "detect", {"source_id": "src-1"})
+    assert has_pending_job(conn, "detect", "src-1") is True
+
+
+def test_has_pending_job_true_when_a_running_job_matches(conn):
+    enqueue(conn, "detect", {"source_id": "src-1"})
+    claim(conn)
+    assert has_pending_job(conn, "detect", "src-1") is True
+
+
+def test_has_pending_job_false_when_the_only_match_is_done(conn):
+    job_id = enqueue(conn, "detect", {"source_id": "src-1"})
+    claim(conn)
+    finish(conn, job_id)
+    assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_has_pending_job_false_when_the_only_match_is_failed(conn):
+    job_id = enqueue(conn, "detect", {"source_id": "src-1"})
+    claim(conn)
+    finish(conn, job_id, error="ffmpeg exploded")
+    assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_has_pending_job_ignores_a_different_job_type(conn):
+    enqueue(conn, "build_proxy", {"source_id": "src-1"})
+    assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_has_pending_job_ignores_a_different_source_id(conn):
+    enqueue(conn, "detect", {"source_id": "src-2"})
+    assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_has_pending_job_does_not_match_on_a_source_id_prefix(conn):
+    """json_extract compares the decoded field, not raw payload text -- a
+    naive substring/LIKE check on the payload string would wrongly treat a
+    job queued for 'src-10' as a match for source_id 'src-1'.
+    """
+    enqueue(conn, "detect", {"source_id": "src-10"})
+    assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_has_pending_job_false_when_the_queue_is_empty(conn):
+    assert has_pending_job(conn, "detect", "src-1") is False

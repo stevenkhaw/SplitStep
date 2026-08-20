@@ -71,6 +71,32 @@ def _move_to_failed(library: Library, src: Path, message: str) -> None:
     (failed_dir / f"{dest.name}.error.txt").write_text(message)
 
 
+def _session_should_fail(
+    conn: sqlite3.Connection, session_id: str, failing_source_id: str | None
+) -> bool:
+    """Decide whether a source failure should also fail its session.
+
+    True unless some OTHER source in the session already reached 'ready'
+    or 'reviewed'. Sessions hold multiple sources (see
+    test_second_file_same_day_joins_the_same_session), and
+    refresh_session_review_status (bootleg/db/sessions.py) only ever acts
+    on sessions already in ('ready', 'reviewed') -- once a session is
+    written 'failed' it can never transition again. Failing it while a
+    sibling source already finished review would strand that sibling's
+    reviewed rallies behind this source's unrelated failure.
+    """
+    query = (
+        "SELECT 1 FROM sources WHERE session_id = ?"
+        " AND status IN ('ready', 'reviewed')"
+    )
+    params: list[str] = [session_id]
+    if failing_source_id is not None:
+        query += " AND id != ?"
+        params.append(failing_source_id)
+    row = conn.execute(query + " LIMIT 1", params).fetchone()
+    return row is None
+
+
 def handle_ingest(library: Library, payload: dict) -> None:
     """Register a dropped file. No transcode, no detection.
 
@@ -152,7 +178,9 @@ def handle_ingest(library: Library, payload: dict) -> None:
     except Exception as exc:
         if source_id is not None:
             set_source_status(conn, source_id, "failed")
-        if session_id is not None:
+        # See _session_should_fail: don't strand a sibling source's
+        # already-reviewed work behind this one's failure.
+        if session_id is not None and _session_should_fail(conn, session_id, source_id):
             set_session_status(conn, session_id, "failed")
         _move_to_failed(library, src, f"{type(exc).__name__}: {exc}")
         raise
@@ -182,12 +210,21 @@ def handle_build_proxy(library: Library, payload: dict) -> None:
         make_thumbs(src_dir / "proxy.mp4", src_dir / "thumbs.jpg")
     except Exception:
         set_source_status(conn, source["id"], "failed")
-        set_session_status(conn, source["session_id"], "failed")
+        # See _session_should_fail: don't strand a sibling source's
+        # already-reviewed work behind this one's failure.
+        if _session_should_fail(conn, source["session_id"], source["id"]):
+            set_session_status(conn, source["session_id"], "failed")
         raise
 
     set_source_status(conn, source["id"], "ingested")
     set_session_status(conn, source["session_id"], "detecting")
-    jobq.enqueue(conn, "detect", {"source_id": source["id"]})
+    # reclaim_stale() can requeue build_proxy if a worker dies after this
+    # enqueue but before the job itself is written 'done', re-running this
+    # handler; a duplicate detect job would call replace_rallies again and
+    # silently discard any rally boundaries a human hand-edited between the
+    # two detect runs (replace_rallies only preserves starred/rejected).
+    if not jobq.has_pending_job(conn, "detect", source["id"]):
+        jobq.enqueue(conn, "detect", {"source_id": source["id"]})
 
 
 def _original_path(src_dir: Path) -> Path | None:

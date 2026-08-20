@@ -755,3 +755,147 @@ def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
 def test_build_proxy_on_a_missing_source_raises(library):
     with pytest.raises(ValueError, match="No such source"):
         handle_build_proxy(library, {"source_id": "nope"})
+
+
+# -- Defect: a source failure must not condemn a whole session -------------
+# (see .superpowers/sdd/task-6-report.md, "one edge case worth flagging").
+# refresh_session_review_status only ever acts on sessions already in
+# ('ready', 'reviewed'); once a session is written 'failed' it can never
+# transition again, so failing it while a sibling source already finished
+# review would strand that sibling's reviewed rallies forever.
+
+def test_build_proxy_failure_does_not_fail_the_session_when_a_sibling_is_ready(
+    library, conn, sample_video, monkeypatch
+):
+    """Source A is already 'ready' (fully detected, possibly reviewed).
+    Source B's build_proxy then fails; only B may be marked failed, and the
+    session -- which A's finished work still lives under -- must not be
+    dragged down with it.
+    """
+    _, row_a = _registered(library, sample_video, name="IMG_3000.MOV")
+    session_id = row_a["session_id"]
+    handlers.set_source_status(conn, row_a["id"], "ready")
+    handlers.set_session_status(conn, session_id, "ready")
+
+    source_b_id, idx_b = add_source(
+        conn, session_id,
+        recorded_at="2024-01-01T00:00:01+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_3001.MOV",
+    )
+    handlers.set_source_status(conn, source_b_id, "needs_setup")
+    b_dir = library.source_dir(session_id, idx_b)
+    b_dir.mkdir(parents=True)
+    (b_dir / "original.mp4").write_bytes(sample_video.read_bytes())
+
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ffmpeg exploded")),
+    )
+
+    with pytest.raises(RuntimeError):
+        handle_build_proxy(library, {"source_id": source_b_id})
+
+    assert get_source(conn, source_b_id)["status"] == "failed"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id=?", (session_id,)
+    ).fetchone()
+    assert session_after["status"] != "failed"
+    assert session_after["status"] == "ready"
+
+
+def test_build_proxy_failure_fails_the_session_when_it_is_the_only_source(
+    library, conn, sample_video, monkeypatch
+):
+    """Existing behaviour, unchanged: a session with only one source still
+    fails wholesale when that source's build_proxy fails -- there is no
+    sibling left to protect.
+    """
+    _, row = _registered(library, sample_video, name="IMG_3002.MOV")
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ffmpeg exploded")),
+    )
+
+    with pytest.raises(RuntimeError):
+        handle_build_proxy(library, {"source_id": row["id"]})
+
+    assert get_source(conn, row["id"])["status"] == "failed"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id=?", (row["session_id"],)
+    ).fetchone()
+    assert session_after["status"] == "failed"
+
+
+def test_ingest_failure_does_not_fail_the_session_when_a_sibling_is_ready(
+    library, conn, dropped_video, monkeypatch
+):
+    """Same healthy-sibling rule as build_proxy (see
+    test_build_proxy_failure_does_not_fail_the_session_when_a_sibling_is_ready):
+    a second file dropped the same day joins session A's session (see
+    test_second_file_same_day_joins_the_same_session); a failure registering
+    it must not fail the session out from under A's already-reviewed work.
+    """
+    handle_ingest(library, {"path": str(dropped_video)})
+    session = list_sessions(conn)[0]
+    source_a = list_sources(conn, session["id"])[0]
+    handlers.set_source_status(conn, source_a["id"], "ready")
+    handlers.set_session_status(conn, session["id"], "ready")
+
+    second = library.inbox / "IMG_0002.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=640x360:rate=30:duration=2",
+         "-c:v", "libx264", str(second)],
+        check=True, capture_output=True,
+    )
+
+    real_move = handlers.shutil.move
+    calls = {"n": 0}
+
+    def flaky_move(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk exploded")
+        return real_move(src, dst, *a, **kw)
+
+    monkeypatch.setattr(handlers.shutil, "move", flaky_move)
+
+    with pytest.raises(OSError):
+        handle_ingest(library, {"path": str(second)})
+
+    sources = list_sources(conn, session["id"])
+    assert len(sources) == 2
+    source_b = sources[1]
+    assert source_b["status"] == "failed"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id=?", (session["id"],)
+    ).fetchone()
+    assert session_after["status"] == "ready"
+
+
+# -- Defect: a duplicate detect job can discard hand-edited rally bounds ---
+
+def test_build_proxy_retried_after_the_first_run_does_not_duplicate_detect(
+    library, sample_video, monkeypatch
+):
+    """Simulates the crash window described in task-6-report.md: a worker
+    dies after handle_build_proxy's jobq.enqueue('detect', ...) call but
+    before the build_proxy job row itself is marked done, so
+    reclaim_stale() requeues build_proxy and this handler runs a second
+    time for the same source. handle_detect's replace_rallies discards
+    manual rally-boundary edits by design (only starred/rejected survive by
+    overlap), so a second 'detect' job must never be queued while the first
+    is still pending.
+    """
+    conn, row = _registered(library, sample_video, name="IMG_3003.MOV")
+    monkeypatch.setattr(
+        "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
+    )
+    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+
+    handle_build_proxy(library, {"source_id": row["id"]})
+    handle_build_proxy(library, {"source_id": row["id"]})
+
+    jobs = conn.execute("SELECT * FROM jobs WHERE type='detect'").fetchall()
+    assert len(jobs) == 1
