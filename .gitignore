@@ -31,3 +31,6 @@ dist/
 
 web/node_modules/
 web/dist/
+
+# Ultralytics downloads the model into the working directory on first run.
+yolo11n.pt

@@ -23,6 +23,9 @@ const mockApi = {
   jobs: vi.fn(),
   proxyUrl: () => 'about:blank',
   frameUrl: () => 'about:blank',
+  getSource: vi.fn(),
+  setup: vi.fn(),
+  previewUrl: () => 'about:blank',
 }
 
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
@@ -74,6 +77,7 @@ function source(): SessionDetail['sources'][number] {
     has_original: 1,
     court_preset_id: null,
     status: 'ready',
+    rotation_deg: 0,
   }
 }
 
