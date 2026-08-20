@@ -40,6 +40,12 @@
   // gesture, so the retry succeeds.
   let blocked = $state(false)
 
+  // A genuine media load failure (e.g. a missing/expired proxy returning
+  // 404). Deliberately separate from `blocked`: telling the user to "click
+  // to play" when playback can never succeed is actively misleading, so this
+  // gets its own honest message instead of borrowing the autoplay scrim.
+  let loadError = $state<string | null>(null)
+
   // How close a preloaded element's currentTime has to be to a requested
   // startMs to count as "already positioned there" -- seeking is not exact.
   const SEEK_TOLERANCE_MS = 100
@@ -69,7 +75,12 @@
         startLoop()
       },
       (err) => {
-        blocked = true
+        // Only a genuine autoplay rejection should raise the click-to-play
+        // scrim. `play()` also rejects with AbortError whenever a pending
+        // call is interrupted by a new load/seek -- e.g. every pointermove
+        // while dragging the start handle in timeline mode -- and treating
+        // that as a block flashes the scrim over the video mid-drag.
+        if (err?.name === 'NotAllowedError') blocked = true
         onblocked?.(err)
       },
     )
@@ -101,6 +112,13 @@
   function finishRally(el: HTMLVideoElement): void {
     if (rallyFinished) return
     rallyFinished = true
+    // The rAF loop and the `timeupdate` backstop race to get here; whichever
+    // loses still has a frame scheduled. Cancel it, don't just zero the
+    // handle -- an uncancelled frame is a leaked, untracked loop that the
+    // next rally's teardown can no longer reach (it only knows about the
+    // handle it itself armed), and it will keep re-arming itself against
+    // whatever element is live by the time it fires.
+    if (raf) cancelAnimationFrame(raf)
     raf = 0
     el.pause()
     onended()
@@ -138,6 +156,23 @@
     if (!raf) raf = requestAnimationFrame(tick)
   }
 
+  // Arms (or re-arms) the rAF loop and the `timeupdate` backstop for
+  // `target`, returning the cleanup that tears both down. This is the only
+  // place either gets started, and every path that tears them down (the
+  // effect cleanup below, on any rerun) must go back through here rather
+  // than returning early -- a teardown that isn't paired with a re-arm
+  // leaves the out-point undetected for the rest of the rally.
+  function armLoop(target: HTMLVideoElement): () => void {
+    startLoop()
+    const handleTimeUpdate = () => checkBoundary(target)
+    target.addEventListener('timeupdate', handleTimeUpdate)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = 0
+      target.removeEventListener('timeupdate', handleTimeUpdate)
+    }
+  }
+
   // The last (src, startMs) this effect actually applied. Without this, any
   // unrelated rerun would redo the seek and restart the loop it just armed --
   // in particular, the aIsLive write below would otherwise do exactly that,
@@ -149,9 +184,20 @@
     // (re)arm whenever the current rally changes
     src
     startMs
-    if (src === appliedSrc && startMs === appliedStartMs) return
+    if (src === appliedSrc && startMs === appliedStartMs) {
+      // Nothing about the rally changed -- some other tracked read (e.g.
+      // `speed`, historically, before it was wrapped in untrack below) is
+      // what forced this rerun. Svelte still ran the *previous* cleanup
+      // before getting here, which cancelled the rAF loop and dropped the
+      // `timeupdate` listener, so this path must re-arm against the
+      // still-current rally rather than return and strand it torn down.
+      const target = untrack(() => live())
+      if (!target) return
+      return armLoop(target)
+    }
     appliedSrc = src
     appliedStartMs = startMs
+    loadError = null
 
     // Reading aIsLive (via live()/idle()) and writing it below must not
     // become a tracked dependency of *this* effect: live()/idle() read it
@@ -187,7 +233,13 @@
     })
     if (!target) return
 
-    target.playbackRate = speed
+    // Redundant with the dedicated playbackRate-sync effect below, and must
+    // stay untracked: a tracked read of `speed` here makes every speed
+    // change invalidate this effect, running the destructive cleanup above
+    // and then hitting the guard -- which is exactly the trap this effect's
+    // re-arm path now exists to catch, but the fix starts with not reading
+    // this at all.
+    target.playbackRate = untrack(() => speed)
     rallyFinished = false
     attemptPlay(target)
 
@@ -198,14 +250,7 @@
     // throttling, so it catches the boundary late (up to ~250ms) but it
     // *does* catch it. finishRally()'s guard keeps this from double-firing
     // against the rAF path.
-    const handleTimeUpdate = () => checkBoundary(target)
-    target.addEventListener('timeupdate', handleTimeUpdate)
-
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      raf = 0
-      target.removeEventListener('timeupdate', handleTimeUpdate)
-    }
+    return armLoop(target)
   })
 
   $effect(() => {
@@ -236,6 +281,22 @@
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   })
+
+  // A missing/expired proxy (404), a decode failure, or any other real media
+  // error is not an autoplay block -- surface it distinctly and honestly
+  // instead of leaving a black box behind a "Click to play" button that can
+  // never succeed.
+  function handleError(el: HTMLVideoElement): void {
+    const code = el.error?.code
+    loadError =
+      code === MediaError.MEDIA_ERR_NETWORK
+        ? 'Video failed to load: network error.'
+        : code === MediaError.MEDIA_ERR_DECODE
+          ? 'Video failed to load: could not decode.'
+          : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+            ? 'Video failed to load: not found or unsupported.'
+            : 'Video failed to load.'
+  }
 </script>
 
 <div class="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
@@ -244,14 +305,20 @@
     class="absolute inset-0 h-full w-full {aIsLive ? 'opacity-100' : 'opacity-0'}"
     playsinline
     muted={false}
+    onerror={() => handleError(a)}
   ></video>
   <video
     bind:this={b}
     class="absolute inset-0 h-full w-full {aIsLive ? 'opacity-0' : 'opacity-100'}"
     playsinline
     muted={false}
+    onerror={() => handleError(b)}
   ></video>
-  {#if blocked}
+  {#if loadError}
+    <div class="absolute inset-0 flex items-center justify-center bg-black/50 text-white">
+      <span class="rounded-full bg-white px-5 py-2 text-sm font-medium text-black">{loadError}</span>
+    </div>
+  {:else if blocked}
     <button
       type="button"
       class="absolute inset-0 flex items-center justify-center bg-black/50 text-white"
