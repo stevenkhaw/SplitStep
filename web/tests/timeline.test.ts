@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MIN_RALLY_MS,
+  clampMinGap,
   fractionToMs,
   msToFraction,
   nearestHandle,
@@ -150,6 +152,37 @@ describe('nearestHandle', () => {
   it('picks the closer handle when the segment is very short', () => {
     expect(nearestHandle(0.5005, 0.5, 0.502, 10, 1000)).toBe('start')
     expect(nearestHandle(0.5018, 0.5, 0.502, 10, 1000)).toBe('end')
+  })
+})
+
+describe('clampMinGap', () => {
+  it('passes a normally-ordered, wide-enough pair through unchanged', () => {
+    expect(clampMinGap(1000, 5000)).toEqual({ startMs: 1000, endMs: 5000 })
+  })
+
+  it('pulls endMs forward when the gap is smaller than the minimum', () => {
+    expect(clampMinGap(1000, 1050)).toEqual({ startMs: 1000, endMs: 1100 })
+  })
+
+  it('never persists an inverted rally (Finding 7: "[" past end_ms)', () => {
+    // e.g. the playhead parked past the rally's current end_ms, then "["
+    // committed with startMs > endMs.
+    const result = clampMinGap(8000, 5000)
+    expect(result.startMs).toBe(8000) // the live playhead position, honored exactly
+    expect(result.endMs).toBeGreaterThan(result.startMs)
+    expect(result.endMs).toBe(8100)
+  })
+
+  it('anchors startMs exactly, even in the degenerate case -- callers rely on this to pick which side is the anchor', () => {
+    expect(clampMinGap(500, 500)).toEqual({ startMs: 500, endMs: 600 })
+  })
+
+  it('honors a custom minimum', () => {
+    expect(clampMinGap(1000, 1010, 50)).toEqual({ startMs: 1000, endMs: 1050 })
+  })
+
+  it('exports the default minimum used across the drag and keyboard paths', () => {
+    expect(MIN_RALLY_MS).toBe(100)
   })
 })
 

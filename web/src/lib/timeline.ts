@@ -68,6 +68,42 @@ export function zoomWindow(
   return { startMs: Math.round(startMs), endMs: Math.round(startMs + span) }
 }
 
+/**
+ * Minimum gap enforced between a rally's start and end. Shared by every
+ * bounds-editing path -- ZoomBand's own per-frame drag clamp and
+ * TimelineMode's `[`/`]` keyboard commit (see `clampMinGap`) -- so neither
+ * can persist a rally narrower than this, and the keyboard path in
+ * particular can never persist an inverted one (start_ms > end_ms).
+ */
+export const MIN_RALLY_MS = 100
+
+/**
+ * Enforces `endMs >= startMs + minMs`, preserving `startMs` exactly and
+ * pulling `endMs` forward when the gap is too small -- including when it's
+ * inverted (endMs < startMs).
+ *
+ * `startMs` is always the anchor: TimelineMode's `[` passes the live
+ * playhead position as `startMs` (so that exact in-point survives even in
+ * the degenerate case) and the rally's untouched `end_ms` as `endMs`; `]`
+ * passes the untouched `start_ms` as `startMs` (correctly anchoring it) and
+ * the live playhead as `endMs`. Either way this never moves the value the
+ * caller is trying to set, only the one it isn't.
+ *
+ * A drag-committed pair from ZoomBand already satisfies the invariant (its
+ * own per-frame clamp enforces the same minimum), so applying this again is
+ * a no-op for that path -- it exists here as the single shared backstop so
+ * every caller of TimelineMode's `commitBounds` gets the same guarantee,
+ * not just the ones that already remembered to clamp themselves.
+ */
+export function clampMinGap(
+  startMs: number,
+  endMs: number,
+  minMs: number = MIN_RALLY_MS,
+): { startMs: number; endMs: number } {
+  if (endMs - startMs < minMs) return { startMs, endMs: startMs + minMs }
+  return { startMs, endMs }
+}
+
 /** Which drag handle, if any, a pointer at `xFraction` is grabbing. */
 export function nearestHandle(
   xFraction: number,
