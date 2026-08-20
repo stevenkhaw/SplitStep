@@ -44,16 +44,26 @@
     api
       .scores(id, th ?? undefined)
       .then((s) => {
+        // /scores' cost scales with features.jsonl's length, so responses
+        // are not guaranteed to land in request order: switch from a long
+        // source to a short one and the long one's response routinely
+        // arrives second. scoredSourceId is reassigned synchronously before
+        // this call goes out (see the $effect below), so by the time any
+        // response lands it names whichever source is *currently* selected
+        // -- a mismatch means a later switch already superseded this one.
+        if (id !== scoredSourceId) return
         scores = s.scores
         scoreStepMs = s.step_ms
-        // The server echoes back whatever threshold it resolved -- on the
-        // first call (th === null) that's the profile default; on every
-        // later call it's just the value we sent. Adopting it either way
-        // keeps this the single place `threshold` gets written from a
-        // response, instead of only doing it conditionally on th === null.
-        threshold = s.threshold
+        // Only adopt the server's echoed threshold when we asked it to
+        // resolve the profile default (th === null). Writing it back
+        // unconditionally -- including for an explicit slider value we
+        // already applied locally in onThresholdInput -- is itself a race:
+        // a debounced response for an in-flight drag can land after the
+        // user has moved the slider further and snap the thumb backward.
+        if (th === null) threshold = s.threshold
       })
       .catch(() => {
+        if (id !== scoredSourceId) return
         scores = []
       })
   }

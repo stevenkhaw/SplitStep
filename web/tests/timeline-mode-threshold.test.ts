@@ -169,4 +169,48 @@ describe('TimelineMode reads the segmentation threshold from the API', () => {
     await vi.waitFor(() => expect(slider().value).toBe('0.25'))
     expect(slider().disabled).toBe(false)
   })
+
+  it('ignores a stale /scores response that resolves after clicking a rally on a different source', async () => {
+    // Same race as ResegmentPanel's, reached the way TimelineMode reaches
+    // it: OverviewBand lets a reviewer click any rally, including one on a
+    // different (and here, shorter-featured) source, mid-flight. /scores'
+    // cost scales with features.jsonl's length, so src1's response
+    // routinely arrives after src2's even though it was requested first --
+    // this is ordinary review behaviour, not a rare interleaving.
+    let resolveSrc1!: (v: ScoreSeries) => void
+    let resolveSrc2!: (v: ScoreSeries) => void
+    mockApi.scores.mockImplementation(
+      (id: string) =>
+        new Promise<ScoreSeries>((resolve) => {
+          if (id === 'src1') resolveSrc1 = resolve
+          else resolveSrc2 = resolve
+        }),
+    )
+
+    instance = mount(TimelineMode, {
+      target,
+      props: { detail: mixedProfileDetail(), rallyId: 'r1', onclose: vi.fn() },
+    })
+    flushSync()
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined)
+
+    // Click over to src2's rally before src1's (slow) response has arrived.
+    const rally2 = target.querySelector('[aria-label="rally 2"]') as HTMLButtonElement
+    rally2.click()
+    flushSync()
+    expect(mockApi.scores).toHaveBeenCalledWith('src2', undefined)
+
+    // src2's response lands first, as it routinely would.
+    resolveSrc2({ step_ms: 200, threshold: 0.25, scores: [0.2, 0.8] })
+    await vi.waitFor(() => expect(slider().value).toBe('0.25'))
+
+    // src1's stale response lands late, after the switch it no longer
+    // belongs to. It must not overwrite the src2 value now on screen.
+    resolveSrc1({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    await Promise.resolve()
+    await Promise.resolve()
+    flushSync()
+
+    expect(slider().value).toBe('0.25')
+  })
 })

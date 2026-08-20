@@ -18,6 +18,31 @@ log = logging.getLogger(__name__)
 MAX_SPEED = 0.7
 MAX_HIT_RATE = 2.0  # impacts in the trailing second that counts as "full"
 
+# PLACEHOLDER, not a validated default -- read
+# docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md before
+# touching this. 0.25 came from fitting against audio-impact clusters on the
+# one real ground-level source (59 clusters, median 8.0 s, 59% coverage over
+# the full 19.5-minute recording), which produced 61 intervals at median
+# 7.6 s, 63% coverage on that same source -- a close match that looked like
+# confirmation. (test_real_ground_footage_segments_into_rallies pins 16
+# intervals, median 7.0 s, on the 4-minute fixture slice in
+# tests/fixtures/ground_level_source01.jsonl -- a different, smaller corpus,
+# not a contradiction.)
+#
+# The validation task then frame-inspected six of those 61 clips and found
+# the fitting target itself was wrong: audio impacts fire at 0.62/s when
+# nobody is playing on our court versus 0.65/s during a confirmed rally --
+# the detector measures a busy multi-court venue, not this player.
+# Confidence came out inverted as a result: the two clips that were clearly
+# false (camera setup, camera teardown) scored 0.40 and 0.46, higher than
+# the two clips that were clearly true (a serve, a rally) at 0.36 and 0.39.
+# No threshold separates true from false on this footage. Subject mode ships
+# enabled anyway as a deliberate decision -- do not re-fit against
+# audio-impact clusters; any future refit needs footage labelled by
+# something other than the audio detector itself.
+SUBJECT_THRESHOLD = 0.25
+SUBJECT_CLOSE_GAP_S = 2.0
+
 
 @dataclass(frozen=True)
 class SegmentParams:
@@ -251,20 +276,6 @@ def segment(frames: list[FeatureFrame], params: SegmentParams) -> list[Interval]
     return out
 
 
-# Subject mode's own defaults. Fitted against audio-impact clusters on the
-# one real ground-level source, the full 19.5-minute recording (59 clusters,
-# median 8.0 s, 59% coverage); these give 61 intervals, median 7.6 s, 63%
-# coverage, also over that full recording. That fit is partly circular --
-# audio drives both the score and the labels -- so treat them as provisional
-# until the visual spot-check in the plan's validation task is done.
-# (test_real_ground_footage_segments_into_rallies asserts different numbers
-# -- 16 intervals, median 7.0 s -- because it runs on the 4-minute fixture
-# slice in tests/fixtures/ground_level_source01.jsonl, not the full source
-# above; that is a different corpus, not a contradiction.)
-SUBJECT_THRESHOLD = 0.25
-SUBJECT_CLOSE_GAP_S = 2.0
-
-
 def params_for_frames(
     frames: list[FeatureFrame], *, threshold: float | None = None
 ) -> SegmentParams:
@@ -309,6 +320,18 @@ def params_for_frames(
         )
     else:
         params = SegmentParams()
+    # Profile choice changes segment() output more than any weight does, and
+    # it is picked per-source from footage the operator never looks at
+    # directly -- so a detect job's log needs to say which model it used and
+    # why, not just that it ran. foot_separation is the number the pair/
+    # subject decision turns on; subject_min_h is the derived gate that only
+    # matters when the decision comes out "subject".
+    log.info(
+        "segmenting with profile=%s foot_separation=%.4f subject_min_h=%.4f",
+        params.profile,
+        view.foot_separation,
+        params.subject_min_h,
+    )
     if threshold is not None:
         params = replace(params, threshold=threshold)
     return params

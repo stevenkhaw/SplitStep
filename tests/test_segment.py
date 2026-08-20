@@ -433,9 +433,15 @@ def test_params_for_frames_does_not_warn_on_a_confident_classification(caplog):
 
 
 def test_real_ground_footage_segments_into_rallies(ground_features):
-    """End to end on the golden fixture. The pair model produced clips with a
-    median of 3.9 s against a true median of 8.0 s; subject mode should land
-    near the truth."""
+    """End to end on the golden fixture. Regression pin, not a correctness
+    check: this asserts subject mode keeps producing 16 intervals at a 7.0 s
+    median on this fixture, distinct from the pair model's wrong 3.9 s. The
+    8.0 s figure once cited alongside these numbers as "the true median" was
+    read off audio-impact clusters; the validation task (see
+    docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md) found
+    those clusters track the venue's ambient noise rather than this player's
+    rallies, so landing near 8.0 s is not evidence of correctness -- only a
+    changed 16/7.0 s here is a signal worth investigating."""
     intervals = segment(ground_features, params_for_frames(ground_features))
     durations = sorted((iv.end_ms - iv.start_ms) / 1000 for iv in intervals)
     assert len(intervals) == 16

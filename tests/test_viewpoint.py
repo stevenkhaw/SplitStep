@@ -49,9 +49,13 @@ def test_a_source_that_never_sees_a_far_player_is_subject():
 
 
 def test_too_few_frames_is_subject_and_low_confidence():
-    """Under 50 frames carrying a near box, the median is not worth trusting.
-    Subject is the safe default -- it gates on your own player's size, so a
-    misclassification cannot invent rallies out of adjacent-court people."""
+    """far_foot=0.55 means every one of these 10 frames is a pair, so this
+    exercises the MIN_PAIRS_FOR_CONFIDENCE branch, not MIN_FRAMES_FOR_CONFIDENCE:
+    10 pairs is under the 20-pair floor, so their median separation is not
+    worth trusting even though a near box was present in all 10 frames.
+    Subject is the safe default regardless of which floor tripped -- it gates
+    on your own player's size, so a misclassification cannot invent rallies
+    out of adjacent-court people."""
     view = analyze_view(_stream(10, near_foot=0.90, far_foot=0.55))
     assert view.profile == "subject"
     assert view.low_confidence is True
@@ -61,6 +65,10 @@ def test_empty_input_does_not_raise():
     view = analyze_view([])
     assert view.profile == "subject"
     assert view.frames_measured == 0
+    # 0 < MIN_FRAMES_FOR_CONFIDENCE, so an empty features file is exactly the
+    # "too short to know either way" case, not a confident subject-mode
+    # reading -- params_for_frames logs a warning off this flag.
+    assert view.low_confidence is True
 
 
 def test_subject_min_h_is_half_the_median_near_height():

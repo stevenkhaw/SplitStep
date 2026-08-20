@@ -155,6 +155,56 @@ describe('ResegmentPanel', () => {
     expect(slider().disabled).toBe(false)
   })
 
+  it('ignores a stale /scores response that resolves after switching to a different source', async () => {
+    // /scores' cost scales with features.jsonl's length, so responses do not
+    // land in request order: switch from a long source to a short one and
+    // the long one's (src1's) response routinely arrives *after* the short
+    // one's (src2's) -- this is the expected case, not a rare interleaving.
+    // Without the scoredSourceId guard, src1's late response would win the
+    // last write to `threshold` and hand the UI a pair-mode 0.45 for a
+    // subject-mode source, silently sendable to POST /resegment.
+    let resolveSrc1!: (v: { step_ms: number; threshold: number; scores: number[] }) => void
+    let resolveSrc2!: (v: { step_ms: number; threshold: number; scores: number[] }) => void
+    mockApi.scores.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) => {
+          if (id === 'src1') resolveSrc1 = resolve
+          else resolveSrc2 = resolve
+        }),
+    )
+
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1), source('src2', 2)],
+        rallies: [rally()],
+        onresegmented: vi.fn(),
+      },
+    })
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined))
+
+    // Switch before src1's (slow) response has arrived.
+    const select = target.querySelector('select') as HTMLSelectElement
+    select.value = 'src2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src2', undefined))
+
+    // src2's (short-source) response lands first, as it routinely would.
+    resolveSrc2({ step_ms: 200, threshold: 0.25, scores: [0.2, 0.8] })
+    await vi.waitFor(() => expect(slider().value).toBe('0.25'))
+
+    // src1's stale response lands late, after the switch it no longer
+    // belongs to. It must not overwrite the src2 value now on screen.
+    resolveSrc1({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    await Promise.resolve()
+    await Promise.resolve()
+    flushSync()
+
+    expect(slider().value).toBe('0.25')
+  })
+
   it('debounces the threshold slider: a burst of input collapses into one scores call', async () => {
     vi.useFakeTimers()
     instance = mount(ResegmentPanel, {
