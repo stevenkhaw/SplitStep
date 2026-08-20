@@ -359,3 +359,40 @@ describe('QueueController discriminated QueueAction (Fix pass 2)', () => {
     expect(q.isStarred('r1')).toBe(false)
   })
 })
+
+describe('QueueController.liveSnapshot (Finding: OverviewBand rendered stale colors)', () => {
+  it('overwrites starred/rejected from this session live state, not the snapshot the Rally was constructed with', () => {
+    const q = new QueueController([rally(1), rally(2), rally(3)])
+    q.star() // r1, live-only -- the Rally objects are never mutated
+    q.reject() // now current is r2, live-only
+
+    const snap = q.liveSnapshot([rally(1), rally(2), rally(3)])
+    expect(snap.find((r) => r.id === 'r1')?.starred).toBe(1)
+    expect(snap.find((r) => r.id === 'r2')?.rejected).toBe(1)
+    expect(snap.find((r) => r.id === 'r3')?.starred).toBe(0)
+    expect(snap.find((r) => r.id === 'r3')?.rejected).toBe(0)
+  })
+
+  it('includes rallies this controller has itself rejected out of the active queue -- OverviewBand still needs to place them', () => {
+    const q = new QueueController([rally(1), rally(2)])
+    q.reject() // r1 leaves #rallies/current entirely
+
+    const snap = q.liveSnapshot([rally(1), rally(2)])
+    expect(snap.map((r) => r.id)).toEqual(['r1', 'r2'])
+    expect(snap.find((r) => r.id === 'r1')?.rejected).toBe(1)
+  })
+
+  it('does not mutate the Rally objects passed in -- the class-level "never mutate" invariant', () => {
+    const q = new QueueController([rally(1)])
+    const original = rally(1)
+    q.star()
+    q.liveSnapshot([original])
+    expect(original.starred).toBe(0)
+  })
+
+  it('reflects an already-server-starred rally that this session never touched', () => {
+    const q = new QueueController([rally(1, { starred: 1 })])
+    const snap = q.liveSnapshot([rally(1, { starred: 1 })])
+    expect(snap[0].starred).toBe(1)
+  })
+})

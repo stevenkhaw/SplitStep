@@ -224,6 +224,33 @@ export class QueueController {
     else this.#rejected.delete(action.rallyId)
   }
 
+  // `rallies`, with `starred`/`rejected` overwritten from this session's
+  // live Sets rather than whatever server-snapshot values were baked into
+  // the Rally objects at construction. For a consumer that needs this
+  // session's current flags on rallies this controller does not otherwise
+  // expose a per-rally accessor for -- namely TimelineMode's OverviewBand,
+  // handed a copy via QueueMode's onopen_timeline, so a rally starred (or
+  // rejected) earlier in this queue session renders correctly there even
+  // though `detail.rallies` itself is never refetched just from a star/
+  // reject/skip action (see Session.svelte's comment on QueueMode never
+  // writing back into `detail`).
+  //
+  // Unlike `current`/`isStarred`/`isRejected` (which only ever reason about
+  // rallies still in `#rallies`, i.e. not rejected), this takes the caller's
+  // own `rallies` array and covers all of it, including ones this
+  // controller has itself rejected out of the active queue -- OverviewBand
+  // still needs to place and color those.
+  //
+  // Returns fresh objects; per the class-level invariant, the Rally objects
+  // this controller was constructed with are never mutated.
+  liveSnapshot(rallies: Rally[]): Rally[] {
+    return rallies.map((r) => ({
+      ...r,
+      starred: this.#starred.has(r.id) ? 1 : 0,
+      rejected: this.#rejected.has(r.id) ? 1 : 0,
+    }))
+  }
+
   jumpTo(rallyId: string): void {
     const i = this.#rallies.findIndex((r) => r.id === rallyId)
     if (i !== -1) this.#index = i
