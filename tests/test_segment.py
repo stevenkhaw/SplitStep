@@ -209,3 +209,86 @@ def test_lateral_term_is_zero_on_the_first_frame_with_no_previous_position():
     far = Player(0.5, 0.4, 0.10, 2.0)
     stream = [FeatureFrame(0, 2, Player(0.9, 0.5, 0.30, 2.0), far, hits=0, hit_reg=0.0)]
     assert score_series(stream, LATERAL_ONLY)[0] == 0.0
+
+
+# -- Real-footage calibration ----------------------------------------------
+#
+# Everything above this line is synthetic: the `frames()` helper hands every
+# player v=2.0, which is 4x the fastest thing ever measured on real footage.
+# The constants below are the ones measured on the first real source
+# (sessions/2026-08-18/sources/01, 19.5 min, 5869 sampled frames), and they
+# are what the defaults are now calibrated against. See
+# test_rally_frame_without_a_recent_impact_clears_the_threshold for the
+# regression these pin.
+
+REAL_NEAR_V = 0.25   # p75 of measured near.v, body-lengths/sec
+REAL_FAR_V = 0.15    # far player, correspondingly slower in the same units
+REAL_HIT_REG = 0.25  # median hit_reg during frames with both players visible
+REAL_DX = 0.010      # per-sample lateral displacement, normalized
+REAL_DY = 0.003      # per-sample longitudinal displacement -> lateral ~= 0.77
+
+
+def rally_frames(n: int, *, hit_every: int = 0, start_ms: int = 0,
+                 gap_at: range | None = None) -> list[FeatureFrame]:
+    """A rally at measured real-footage speeds, not synthetic ones.
+
+    `hit_every` places one audio impact every N samples; 0 means silent.
+    `gap_at` blanks the far player over those indices, reproducing the
+    YOLO far-player dropout that occurs on 38% of real frames.
+    """
+    out = []
+    for i in range(n):
+        cx = 0.5 + (i % 2) * REAL_DX
+        foot = 0.9 + (i % 2) * REAL_DY
+        far = None if (gap_at is not None and i in gap_at) else \
+            Player(0.5, 0.4, 0.10, REAL_FAR_V)
+        out.append(FeatureFrame(
+            start_ms + i * SAMPLE_MS,
+            1 if far is None else 2,
+            Player(cx, foot, 0.30, REAL_NEAR_V),
+            far,
+            hits=1 if (hit_every and i % hit_every == 0) else 0,
+            hit_reg=REAL_HIT_REG,
+        ))
+    return out
+
+
+def test_rally_frame_without_a_recent_impact_clears_the_threshold(params):
+    """The bug that made every clip one hit long.
+
+    Between two ball impacts there is no audio in the trailing 1 s window,
+    so `hits` and `hit_reg` cannot carry the frame -- only `both`, `speed`
+    and `lateral` can. With MAX_SPEED at its old synthetic 4.0, real
+    body-length speeds (median 0.04 for min(near, far)) made the speed term
+    contribute 0.009 out of a possible 0.27, leaving a plainly rallying
+    frame at 0.408 against a 0.45 threshold. Every frame between impacts
+    therefore fell below threshold and each clip collapsed to the ~1 s hit
+    window plus padding.
+    """
+    scores = score_series(rally_frames(40), params)
+    assert min(scores) >= params.threshold, (
+        f"a rally frame with no recent impact scored {min(scores):.3f}, "
+        f"below the {params.threshold} threshold"
+    )
+
+
+def test_rally_is_not_split_into_one_clip_per_impact(params):
+    """A 12 s rally with impacts every 1.4 s is one clip, not eight."""
+    result = segment(rally_frames(60, hit_every=7), params)
+    assert len(result) == 1
+    assert result[0].end_ms - result[0].start_ms >= 12_000
+
+
+def test_far_player_dropout_does_not_split_a_rally(params):
+    """The far player is occluded for 1.8 s mid-rally -- one clip, not two.
+
+    `both` going false zeroes the score outright (and fires w_outside), so a
+    frame missing the far player reads exactly like the end of a rally.
+
+    Note this test is about the *pair* camera model. The 38% far-player
+    absence measured on the one real source is NOT occlusion -- that camera
+    sits a foot off the ground and its "far player" was people on adjacent
+    courts. See docs/superpowers/specs/2026-08-20-camera-viewpoint-design.md.
+    """
+    stream = rally_frames(60, hit_every=7, gap_at=range(25, 34))
+    assert len(segment(stream, params)) == 1

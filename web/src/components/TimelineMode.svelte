@@ -28,6 +28,10 @@
 
   const ZOOM_SPAN_MS = 40000
   const SCORE_DEBOUNCE_MS = 150
+  // Mirrors SegmentParams.threshold in bootleg/detect/segment.py -- the
+  // slider must start where a fresh detect run already landed, or the
+  // first nudge silently resegments at a different value than the
+  // rallies on screen were cut at.
   const DEFAULT_THRESHOLD = 0.45
 
   let currentId = $state(untrack(() => rallyId))

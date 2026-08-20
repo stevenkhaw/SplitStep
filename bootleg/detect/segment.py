@@ -3,7 +3,15 @@ from dataclasses import dataclass
 
 from bootleg.detect.features import FeatureFrame, Player
 
-MAX_SPEED = 4.0   # body-lengths/sec that counts as "fully moving"
+# Body-lengths/sec that counts as "fully moving". Measured, not guessed:
+# on the first real source the near player's speed runs p50=0.11, p75=0.25,
+# p95=0.69, so 0.7 is where a genuine sprint to a wide ball saturates the
+# term. The old value of 4.0 came from the synthetic fixtures (which hand
+# every player v=2.0) and was ~6x too large, which collapsed the speed term
+# to ~0.01 of its 0.27 possible contribution and left rallying frames
+# scoring 0.408 against a 0.45 threshold -- so only the ~1 s window around
+# an audio impact ever cleared it, and every clip came out one hit long.
+MAX_SPEED = 0.7
 MAX_HIT_RATE = 2.0  # impacts in the trailing second that counts as "full"
 
 
@@ -16,9 +24,22 @@ class SegmentParams:
     w_regularity: float = 0.4
     w_outside: float = 1.2
 
+    # UNVALIDATED. This is the pair-camera threshold and no footage exists
+    # that the pair model is actually correct for -- the only real source is
+    # ground-level, where the "far player" was people on adjacent courts (see
+    # docs/superpowers/specs/2026-08-20-camera-viewpoint-design.md). A 0.42
+    # fitted against that source was fitted against strangers, so this stays
+    # at its original value until genuine elevated footage exists.
     threshold: float = 0.45
     smooth_window_s: float = 1.0
-    close_gap_s: float = 1.5
+    # 2.0, not 1.5: `both` going false zeroes the score outright, so any
+    # frame where the far player is occluded -- by the net cord, by the near
+    # player crossing in front, by a lunge that clips the box -- reads exactly
+    # like the end of a rally. 2.0 s bridges those without merging separate
+    # points, which are seconds apart at minimum. Also UNVALIDATED: the one
+    # real source is ground-level, where far-player absence was never
+    # occlusion at all (see the spec referenced above).
+    close_gap_s: float = 2.0
     min_duration_s: float = 1.5
     pad_start_s: float = 0.3
     pad_end_s: float = 0.5

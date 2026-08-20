@@ -10,6 +10,7 @@ from bootleg.db.rallies import list_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.features import FeatureFrame, Player, write_features
+from bootleg.detect.segment import SegmentParams
 
 
 @pytest.fixture
@@ -158,7 +159,11 @@ def test_segment_dry_run_prints_intervals_and_writes_no_rallies(
     assert "0:08.0" in out
     assert "8.0s" in out  # duration column stays plain seconds
     assert "conf" in out
-    assert "1 rallies at threshold 0.45" in out
+    # Read the default off SegmentParams rather than hardcoding it: this
+    # assertion is about the summary line's shape, not about which
+    # threshold is currently calibrated, and a literal here failed the
+    # suite for an unrelated retune.
+    assert f"1 rallies at threshold {SegmentParams().threshold}" in out
     assert list_rallies(conn, seeded_source["session_id"]) == []
 
 

@@ -75,17 +75,43 @@ score(t) = w_both·both_present
 
 Defaults: `w_both=1.0, w_speed=0.9, w_lateral=0.3, w_hits=0.7, w_reg=0.4, w_outside=1.2, threshold=0.45`.
 
-Post-processing: rolling median (~1 s), threshold, close gaps < 1.5 s, drop segments < 1.5 s (kept low deliberately — a 3 s floor discarded aces), pad −0.3 s / +0.5 s.
+Post-processing: rolling median (~1 s), threshold, close gaps < 2.0 s, drop segments < 1.5 s (kept low deliberately — a 3 s floor discarded aces), pad −0.3 s / +0.5 s.
 
-A synthetic active-rally frame scores **0.6545** against the 0.45 threshold.
+A synthetic active-rally frame scores **0.7909** against the 0.45 threshold — but that
+number is close to meaningless, because the fixtures hand every player `v=2.0`, roughly
+8x anything measured on real footage. On the first real source
+(`sessions/2026-08-18/sources/01`, 19.5 min) the median *smoothed* score for a frame with
+both players visible and no impact in the trailing second is **0.4119**, and only **43%**
+of such frames clear the threshold. `MAX_SPEED` and `threshold` were recalibrated against
+that source on 2026-08-20; the score still separates rally from non-rally far more weakly
+than the synthetic figure suggests. See the comments in `detect/segment.py`.
 
 ## Likely failure modes and what they mean
 
 - **Way too many short rallies** → threshold too low, or the play region is too generous and adjacent-court players are being counted.
-- **Rallies merged together** → `close_gap_s` (1.5 s) too large, or the players never stop moving between points.
+- **Rallies merged together** → `close_gap_s` (2.0 s) too large, or the players never stop moving between points.
 - **Long rallies split in two** → threshold too high, or a lob/lull drops the score below it mid-rally.
+- **Every clip is one hit long** → the calibration bug fixed on 2026-08-20. `MAX_SPEED` was
+  4.0 while real `min(near.v, far.v)` runs a median of 0.04, so the speed term contributed
+  ~0.01 of its possible 0.27 and only the ~1 s audio-impact window ever cleared the
+  threshold. Before touching weights, measure `min(near.v, far.v)` against `MAX_SPEED` on
+  the actual footage.
 - **Almost nothing detected** → check the play region first; if the quad is wrong, `n_in_region` is 0 and nothing can score.
 - **Warmup detected as rallies** → that's intended. A rally is defined as continuous hitting; warmup counts.
+
+## Known weakness: far-player dropout
+
+The single biggest source of score noise is not the weights. On the first real source YOLO
+finds a near player but no far one on **38%** of sampled frames, and `both` going false
+zeroes the score outright *and* fires `w_outside`. Worse, when the far player is
+re-acquired, `_to_player` sees `prev is None` and reports `v=0`, so `min(near.v, far.v)`
+collapses to 0 for that frame regardless of how fast either player is moving — 22% of
+frames that do have a far player report exactly `far.v == 0`.
+
+This is why the 2026-08-20 retune leaned on `close_gap_s` as much as on `MAX_SPEED`: the
+gaps are being bridged rather than scored correctly. Fixing the dropout (tracker, box
+persistence across a frame or two, or carrying the last known far position) would do more
+for segmentation quality than any further weight tuning.
 
 ## Diagnostics
 
