@@ -284,3 +284,26 @@ negative results are not.
 
 Fifteen windows remains small. Anything that separates cleanly on it should be re-checked
 against a second labelling pass before it is built.
+
+### 2026-08-21: producing that second pass no longer needs a throwaway tool
+
+The fifteen windows above came from `web/public/label.html`, 112 lines with the window
+list pasted in as a literal and the results pasted back out through a `<textarea>`. It
+could not be pointed at a second source.
+
+Labelling is now a mode in the app — press `L` in the review queue. Verdicts
+(`clean` / `not_play` / `partly` / `unsure`) and boundary flags land in the `rally_labels`
+table, which anchors to the detector's own span rather than to a rally row and therefore
+survives a re-segment. Every manual boundary drag also records a signed millisecond
+correction, with no extra keystrokes, so the boundary half of the corpus accumulates
+just by reviewing normally.
+
+`bootleg labels score <source_id> --threshold X` scores a candidate segmentation against
+whatever has been labelled so far, in well under a second. `bootleg labels export` writes
+it out as JSON alongside `labels_2026-08-18_source01.json`.
+
+The caveat above still stands, and the tooling does not soften it: every label attaches to
+a span the detector proposed, so this corpus measures precision and boundary error, never
+recall over play the detector missed. Six of the fifteen windows here were spans the
+detector ignored, and two of them contained play — that measurement still requires
+sampling unflagged windows, which nothing in the app does.

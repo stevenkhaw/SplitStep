@@ -64,3 +64,13 @@ export interface Job {
   progress: number
   error: string | null
 }
+
+export interface LabelRecord {
+  source_id: string
+  span_start_ms: number
+  span_end_ms: number
+  verdict: 'clean' | 'not_play' | 'partly' | 'unsure' | null
+  boundary_flags: ('start_early' | 'start_late' | 'end_early' | 'end_late')[]
+  true_start_ms: number | null
+  true_end_ms: number | null
+}

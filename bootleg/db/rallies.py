@@ -11,7 +11,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
+def overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
+    """Overlap as a fraction of the *shorter* of the two spans.
+
+    Public because the label scorer matches candidate intervals to labelled
+    spans by the same rule replace_rallies uses to carry stars across a
+    re-segment. One definition, so a rally that would inherit a star and a
+    candidate that would count against a label can never disagree about what
+    "the same rally" means.
+    """
     overlap = min(a_end, b_end) - max(a_start, b_start)
     if overlap <= 0:
         return 0.0
@@ -21,7 +29,7 @@ def _overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> flo
 def _overlaps_any(iv: Interval, rows: list[sqlite3.Row], flag: str) -> bool:
     return any(
         r[flag]
-        and _overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
+        and overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
         >= STAR_OVERLAP_MIN
         for r in rows
     )

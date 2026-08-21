@@ -252,13 +252,23 @@ to be wrong about on a span that contains no rally. The header shows
 
 ## 7. Consumption
 
-**Export.** `bootleg labels export <source_id>` writes JSON in a superset of the
-existing fixture shape, adding `boundary_flags`, `true_start_ms` and
-`true_end_ms`. It writes to stdout, or to `--out PATH`; the intended destination
-is beside `labels_2026-08-18_source01.json` in `tests/fixtures/`. No `.gitignore`
-change is needed — the ignore list covers `*.jsonl`, and the `!tests/fixtures/**`
-re-inclusion exists for golden *feature* fixtures. A `.json` export is not
-ignored in the first place.
+**Export.** `bootleg labels export <source_id>` writes JSON to stdout, or to
+`--out PATH`; the intended destination is beside `labels_2026-08-18_source01.json`
+in `tests/fixtures/`. The top level carries `source`, `source_id`, `exported_on`
+and a `labels` array of rows shaped `{span_start_ms, span_end_ms, verdict,
+boundary_flags, true_start_ms, true_end_ms}`.
+
+**This is a different format from the 2026-08-18 fixture, not a superset of
+it.** The fixture's row list is `windows`, keyed by `start_ms`/`end_ms`/`label`
+with `label` drawn from `play`/`partly`/`none`; its top-level `labels` key is not
+a row list at all, it is the *enumeration of allowed label values*. The export's
+`labels` key names the row list itself, and its rows use
+`span_start_ms`/`span_end_ms`/`verdict`, with `verdict` drawn from the unrelated
+four-value vocabulary in §3 (`clean`/`not_play`/`partly`/`unsure`). The same key,
+`labels`, means two incompatible things in the two files sitting side by side in
+`tests/fixtures/`. No `.gitignore` change is needed — the ignore list covers
+`*.jsonl`, and the `!tests/fixtures/**` re-inclusion exists for golden *feature*
+fixtures. A `.json` export is not ignored in the first place.
 
 **Scoring.** `bootleg labels score <source_id> --threshold X` re-runs `segment()`
 over cached features and reports against the corpus. Candidates are matched to
@@ -270,8 +280,17 @@ carrying stars, reused rather than reinvented.
 | precision | candidates matching `clean`/`partly` against those matching `not_play` |
 | span recall | labelled `clean` spans with no candidate |
 | unknown | candidates matching no label at all |
-| start bias / end bias | signed median ms error over rows carrying `true_*` |
+| start bias / end bias | signed median ms error over rows carrying `true_*`, excluding `not_play` |
 | start MAE / end MAE | absolute median ms error over the same rows |
+
+**`not_play` rows are excluded from the boundary figures even when they carry
+`true_*`.** A span the human said contains no play has no correct boundary to
+be wrong about — the drag still happened and the corpus still keeps
+`true_start_ms`/`true_end_ms` for it (the write path stays lossless), but
+scoring it as a boundary measurement would make `start_bias_ms`/`end_mae_ms`
+describe something other than what their names say. `unsure` is not excluded
+the same way: an undecidable clip may still have a real, correctly-measured
+edge, it is only the play/no-play call that could not be made.
 
 Two constraints on the output, both of which exist to stop a known failure from
 recurring.
@@ -297,9 +316,15 @@ two-stage detector split was built for.
 - A label POST against a rally deleted by a re-segment in another tab returns
   404; the client toasts and re-keys, which the queue already does on detail swap
   (`web/tests/requeue-on-detail-swap.test.ts`).
-- A `CHECK` violation surfaces as 400, not 500.
-- `bootleg labels score` on a source with no `features.jsonl` returns the same
-  409 the re-segment route already returns for that condition.
+- A malformed body — unknown verdict, unknown boundary flag — is rejected by
+  pydantic before any SQL runs, giving FastAPI's standard 422. The table-level
+  `CHECK` is unreachable over HTTP: `LabelBody.verdict` is required, so no
+  request can produce a row carrying neither a verdict nor a corrected span.
+  `add_label` still validates the verdict itself, for the CLI path.
+- `bootleg labels score` on a source with no `features.jsonl` has no HTTP route
+  to return a status from — it is CLI-only. `cmd_labels_score` prints
+  `source has not been detected yet: <id>` to stderr and returns exit code 1,
+  the same convention `_source_or_fail` already uses for an unknown source id.
 
 ## 9. Tests
 

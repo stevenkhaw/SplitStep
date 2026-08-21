@@ -806,7 +806,16 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
     # nothing and report success) and because det_* is what the label
     # anchors to.
     span = _rally_det_span(conn, rally_id)
-    set_bounds(conn, rally_id, body.start_ms, body.end_ms)
+    # Label before bounds, not after: set_bounds and record_boundary_correction
+    # each commit independently, so whichever runs second is the one a crash
+    # between the two can lose. Losing the bounds write just means the drag
+    # didn't visibly save and the reviewer retries. Losing the label after
+    # the bounds already landed is worse and silent -- the UI reports success
+    # while the correction that was the whole point never reaches the corpus.
+    # Ordering the label first turns that failure mode into a loud one: the
+    # request fails and the reviewer retries, and a retried label is harmless
+    # since it only reads immutable det_* (captured above) and appends a row
+    # that `latest_labels` will supersede if needed.
     # Every drag is ground truth: det_start_ms sits immutable beside the
     # edited start_ms, so the difference is a signed detector error in
     # milliseconds. It used to be destroyed by the next replace_rallies;
@@ -821,6 +830,7 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
         true_start_ms=body.start_ms,
         true_end_ms=body.end_ms,
     )
+    set_bounds(conn, rally_id, body.start_ms, body.end_ms)
     return {"ok": True}
 ```
 
@@ -1749,8 +1759,18 @@ interface HistoryEntry {
   flags: BoundaryFlag[]
 }
 
-function spanKey(startMs: number, endMs: number): string {
-  return `${startMs}:${endMs}`
+// Keyed on (source_id, span), not span alone. Sources are independent clips
+// whose timelines each start at 0, and segment() places every edge on a
+// fixed sample grid, so two sources can produce identical
+// (det_start_ms, det_end_ms) pairs -- guaranteed at the start edge for any
+// rally within the start pad, since the clamp puts both at 0. LabelMode
+// fetches labels per source and flattens them into one list before handing
+// it to this controller, so a span-only key let source A's verdict render
+// on source B's rally of the same span (M2) -- precisely the collision
+// exact-span matching exists to prevent, reintroduced through a different
+// door.
+function spanKey(sourceId: string, startMs: number, endMs: number): string {
+  return `${sourceId}:${startMs}:${endMs}`
 }
 
 /**
@@ -1782,10 +1802,12 @@ export class LabelController {
   constructor(rallies: Rally[], existing: LabelRecord[]) {
     this.#rallies = rallies
     const bySpan = new Map<string, LabelRecord>()
-    for (const rec of existing) bySpan.set(spanKey(rec.span_start_ms, rec.span_end_ms), rec)
+    for (const rec of existing) {
+      bySpan.set(spanKey(rec.source_id, rec.span_start_ms, rec.span_end_ms), rec)
+    }
 
     for (const r of rallies) {
-      const rec = bySpan.get(spanKey(r.det_start_ms, r.det_end_ms))
+      const rec = bySpan.get(spanKey(r.source_id, r.det_start_ms, r.det_end_ms))
       // A verdict-less row is a boundary correction from a drag, not a
       // judgement -- rendering it as one would invent a verdict the reviewer
       // never gave.
@@ -1818,7 +1840,10 @@ export class LabelController {
 
   get currentFlags(): BoundaryFlag[] {
     const r = this.current
-    return r ? (this.#flags.get(r.id) ?? []) : []
+    // Copied, not the live array: a caller holding this reference must not
+    // be able to reach into controller state (e.g. `currentFlags.push(...)`)
+    // without going through toggleFlag.
+    return r ? [...(this.#flags.get(r.id) ?? [])] : []
   }
 
   get flagsEnabled(): boolean {
@@ -1847,12 +1872,24 @@ export class LabelController {
     // Dropping to a verdict that admits no boundary error clears whatever was
     // already flagged, so a not_play row can never carry an end_late that
     // contradicts it.
-    const flags = FLAGGABLE.includes(verdict) ? previousFlags : []
+    // Copied rather than reused: `flags` becomes the array stored in
+    // `#flags`, and `previousFlags` is handed back to the caller as the
+    // action's pre-action snapshot. Aliasing the two would let a caller
+    // mutating action.previousFlags corrupt controller state, and revert()
+    // depends on previousFlags staying an immutable snapshot of what
+    // preceded this action.
+    const flags = FLAGGABLE.includes(verdict) ? [...previousFlags] : []
     this.#flags.set(r.id, flags)
 
     // Deliberately does not advance -- boundary flags are added to this same
     // span next, and `→` is the only thing that moves the cursor.
-    return { rallyId: r.id, verdict, flags: [...flags], previousVerdict, previousFlags }
+    return {
+      rallyId: r.id,
+      verdict,
+      flags: [...flags],
+      previousVerdict,
+      previousFlags: [...previousFlags],
+    }
   }
 
   toggleFlag(flag: BoundaryFlag): LabelAction | null {
@@ -2321,33 +2358,47 @@ Expected: PASS, 20 passed
 In `web/src/components/QueueMode.svelte`, add to `Props`:
 
 ```ts
-    /** Enter label mode. Separate from review: a verdict is a note about the
+    /** Enter label mode, optionally on this rally -- Session threads it
+     * through as startAtRallyId the same way onopen_timeline's rallyId is,
+     * so a fresh QueueController on return jumps back here instead of
+     * opening on whichever rally is first-unreviewed. `null` when `current`
+     * is undefined (the pass is finished): unlike `t`/timeline, label mode
+     * needs no specific rally to open on, since LabelController iterates the
+     * full unfiltered rally list rather than following the queue's cursor --
+     * and "just finished reviewing" is exactly when a reviewer is most
+     * likely to want it. Separate from review: a verdict is a note about the
      * detector, not a decision about the clip, so it deliberately does not
      * touch star/reject or the session's review status. */
-    onopen_label: () => void
+    onopen_label: (rallyId: string | null) => void
 ```
 
 destructure it:
 
 ```ts
-  let { detail, onopen_timeline, onopen_label }: Props = $props()
+  let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
 ```
 
-add to the `switch` in `onKey`, after the `'t'` case:
+add to the `switch` in `onKey`, after the `'t'` case. Unlike `'t'`/`'T'`, this has **no** `if (current)` guard -- `current` is undefined once the pass is finished, and that is exactly the moment a reviewer is most likely to want to open label mode, since LabelController's own list is unfiltered and needs no current rally to iterate:
 
 ```ts
       case 'l':
       case 'L':
-        onopen_label()
+        onopen_label(current ? current.id : null)
         break
 ```
 
-and extend the help line to:
+extend the help line to:
 
 ```svelte
   <p class="mt-4 font-mono text-xs text-neutral-500">
     S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
+```
+
+and give the "Session reviewed" panel (rendered when `current` is undefined) a help line of its own -- it previously rendered none at all, leaving the only entry point into label mode from that screen undiscoverable:
+
+```svelte
+    <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
 ```
 
 - [ ] **Step 8: Wire the third mode into Session**
@@ -2369,10 +2420,33 @@ Widen the mode union (line 18):
 Add next to `closeTimeline`:
 
 ```ts
-  // Unlike closeTimeline, this does NOT refetch. Label mode writes only to
-  // rally_labels; it never changes a rally's bounds, flags or review status,
-  // so `detail` cannot have gone stale and a refetch would only discard
-  // QueueMode's undo stack by bumping rallyRevision.
+  // Reuses focusedRallyId rather than a field of its own -- it means "the
+  // rally the user stepped away from" regardless of which mode did the
+  // stepping. Safe to share with TimelineMode's use of the same field: the
+  // `{#if mode === 'queue'} ... {:else if mode === 'label'} ... {:else if
+  // focusedRallyId}` chain below tests `mode === 'label'` before it ever
+  // reaches the TimelineMode branch, so setting focusedRallyId here cannot
+  // mis-route into the timeline -- including when rallyId is null (the queue
+  // passes null once the pass is finished), since that branch's guard is
+  // `focusedRallyId` truthiness only reached in the TimelineMode `{:else
+  // if}`, never in the `mode === 'label'` check above it.
+  function openLabel(rallyId: string | null) {
+    focusedRallyId = rallyId
+    mode = 'label'
+  }
+
+  // Unlike closeTimeline, this does NOT refetch -- label mode writes only to
+  // rally_labels, never a rally's bounds, flags or review status, so
+  // `detail` cannot have gone stale. That's the only thing skipping the
+  // refetch buys, though: `mode === 'label'` already tears QueueMode down
+  // the instant it's set (Svelte destroys the outgoing branch of an
+  // `{#if}/{:else if}` chain regardless of `{#key rallyRevision}`), so its
+  // undo stack and cursor are gone before this function ever runs. Queue
+  // position survives the round trip because openLabel set focusedRallyId
+  // first -- the fresh QueueController built on return calls
+  // jumpTo(startAtRallyId) against it, the same mechanism openTimeline/
+  // closeTimeline already rely on -- not because avoiding a refetch avoided
+  // a remount.
   function closeLabel() {
     mode = 'queue'
   }
@@ -2383,9 +2457,14 @@ Extend the keyed block:
 ```svelte
   {#key rallyRevision}
     {#if mode === 'queue'}
-      <QueueMode {detail} onopen_timeline={openTimeline} onopen_label={() => (mode = 'label')} />
+      <QueueMode
+        {detail}
+        onopen_timeline={openTimeline}
+        onopen_label={openLabel}
+        startAtRallyId={focusedRallyId}
+      />
     {:else if mode === 'label'}
-      <LabelMode {detail} onclose={closeLabel} />
+      <LabelMode {detail} onclose={closeLabel} startAtRallyId={focusedRallyId} />
     {:else if focusedRallyId}
       <TimelineMode
         {detail}

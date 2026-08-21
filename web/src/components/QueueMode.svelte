@@ -18,9 +18,26 @@
      * session correctly, instead of seeding from `detail.rallies`' stale
      * server-snapshot flags. */
     onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
+    /** Enter label mode, optionally on this rally -- Session threads it
+     * through as startAtRallyId the same way onopen_timeline's rallyId is,
+     * so a fresh QueueController on return jumps back here instead of
+     * opening on whichever rally is first-unreviewed. `null` when `current`
+     * is undefined (the pass is finished): unlike `t`/timeline, label mode
+     * needs no specific rally to open on, since LabelController iterates the
+     * full unfiltered rally list rather than following the queue's cursor --
+     * and "just finished reviewing" is exactly when a reviewer is most
+     * likely to want it. Separate from review: a verdict is a note about the
+     * detector, not a decision about the clip, so it deliberately does not
+     * touch star/reject or the session's review status. */
+    onopen_label: (rallyId: string | null) => void
+    /** Open on this rally instead of the first unreviewed one, when it is
+     * still in the queue. Session passes the rally the user just left the
+     * timeline from -- see the constructor call below for why a remount
+     * would otherwise lose their place. */
+    startAtRallyId?: string | null
   }
 
-  let { detail, onopen_timeline }: Props = $props()
+  let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
@@ -32,6 +49,20 @@
   // from under it. `untrack` tells svelte-check this one-time read is
   // intentional rather than an accidental non-reactive reference.
   const queue = new QueueController(untrack(() => detail.rallies))
+  // A fresh controller opens on the first rally whose reviewed_at is null,
+  // which is the right resume point for a new session and the wrong one for
+  // a remount. Returning from the timeline forces a remount (Session bumps
+  // rallyRevision -- the only way a trimmed rally's new bounds reach the
+  // queue at all), and reviewed_at is stamped by star/reject alone, never by
+  // a bounds edit, so trimming rally 40 of 61 and pressing esc would drop
+  // the user back at whichever rally they had not yet judged.
+  //
+  // jumpTo silently does nothing for an id it cannot find, which is exactly
+  // right for the other remount trigger: a re-segment rebuilds every rally
+  // with a new uuid, so a stale id from a previous timeline visit correctly
+  // falls through to the first-unreviewed default.
+  const initialRallyId = untrack(() => startAtRallyId)
+  if (initialRallyId) queue.jumpTo(initialRallyId)
   const toaster = createToaster()
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)
@@ -176,6 +207,12 @@
       case 'T':
         if (current) onopen_timeline(current.id, queue.liveSnapshot(detail.rallies))
         break
+      case 'l':
+      case 'L':
+        // No `if (current)` guard here, unlike 't' -- see the onopen_label
+        // doc comment above for why label mode has no need of one.
+        onopen_label(current ? current.id : null)
+        break
     }
   }
 </script>
@@ -201,6 +238,10 @@
     <p class="mt-2 font-mono text-sm text-neutral-400">
       {stats.total} seen · ★{stats.starredCount} starred · ✕{stats.rejectedCount} rejected
     </p>
+    <!-- M3: this screen used to render no help line at all, so the only way
+         into label mode -- pressing L -- was undiscoverable exactly when a
+         reviewer who just finished a pass is most likely to want it. -->
+    <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
     <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
          reel" here. Both need clip export, which is Plan 3. -->
   </section>
@@ -255,7 +296,7 @@
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline
+    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
 {/if}
 

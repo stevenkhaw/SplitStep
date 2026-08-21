@@ -1,4 +1,4 @@
-import type { Job, Preset, ScoreSeries, Session, SessionDetail, Source } from './types'
+import type { Job, LabelRecord, Preset, ScoreSeries, Session, SessionDetail, Source } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -27,6 +27,9 @@ export const api = {
   reviewed: (id: string) => post(`/api/rallies/${id}/reviewed`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),
+  label: (id: string, verdict: string, boundary_flags: string[]) =>
+    post(`/api/rallies/${id}/label`, { verdict, boundary_flags }),
+  sourceLabels: (sourceId: string) => req<LabelRecord[]>(`/api/sources/${sourceId}/labels`),
 
   resegment: (sourceId: string, threshold: number) =>
     post(`/api/sources/${sourceId}/resegment`, { threshold }),
