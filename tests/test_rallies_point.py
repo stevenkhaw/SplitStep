@@ -1,6 +1,12 @@
 import pytest
 
-from bootleg.db.rallies import list_rallies, replace_rallies, set_point, set_star
+from bootleg.db.rallies import (
+    list_rallies,
+    replace_rallies,
+    set_point,
+    set_rejected,
+    set_star,
+)
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
 
@@ -103,7 +109,6 @@ def test_a_rejected_carry_over_does_not_gain_a_point(conn, seeded):
     # overlapped a rejection.
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])
-    from bootleg.db.rallies import set_rejected
     set_rejected(conn, _rallies(conn, seeded["session_id"])[0]["id"], True)
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1200, 4800, 0.7)])

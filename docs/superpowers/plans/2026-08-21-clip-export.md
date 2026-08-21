@@ -278,7 +278,7 @@ starred -- double faults and missed returns included -- because star was the
 only mark available and 'this is a point' was the thing worth recording,
 which left no way to say 'this one was good'.
 
-004 moves that meaning to \`point\` and clears the stars: if the second pass
+005 moves that meaning to \`point\` and clears the stars: if the second pass
 never happens, an empty highlight set is honest and one that silently still
 means 'point' is not.
 

@@ -343,7 +343,7 @@ element preload the review queue relies on.
   mismatch path taking the re-encode fallback.
 - **`replace_rallies` carries `point` across by overlap** — the test that stops
   a re-segment wiping every mark.
-- **Migration `005`** backfills exactly once and correctly; **`005`** recreates
+- **Migration `005`** backfills exactly once and correctly; **`006`** recreates
   `reel_items` with no rally foreign key.
 - **Span-derived clip paths**: an identical span after a re-segment resolves to
   the same file, so export skips it.

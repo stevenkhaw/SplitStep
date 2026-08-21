@@ -41,8 +41,8 @@ def replace_rallies(
     source_id: str,
     intervals: list[Interval],
 ) -> int:
-    """Rewrite one source's rallies, carrying stars and rejections across by
-    overlap.
+    """Rewrite one source's rallies, carrying stars, rejections and points
+    across by overlap.
 
     Manual boundary edits are intentionally not preserved — the caller
     confirms that loss before calling.
