@@ -16,6 +16,7 @@ const mockApi = {
   reject: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
+  setNote: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),
   listPresets: vi.fn().mockResolvedValue([]),
@@ -123,6 +124,12 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     return el as HTMLInputElement
   }
 
+  function noteInput(): HTMLInputElement {
+    const el = target.querySelector('input[aria-label="rally note"]')
+    if (!el) throw new Error('note input not found')
+    return el as HTMLInputElement
+  }
+
   function keydownOn(el: Element, key: string): boolean {
     // dispatchEvent's return value is false iff some handler called
     // preventDefault() -- this is how we can tell whether the keystroke
@@ -212,5 +219,32 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     // more -- it would pass whether or not the key was handled.
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally 2 \/ 2/))
     expect(mockApi.reviewed).not.toHaveBeenCalled()
+  })
+
+  it('lets a note with spaces be typed after N without starring/skipping/undoing', async () => {
+    instance = mount(Session, { target, props: { id: 's1' } })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 2/))
+
+    // N opens the field. The window handler is what must NOT act on the
+    // keystrokes that follow.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }))
+    flushSync()
+
+    const input = noteInput()
+    input.focus()
+
+    for (const key of ['s', 'l', 'o', 'w', ' ', 'x']) {
+      const notPrevented = keydownOn(input, key)
+      if (key === ' ') expect(notPrevented).toBe(true)
+      input.value += key
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      flushSync()
+    }
+
+    expect(input.value).toBe('slow x')
+    // 's' would star, 'x' would reject, and space would toggle playback.
+    expect(mockApi.star).not.toHaveBeenCalled()
+    expect(mockApi.reject).not.toHaveBeenCalled()
   })
 })

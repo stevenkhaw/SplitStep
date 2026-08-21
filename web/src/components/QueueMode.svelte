@@ -3,6 +3,7 @@
   import { api } from '../lib/api'
   import { describeExportResult, exportSetLabel } from '../lib/export'
   import { isEditableTarget } from '../lib/keyboard'
+  import { NOTE_MAX_CHARS, NoteWriter, seedNotes } from '../lib/notes'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
@@ -76,6 +77,19 @@
   // direct-to-DOM painting below exists to avoid.
   let scrubbing = false
 
+  // NoteWriter (lib/notes.ts) owns the id -> note map, the optimistic set,
+  // the POST and the failure restore -- a plain class, like QueueController,
+  // so it needs the same `version`-style bump below to make its mutations
+  // visible to Svelte. Notes stay out of QueueController itself: that models
+  // three booleans with an undo stack, and a note is free text with no
+  // toggle semantics that an undo history for verdicts has no business
+  // carrying.
+  const noteWriter = new NoteWriter(api, seedNotes(untrack(() => detail.rallies)))
+  let notesVersion = $state(0)
+  let editingNote = $state(false)
+  let noteBuffer = $state('')
+  let noteInput = $state<HTMLInputElement>()
+
   // `version` is the dependency that forces a re-read after a mutation --
   // QueueController is a plain class, so Svelte cannot track it directly:
   // reading a plain getter registers no signal, so an expression that reads
@@ -106,6 +120,17 @@
   const currentPoint = $derived.by(() => {
     version
     return queue.currentIsPoint
+  })
+  // notesVersion is NoteWriter's equivalent of `version` above: a plain
+  // class's mutations register no Svelte signal on their own, so the ✎
+  // indicator needs an explicit dependency to re-read has()/get() by.
+  const currentNote = $derived.by(() => {
+    notesVersion
+    return current ? noteWriter.get(current.id) : ''
+  })
+  const currentHasNote = $derived.by(() => {
+    notesVersion
+    return current ? noteWriter.has(current.id) : false
   })
   const stats = $derived.by(() => {
     version
@@ -175,6 +200,66 @@
       toaster.push(describeExportResult(which, result), 'info')
     } catch (e) {
       toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
+    }
+  }
+
+  function openNote() {
+    if (!current) return
+    noteBuffer = noteWriter.get(current.id)
+    editingNote = true
+    // Focus after the field exists. Svelte renders on the microtask queue, so
+    // the element is not in the DOM at the point this handler returns.
+    queueMicrotask(() => noteInput?.select())
+  }
+
+  // Thin orchestration only -- the optimistic set, the POST and the
+  // failure-restore all live in NoteWriter.commit (lib/notes.ts) so they are
+  // unit-tested; jsdom has no <video>, so this component itself can only be
+  // verified by hand.
+  async function commitNote() {
+    // Guards against a second call: the field's onblur also targets this
+    // function, and removing a focused element from the DOM fires blur on
+    // it -- so both an Enter and an Escape already close the field
+    // (editingNote = false) themselves, and that same removal then blurs
+    // the input a moment later. Without this guard, that trailing blur
+    // would re-run commitNote a second time: after Enter, a pointless
+    // duplicate POST of the same value; after Escape, a real one -- silently
+    // saving the exact text the reviewer just discarded.
+    if (!editingNote) return
+    const rally = current
+    if (!rally) return
+    const buffer = noteBuffer
+    editingNote = false
+    // commit() applies its optimistic map update synchronously, before
+    // returning -- bumping notesVersion right away (rather than after the
+    // await below) is what makes the ✎ indicator update immediately instead
+    // of waiting on the round trip, matching how star/point/reject already
+    // feel on a LAN box.
+    const pending = noteWriter.commit(rally.id, buffer)
+    notesVersion += 1
+    const outcome = await pending
+    if (outcome.status === 'failed') {
+      // Put back exactly what the server last accepted -- NoteWriter already
+      // did that internally, this just re-renders to show it. Unlike a
+      // failed star there is no revert action to hand the controller: notes
+      // are not part of the undo stack.
+      notesVersion += 1
+      toaster.push(`Couldn't save the note -- ${String(outcome.error)}`)
+    }
+  }
+
+  function onNoteKey(e: KeyboardEvent) {
+    // Handled on the field itself rather than in onKey: these two keys mean
+    // commit and cancel only while the field is open, and giving them a
+    // second global meaning would make them depend on what has focus.
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitNote()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      // Cancel, not commit: Escape discards, which is why noteBuffer is
+      // never written back to noteWriter here.
+      editingNote = false
     }
   }
 
@@ -295,6 +380,11 @@
       case 'T':
         if (current) onopen_timeline(current.id, queue.liveSnapshot(detail.rallies))
         break
+      case 'n':
+      case 'N':
+        e.preventDefault()
+        openNote()
+        break
       case 'l':
       case 'L':
         // No `if (current)` guard here, unlike 't' -- see the onopen_label
@@ -411,6 +501,25 @@
     ></div>
   </div>
 
+  {#if editingNote}
+    <!-- One line, and no textarea: the caption renders as at most two lines at
+         4K, so a field that invites a paragraph would invite text the export
+         has to truncate. Enter/Escape are handled on the field itself (see
+         onNoteKey); the queue's window handler already stands down for an
+         editable target, which editable-target-guard.test.ts pins. -->
+    <input
+      bind:this={noteInput}
+      bind:value={noteBuffer}
+      onkeydown={onNoteKey}
+      onblur={commitNote}
+      maxlength={NOTE_MAX_CHARS}
+      placeholder="note for this rally — Enter saves, Esc cancels"
+      aria-label="rally note"
+      class="mt-2 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1
+             font-mono text-sm"
+    />
+  {/if}
+
   <div class="mt-2 flex items-center justify-between font-mono text-xs text-neutral-400">
     <span class="flex items-center gap-2">
       <span
@@ -421,6 +530,10 @@
         class="text-base leading-none {currentPoint ? 'text-green-400' : 'text-neutral-700'}"
         title={currentPoint ? 'point' : 'not a point'}
       >●</span>
+      <span
+        class="text-base leading-none {currentHasNote ? 'text-blue-300' : 'text-neutral-700'}"
+        title={currentHasNote ? currentNote : 'no note'}
+      >✎</span>
       rally {stats.index + 1} / {stats.total} ·
       {formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}
       {#if currentRejected}<span class="text-red-400">· rejected</span>{/if}
@@ -432,7 +545,7 @@
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · P point · X reject (again to undo) · R replay · ← back · → next · U undo · `/1/2/3 speed · T timeline · L label
+    S star · P point · X reject (again to undo) · R replay · N note · ← back · → next · U undo · `/1/2/3 speed · T timeline · L label
   </p>
 {/if}
 
