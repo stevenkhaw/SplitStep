@@ -14,7 +14,7 @@
 - Python runs from the `bootleg` conda env by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
 - ruff line-length 100. **ruff 0.16.3 defaults here are broader than the classic set** — `I001` (import ordering), `BLE001` (blind except), `PLW1510` (`subprocess.run` without `check=`) are active.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
-- Migrations are numbered `.sql` applied by `PRAGMA user_version`. Add `004_point_flag.sql`; **never edit `001`–`003`**, all of which are applied to the user's real library.
+- Migrations are numbered `.sql` applied by `PRAGMA user_version`. Add `005_point_flag.sql`; **never edit `001`–`003`**, all of which are applied to the user's real library.
 - **The locked clip profile may never change** once a clip exists: `mp4 · H.264 High · yuv420p · 3840×2160 · 30 fps CFR · CRF 20 · AAC 128k 48 kHz stereo`. Changing it breaks `-c copy` against every clip ever cut.
 - **Rotation never comes from the file's display matrix.** Pass `-noautorotate`, apply `rotation_filter(rotation_deg)`, and strip stale side data with `-display_rotation 0` exactly as `make_proxy` does.
 - Comments explain **why**, not what. This codebase carries long rationale comments on non-obvious calls; match that density.
@@ -27,7 +27,7 @@
 ### Task 1: The `point` flag in the database
 
 **Files:**
-- Create: `bootleg/db/migrations/004_point_flag.sql`
+- Create: `bootleg/db/migrations/005_point_flag.sql`
 - Modify: `bootleg/db/rallies.py` (add `set_point`; `replace_rallies` carries `point`)
 - Test: `tests/test_db.py` (append), `tests/test_rallies_point.py` (create)
 
@@ -37,7 +37,7 @@
 
 - [ ] **Step 1: Write the migration**
 
-Create `bootleg/db/migrations/004_point_flag.sql`:
+Create `bootleg/db/migrations/005_point_flag.sql`:
 
 ```sql
 -- A third review flag beside starred and rejected.
@@ -269,7 +269,7 @@ Expected: all pass. `tests/test_db.py`, `tests/test_api.py` and `tests/test_labe
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/db/migrations/004_point_flag.sql bootleg/db/rallies.py \
+git add bootleg/db/migrations/005_point_flag.sql bootleg/db/rallies.py \
         tests/test_rallies_point.py tests/test_db.py
 git commit -m "feat(db): a point flag, and a reinterpretation of every star
 
