@@ -201,4 +201,33 @@ describe('LabelController', () => {
     c.back()
     expect(c.currentVerdict).toBeNull()
   })
+
+  it('mutating the array returned by currentFlags does not change controller state', () => {
+    c.setVerdict('clean')
+    c.toggleFlag('start_early')
+    const f = c.currentFlags
+    f.push('end_late')
+    expect(c.currentFlags).toEqual(['start_early'])
+  })
+
+  it('mutating action.previousFlags does not change controller state', () => {
+    c.setVerdict('clean')
+    c.toggleFlag('start_early')
+    const action = c.setVerdict('partly')!
+    action.previousFlags.push('end_late')
+    expect(c.currentFlags).toEqual(['start_early'])
+  })
+
+  it('revert restores the true pre-action flags even if a caller mutated a returned array in between', () => {
+    c.setVerdict('clean')
+    c.toggleFlag('start_early')
+    const action = c.setVerdict('partly')!
+    // Simulate some other part of the app holding currentFlags (e.g. for
+    // rendering) and mutating it before the failed POST is known about.
+    // Before the fix this is the same array object as action.previousFlags,
+    // so the mutation silently corrupts the snapshot revert() depends on.
+    c.currentFlags.push('end_late')
+    c.revert(action)
+    expect(c.currentFlags).toEqual(['start_early'])
+  })
 })

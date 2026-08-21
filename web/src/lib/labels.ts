@@ -102,7 +102,10 @@ export class LabelController {
 
   get currentFlags(): BoundaryFlag[] {
     const r = this.current
-    return r ? (this.#flags.get(r.id) ?? []) : []
+    // Copied, not the live array: a caller holding this reference must not
+    // be able to reach into controller state (e.g. `currentFlags.push(...)`)
+    // without going through toggleFlag.
+    return r ? [...(this.#flags.get(r.id) ?? [])] : []
   }
 
   get flagsEnabled(): boolean {
@@ -131,12 +134,24 @@ export class LabelController {
     // Dropping to a verdict that admits no boundary error clears whatever was
     // already flagged, so a not_play row can never carry an end_late that
     // contradicts it.
-    const flags = FLAGGABLE.includes(verdict) ? previousFlags : []
+    // Copied rather than reused: `flags` becomes the array stored in
+    // `#flags`, and `previousFlags` is handed back to the caller as the
+    // action's pre-action snapshot. Aliasing the two would let a caller
+    // mutating action.previousFlags corrupt controller state, and revert()
+    // depends on previousFlags staying an immutable snapshot of what
+    // preceded this action.
+    const flags = FLAGGABLE.includes(verdict) ? [...previousFlags] : []
     this.#flags.set(r.id, flags)
 
     // Deliberately does not advance -- boundary flags are added to this same
     // span next, and `→` is the only thing that moves the cursor.
-    return { rallyId: r.id, verdict, flags: [...flags], previousVerdict, previousFlags }
+    return {
+      rallyId: r.id,
+      verdict,
+      flags: [...flags],
+      previousVerdict,
+      previousFlags: [...previousFlags],
+    }
   }
 
   toggleFlag(flag: BoundaryFlag): LabelAction | null {
