@@ -66,6 +66,16 @@
   }
 
   function attemptPlay(el: HTMLVideoElement): void {
+    // Starting playback is a new pass over the rally, so the out-point has to
+    // be detectable again. `rallyFinished` used to be cleared only where the
+    // rally itself changed, which `replay()` does not do -- it seeks the same
+    // src/startMs back to the beginning. A looping clip therefore played
+    // through once, and on the second pass finishRally() returned at its
+    // guard before pausing, so playback ran on into the following footage
+    // with the rAF loop already torn down and the timeupdate backstop hitting
+    // the same guard. Every restart funnels through here: replay(), play(),
+    // the click-to-play scrim retry, and the rally-change effect.
+    rallyFinished = false
     el.play().then(
       () => {
         blocked = false
@@ -240,7 +250,9 @@
     // re-arm path now exists to catch, but the fix starts with not reading
     // this at all.
     target.playbackRate = untrack(() => speed)
-    rallyFinished = false
+    // rallyFinished is cleared inside attemptPlay, which owns it for every
+    // restart path -- resetting it again here would just be a second place to
+    // keep in sync.
     attemptPlay(target)
 
     // Backstop: if rAF gets throttled (hidden/backgrounded tab), `tick()`
