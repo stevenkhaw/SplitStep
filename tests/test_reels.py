@@ -158,6 +158,28 @@ def test_plan_reel_export_reports_in_flight_separately(library, conn, seeded):
     assert (plan.in_flight, plan.already_cut, len(plan.pending)) == (1, 0, 0)
 
 
+def test_plan_reel_export_checks_job_queue_before_disk_file(library, conn, seeded):
+    # A killed-and-requeued job can leave a stale complete file at this span's
+    # path from an earlier run, and reading that as "already cut" while a live
+    # job is about to overwrite it would be wrong. This test pins the ordering:
+    # has_pending_clip() runs BEFORE item.clip_ready, so a span with both a
+    # queued job and a stale disk file reports as in_flight, not already_cut.
+    # Reordering these checks would pass the previous test (no disk file) but
+    # fail this one (both conditions present).
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 5000)])
+    _cut(library, seeded["session_id"], seeded["idx"], 1000, 5000)
+    enqueue(conn, "clip", {
+        "source_id": seeded["source_id"], "start_ms": 1000, "end_ms": 5000,
+    })
+
+    plan = plan_reel_export(library, conn, reel["id"])
+
+    assert plan.in_flight == 1
+    assert plan.already_cut == 0
+    assert len(plan.pending) == 0
+
+
 def test_plan_reel_export_carries_rally_id_when_there_is_one(library, conn, seeded):
     reel = create_reel(conn, "r")
     add_items(conn, reel["id"], [(seeded["source_id"], 1000, 5000)])
