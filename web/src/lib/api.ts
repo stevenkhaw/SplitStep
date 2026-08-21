@@ -78,6 +78,7 @@ export const api = {
   star: (id: string, starred: boolean) => post(`/api/rallies/${id}/star`, { starred }),
   reject: (id: string, rejected: boolean) => post(`/api/rallies/${id}/reject`, { rejected }),
   point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
+  setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
   reviewed: (id: string) => post(`/api/rallies/${id}/reviewed`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),

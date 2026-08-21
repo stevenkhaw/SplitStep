@@ -23,10 +23,12 @@ from bootleg.db.labels import (
 )
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
+    NOTE_MAX_CHARS,
     list_rallies,
     mark_reviewed,
     replace_rallies,
     set_bounds,
+    set_note,
     set_point,
     set_rejected,
     set_star,
@@ -64,6 +66,22 @@ class RejectBody(BaseModel):
 
 class PointBody(BaseModel):
     point: bool
+
+
+class NoteBody(BaseModel):
+    note: str
+
+    @field_validator("note")
+    @classmethod
+    def check_note(cls, v: str) -> str:
+        # Trim before measuring, and store what was measured: trailing
+        # whitespace is invisible to the reviewer but would widen the rendered
+        # caption pill, and a note that is 120 characters of text plus two
+        # spaces is not over the limit in any sense the reviewer would accept.
+        v = v.strip()
+        if len(v) > NOTE_MAX_CHARS:
+            raise ValueError(f"a note is at most {NOTE_MAX_CHARS} characters")
+        return v
 
 
 class BoundsBody(BaseModel):
@@ -262,6 +280,16 @@ def api_point(rally_id: str, body: PointBody, request: Request):
     # ruling on the clip in the same family as star and reject, and
     # reviewed_at records that a human ruled on the rally at all.
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/note")
+def api_note(rally_id: str, body: NoteBody, request: Request):
+    conn = _conn(request)
+    # No refresh_session_review_status call, unlike star/reject/point: writing
+    # a note is not a ruling on the rally (see set_note), so it must not move
+    # the session's review status. Same reasoning the label route follows.
+    set_note(conn, rally_id, body.note)
+    return {"ok": True}
 
 
 @router.post("/api/rallies/{rally_id}/reviewed")

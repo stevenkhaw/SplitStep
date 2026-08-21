@@ -1,0 +1,14 @@
+-- One free-text note per rally, written during review and burned into the
+-- clip at export.
+--
+-- A column on `rallies` rather than a row in `rally_labels`, which is the
+-- opposite of what 003 chose for labels, and deliberately so. A label is a
+-- judgement about the *detector's* span and has to outlive any number of
+-- re-segments to stay useful for scoring. A note is about the clip you cut:
+-- it belongs to the rally's current bounds, and anchoring it to a detector
+-- span the reviewer has since dragged elsewhere would re-attach text to
+-- boundaries it was never written about.
+--
+-- NOT NULL DEFAULT '' rather than nullable: absence has one representation,
+-- so no reader has to handle NULL and '' as separate cases.
+ALTER TABLE rallies ADD COLUMN note TEXT NOT NULL DEFAULT '';

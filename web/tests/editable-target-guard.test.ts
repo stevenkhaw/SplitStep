@@ -16,6 +16,7 @@ const mockApi = {
   reject: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
+  setNote: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),
   listPresets: vi.fn().mockResolvedValue([]),
@@ -52,6 +53,7 @@ function rally(id: string, idx: number): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    note: '',
   }
 }
 
@@ -96,6 +98,20 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     instance = undefined
   })
 
+  // Both setup panels below the queue ship collapsed, and QuadEditor renders
+  // nothing at all until opened (its frame <img> costs a server-side ffmpeg
+  // extraction). The keystroke this test is about only exists once the panel
+  // is open, so expand every panel first. `open` + a hand-dispatched toggle
+  // rather than clicking <summary>, because jsdom fires the real toggle
+  // asynchronously and it would race flushSync.
+  function expandPanels() {
+    for (const details of target.querySelectorAll('details')) {
+      details.open = true
+      details.dispatchEvent(new Event('toggle'))
+    }
+    flushSync()
+  }
+
   function presetNameInput(): HTMLInputElement {
     const el = target.querySelector('input[aria-label="preset name"]')
     if (!el) throw new Error('preset-name input not found')
@@ -105,6 +121,12 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
   function thresholdSlider(): HTMLInputElement {
     const el = target.querySelector('input[aria-label="detector threshold"]')
     if (!el) throw new Error('threshold slider not found')
+    return el as HTMLInputElement
+  }
+
+  function noteInput(): HTMLInputElement {
+    const el = target.querySelector('input[aria-label="rally note"]')
+    if (!el) throw new Error('note input not found')
     return el as HTMLInputElement
   }
 
@@ -121,6 +143,7 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     instance = mount(Session, { target, props: { id: 's1' } })
     flushSync()
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 2/))
+    expandPanels()
 
     const input = presetNameInput()
     input.focus()
@@ -196,5 +219,32 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     // more -- it would pass whether or not the key was handled.
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally 2 \/ 2/))
     expect(mockApi.reviewed).not.toHaveBeenCalled()
+  })
+
+  it('lets a note with spaces be typed after N without starring/skipping/undoing', async () => {
+    instance = mount(Session, { target, props: { id: 's1' } })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 2/))
+
+    // N opens the field. The window handler is what must NOT act on the
+    // keystrokes that follow.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }))
+    flushSync()
+
+    const input = noteInput()
+    input.focus()
+
+    for (const key of ['s', 'l', 'o', 'w', ' ', 'x']) {
+      const notPrevented = keydownOn(input, key)
+      if (key === ' ') expect(notPrevented).toBe(true)
+      input.value += key
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      flushSync()
+    }
+
+    expect(input.value).toBe('slow x')
+    // 's' would star, 'x' would reject, and space would toggle playback.
+    expect(mockApi.star).not.toHaveBeenCalled()
+    expect(mockApi.reject).not.toHaveBeenCalled()
   })
 })

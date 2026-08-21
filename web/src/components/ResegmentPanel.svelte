@@ -29,6 +29,12 @@
   let busy = $state(false)
   let lastCount = $state<number | null>(null)
   let error = $state<string | null>(null)
+  // Collapsed by default: this is the threshold-tuning loop, opened
+  // deliberately, not something a review pass touches. It also gates the
+  // /scores fetch below -- that call parses the whole of features.jsonl, and
+  // paying it on every session load for a panel nobody opened is the cost
+  // this collapse actually removes.
+  let open = $state(false)
   let scores = $state<number[]>([])
   let scoreStepMs = $state(200)
 
@@ -92,6 +98,11 @@
   // back (see loadScores' comment above), silently wrong-scale whenever
   // the two sources sit on different camera-view profiles.
   $effect(() => {
+    // Reading `open` makes this effect fire on first expand, so the panel
+    // fetches when it is actually looked at. Re-collapsing just re-runs it
+    // into this guard -- nothing is torn down, and reopening refetches
+    // against whatever the source looks like by then.
+    if (!open) return
     if (!source) return
     if (source.id !== scoredSourceId) threshold = null
     scoredSourceId = source.id
@@ -153,68 +164,71 @@
   }
 </script>
 
-<section class="mt-6 rounded-lg border border-neutral-800 p-4">
-  <h2 class="text-sm font-semibold">Re-segment</h2>
-  <p class="mt-1 text-xs text-neutral-400">
-    Runs over cached features — no GPU. Stars and rejections carry across by overlap;
-    hand-edited boundaries do not.
-  </p>
+<details bind:open class="mt-6 rounded-lg border border-neutral-800">
+  <summary class="cursor-pointer select-none p-4 text-sm font-semibold">Re-segment</summary>
 
-  <div class="mt-3 flex items-center gap-3">
-    <select
-      value={sourceId}
-      onchange={(e) => onSourceChange(e.currentTarget.value)}
-      class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-      aria-label="source to re-segment"
-    >
-      {#each sources as s (s.id)}
-        <option value={s.id}>source {s.idx}</option>
-      {/each}
-    </select>
+  <div class="px-4 pb-4">
+    <p class="text-xs text-neutral-400">
+      Runs over cached features — no GPU. Stars and rejections carry across by overlap;
+      hand-edited boundaries do not.
+    </p>
 
-    <input
-      type="range"
-      min="0.05"
-      max="0.95"
-      step="0.01"
-      value={threshold ?? 0.05}
-      oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
-      disabled={threshold === null}
-      class="flex-1 disabled:opacity-40"
-      aria-label="detector threshold"
-    />
-    <span class="w-12 font-mono text-sm">{threshold === null ? '…' : threshold.toFixed(2)}</span>
+    <div class="mt-3 flex items-center gap-3">
+      <select
+        value={sourceId}
+        onchange={(e) => onSourceChange(e.currentTarget.value)}
+        class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+        aria-label="source to re-segment"
+      >
+        {#each sources as s (s.id)}
+          <option value={s.id}>source {s.idx}</option>
+        {/each}
+      </select>
 
-    <button
-      class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
-      onclick={run}
-      disabled={busy || !source || threshold === null}
-    >
-      {busy ? 'working…' : 'Re-segment'}
-    </button>
-  </div>
+      <input
+        type="range"
+        min="0.05"
+        max="0.95"
+        step="0.01"
+        value={threshold ?? 0.05}
+        oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
+        disabled={threshold === null}
+        class="flex-1 disabled:opacity-40"
+        aria-label="detector threshold"
+      />
+      <span class="w-12 font-mono text-sm">{threshold === null ? '…' : threshold.toFixed(2)}</span>
 
-  {#if source && threshold !== null}
-    <div class="mt-3">
-      <ScoreCurve {scores} {threshold} stepMs={scoreStepMs} windowStartMs={0} windowEndMs={source.duration_ms} />
-      <p class="mt-1 font-mono text-[11px] text-neutral-500">
-        detector score for the whole source — dashed line is the threshold above
-      </p>
+      <button
+        class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
+        onclick={run}
+        disabled={busy || !source || threshold === null}
+      >
+        {busy ? 'working…' : 'Re-segment'}
+      </button>
     </div>
-  {/if}
 
-  {#if editedCount > 0}
-    <p class="mt-2 text-xs text-amber-300">
-      {editedCount} hand-edited boundar{editedCount === 1 ? 'y' : 'ies'} on this source will be
-      discarded if you re-segment.
-    </p>
-  {/if}
-  {#if lastCount !== null && threshold !== null}
-    <p class="mt-2 font-mono text-xs text-neutral-400">
-      {lastCount} rallies at threshold {threshold.toFixed(2)}
-    </p>
-  {/if}
-  {#if error}
-    <p class="mt-2 text-xs text-red-300">{error}</p>
-  {/if}
-</section>
+    {#if source && threshold !== null}
+      <div class="mt-3">
+        <ScoreCurve {scores} {threshold} stepMs={scoreStepMs} windowStartMs={0} windowEndMs={source.duration_ms} />
+        <p class="mt-1 font-mono text-[11px] text-neutral-500">
+          detector score for the whole source — dashed line is the threshold above
+        </p>
+      </div>
+    {/if}
+
+    {#if editedCount > 0}
+      <p class="mt-2 text-xs text-amber-300">
+        {editedCount} hand-edited boundar{editedCount === 1 ? 'y' : 'ies'} on this source will be
+        discarded if you re-segment.
+      </p>
+    {/if}
+    {#if lastCount !== null && threshold !== null}
+      <p class="mt-2 font-mono text-xs text-neutral-400">
+        {lastCount} rallies at threshold {threshold.toFixed(2)}
+      </p>
+    {/if}
+    {#if error}
+      <p class="mt-2 text-xs text-red-300">{error}</p>
+    {/if}
+  </div>
+</details>

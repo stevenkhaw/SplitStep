@@ -67,6 +67,7 @@ function rally(id: string, idx: number, sourceId: string): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    note: '',
   }
 }
 
@@ -96,6 +97,19 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
     instance = undefined
   })
 
+  // Both panels below the queue ship collapsed, and ResegmentPanel's /scores
+  // effect is gated on being open. The id filtering these tests pin happens
+  // on that first fetch, so they have to expand first. `open` + a
+  // hand-dispatched toggle rather than clicking <summary>: jsdom fires the
+  // real toggle asynchronously and it would race flushSync.
+  function expandPanels() {
+    for (const details of target.querySelectorAll('details')) {
+      details.open = true
+      details.dispatchEvent(new Event('toggle'))
+    }
+    flushSync()
+  }
+
   it('calls scores() only with a ready source id, never a needs_setup source id', async () => {
     // needs_setup listed FIRST: if Session ever regressed to passing the
     // raw (unfiltered) `sources` array through, ResegmentPanel's
@@ -110,6 +124,8 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
     instance = mount(Session, { target, props: { id: 's1' } })
     flushSync()
 
+    await vi.waitFor(() => expect(target.querySelector('details')).not.toBeNull())
+    expandPanels()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
 
     // This is the initial mount fetch, so the threshold arg is undefined --
@@ -131,6 +147,11 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
     flushSync()
 
     await vi.waitFor(() => expect(target.textContent).toContain('Set up source 1'))
+    // Expanding whatever panels rendered keeps this assertion about the
+    // filtering rather than about the collapse: a session whose every source
+    // needs setup renders no ResegmentPanel at all, so there is nothing here
+    // to open and nothing to fetch.
+    expandPanels()
 
     expect(mockApi.scores).not.toHaveBeenCalled()
   })

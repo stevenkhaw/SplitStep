@@ -1,3 +1,4 @@
+import math
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -5,6 +6,12 @@ from datetime import UTC, datetime
 from bootleg.detect.segment import Interval
 
 STAR_OVERLAP_MIN = 0.5
+
+# The longest note that still renders as two lines inside the caption pill at
+# 4K without shrinking the type. Enforced here and again at the API boundary
+# (NoteBody), and mirrored in web/src/lib/notes.ts -- a note that cannot be
+# rendered must never reach the database, whoever is writing it.
+NOTE_MAX_CHARS = 120
 
 
 def _now() -> str:
@@ -52,14 +59,75 @@ def _carried_clip_path(iv: Interval, rows: list[sqlite3.Row]) -> str | None:
     return None
 
 
+def _carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str:
+    """The note for `iv` from the best-overlapping old row, else ''.
+
+    The >50% rule starred/rejected/point use, not clip_path's exact-span
+    rule: a note is a judgement about a rally, and a rally that shifts by a
+    few hundred milliseconds under a new threshold is the same rally the
+    reviewer wrote about. clip_path is different because it names a file cut
+    for one specific span.
+
+    Best overlap rather than first match, unlike _overlaps_any. Those three
+    are booleans, so any qualifying row gives the same answer; a note is a
+    string, and two old rallies can both clear 50% of one merged new span. The
+    answer must not depend on the order sqlite returned the rows in.
+
+    Ranking has two stages, and only the first is a qualifier: overlap_fraction
+    (the same >50% rule the flags use, normalized so a short old rally and a
+    long one need the same relative coverage to count) decides which rows are
+    even in the running. Among those, raw millisecond overlap is not a
+    tie-break -- it is the sole ranking signal, full stop. Two qualifying rows
+    with different fractions are still ranked by milliseconds alone, because
+    overlap_fraction divides by the *shorter* span, so any old rally fully
+    contained in the new one scores a flat 1.0 regardless of its own length --
+    two contained old rallies of different sizes are indistinguishable by
+    fraction alone, and raw overlap is the only signal left at that point. It
+    is also the more natural "longest overlap" a reviewer would name if asked
+    which old rally a merged span best represents.
+
+    A third, genuine tie-break -- smaller start_ms wins -- makes the ranking a
+    total order. Two old rallies of equal duration absorbed into one merged
+    new span produce the identical raw overlap: old (0, 600) and old
+    (400, 1000) both overlap a new (0, 1000) span by exactly 600ms. The
+    read-back SELECT carries no ORDER BY, so without this the winner would be
+    whichever row sqlite happened to list first -- not an answer.
+    """
+    # best_start_ms starts at +inf, not None: `r["start_ms"] < best_start_ms`
+    # below is a real numeric comparison on every qualifying row, including
+    # the first. A None start was only ever safe because the first row to
+    # clear the >= STAR_OVERLAP_MIN gate always has overlap_ms > 0 ==
+    # best_overlap_ms, so the `overlap_ms > best_overlap_ms` disjunct wins
+    # before the None comparison is reached -- a short-circuit that silently
+    # depended on STAR_OVERLAP_MIN being greater than zero.
+    best_note, best_overlap_ms, best_start_ms = "", 0, math.inf
+    for r in rows:
+        if not r["note"]:
+            continue
+        f = overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
+        if f < STAR_OVERLAP_MIN:
+            continue
+        # Recomputed rather than reused from inside overlap_fraction: that
+        # function's signature is shared with the label scorer and must not
+        # change shape just to also hand back its numerator. The duplication
+        # here is deliberate, not an oversight.
+        overlap_ms = min(iv.end_ms, r["end_ms"]) - max(iv.start_ms, r["start_ms"])
+        better = overlap_ms > best_overlap_ms or (
+            overlap_ms == best_overlap_ms and r["start_ms"] < best_start_ms
+        )
+        if better:
+            best_note, best_overlap_ms, best_start_ms = r["note"], overlap_ms, r["start_ms"]
+    return best_note
+
+
 def replace_rallies(
     conn: sqlite3.Connection,
     session_id: str,
     source_id: str,
     intervals: list[Interval],
 ) -> int:
-    """Rewrite one source's rallies, carrying stars, rejections and points
-    across by overlap, and clip_path across by exact span match (see
+    """Rewrite one source's rallies, carrying stars, rejections, points and
+    notes across by overlap, and clip_path across by exact span match (see
     _carried_clip_path).
 
     Manual boundary edits are intentionally not preserved — the caller
@@ -79,9 +147,9 @@ def replace_rallies(
         # to starred/rejected/point rows would silently drop clip_path for a
         # real file still sitting on disk at that exact span.
         old = conn.execute(
-            "SELECT start_ms, end_ms, starred, rejected, point, clip_path FROM rallies"
+            "SELECT start_ms, end_ms, starred, rejected, point, clip_path, note FROM rallies"
             " WHERE source_id = ? AND (starred = 1 OR rejected = 1 OR point = 1"
-            " OR clip_path IS NOT NULL)",
+            " OR clip_path IS NOT NULL OR note != '')",
             (source_id,),
         ).fetchall()
 
@@ -102,16 +170,17 @@ def replace_rallies(
             # to prevent.
             point = _overlaps_any(iv, old, "point")
             clip_path = _carried_clip_path(iv, old)
+            note = _carried_note(iv, old)
             # idx is a temporary, per-row-unique negative placeholder so a batch of
             # several new rows never collides with itself under UNIQUE(session_id,
             # idx) before _renumber() assigns the real sequential values below.
             conn.execute(
                 "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-                "det_start_ms,det_end_ms,confidence,starred,rejected,point,clip_path)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "det_start_ms,det_end_ms,confidence,starred,rejected,point,clip_path,note)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, session_id, source_id, -placeholder_idx, iv.start_ms,
                  iv.end_ms, iv.start_ms, iv.end_ms, iv.confidence,
-                 int(starred), int(rejected), int(point), clip_path),
+                 int(starred), int(rejected), int(point), clip_path, note),
             )
 
         _renumber(conn, session_id)
@@ -183,6 +252,19 @@ def set_rejected(conn: sqlite3.Connection, rally_id: str, rejected: bool) -> Non
         " WHERE id = ?",
         (int(rejected), _now(), rally_id),
     )
+    conn.commit()
+
+
+def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
+    """Write (or clear) a rally's note.
+
+    Deliberately does NOT stamp reviewed_at, unlike set_star/set_point/
+    set_rejected. Those three are rulings on the clip and reviewed_at records
+    that a human ruled on it; a note carries no verdict at all -- "check this
+    later" is an ordinary thing to write -- so flipping a session to reviewed
+    on the strength of one would report a judgement nobody made.
+    """
+    conn.execute("UPDATE rallies SET note = ? WHERE id = ?", (note, rally_id))
     conn.commit()
 
 
