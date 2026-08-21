@@ -5,6 +5,7 @@ from bootleg.db.rallies import (
     list_rallies,
     replace_rallies,
     set_bounds,
+    set_clip_path,
     set_rejected,
     set_star,
 )
@@ -331,6 +332,53 @@ def test_replace_rallies_drops_rejected_when_overlap_is_small(conn):
 
     replace_rallies(conn, s, src, [Interval(30_000, 34_000, 0.7)])
     assert list_rallies(conn, s)[0]["rejected"] == 0
+
+
+def test_replace_rallies_carries_clip_path_when_the_span_is_unchanged(conn):
+    """set_clip_path's docstring: the column records "what WAS cut", and
+    Reclaim Space needs it to know an original is safe to delete. Before
+    this fix, the INSERT in replace_rallies never listed clip_path at all,
+    so any re-segment -- even one that left every span untouched -- wiped
+    every recorded clip path in the session to NULL.
+    """
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    rally_id = list_rallies(conn, s)[0]["id"]
+    set_clip_path(conn, rally_id, "sessions/2026-08-19/clips/01-1000-5000.mp4")
+
+    # A re-segment that reproduces this rally's exact span unchanged,
+    # alongside a genuinely new one it must not invent a path for.
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8), Interval(9000, 12000, 0.7)])
+
+    rows = {(r["start_ms"], r["end_ms"]): r for r in list_rallies(conn, s)}
+    assert rows[(1000, 5000)]["clip_path"] == "sessions/2026-08-19/clips/01-1000-5000.mp4"
+    assert rows[(9000, 12000)]["clip_path"] is None
+
+
+def test_replace_rallies_drops_clip_path_when_bounds_shift_even_slightly(conn):
+    """clip_path is span-specific, unlike starred/rejected/point, which is
+    why it needs its own carry-over rule rather than reusing _overlaps_any.
+    A boundary nudge small enough to keep the star by >50% overlap must NOT
+    keep pointing at a clip cut for the old span: that file's span no longer
+    matches the rally's new bounds, so clip_relpath of the current bounds
+    resolves to a different, nonexistent path -- exactly the "exists or does
+    not" property clip_relpath's docstring describes.
+    """
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    rally_id = list_rallies(conn, s)[0]["id"]
+    set_clip_path(conn, rally_id, "sessions/2026-08-19/clips/01-1000-5000.mp4")
+    set_star(conn, rally_id, True)
+
+    # Shifted just enough to still count as the same rally for the star
+    # carry-over (>50% overlap), but not the identical span.
+    replace_rallies(conn, s, src, [Interval(1200, 5200, 0.7)])
+
+    row = list_rallies(conn, s)[0]
+    assert row["starred"] == 1
+    assert row["clip_path"] is None
 
 
 def test_set_rejected_hides_nothing_but_flags_the_row(conn):

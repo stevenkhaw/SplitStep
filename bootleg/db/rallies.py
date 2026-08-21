@@ -35,6 +35,23 @@ def _overlaps_any(iv: Interval, rows: list[sqlite3.Row], flag: str) -> bool:
     )
 
 
+def _carried_clip_path(iv: Interval, rows: list[sqlite3.Row]) -> str | None:
+    """clip_path for `iv` if an old row's bounds are its EXACT bounds, else None.
+
+    Deliberately not the >50% overlap rule starred/rejected/point use. Those
+    three are judgements about a rally that survive it shifting slightly
+    under a re-segment; clip_path is a fact about one specific span --
+    set_clip_path's docstring: "what WAS cut" -- and a clip cut for
+    (1000, 5000) is not what was cut for (1200, 4800), even though a reviewer
+    would call them the same rally. Carrying it across a fuzzy-matched shift
+    would silently point a rally at a clip whose span it no longer has.
+    """
+    for r in rows:
+        if r["clip_path"] is not None and r["start_ms"] == iv.start_ms and r["end_ms"] == iv.end_ms:
+            return r["clip_path"]
+    return None
+
+
 def replace_rallies(
     conn: sqlite3.Connection,
     session_id: str,
@@ -42,7 +59,8 @@ def replace_rallies(
     intervals: list[Interval],
 ) -> int:
     """Rewrite one source's rallies, carrying stars, rejections and points
-    across by overlap.
+    across by overlap, and clip_path across by exact span match (see
+    _carried_clip_path).
 
     Manual boundary edits are intentionally not preserved — the caller
     confirms that loss before calling.
@@ -54,9 +72,16 @@ def replace_rallies(
     waiting for some unrelated later commit to persist it.
     """
     try:
+        # clip_path IS NOT NULL is an extra carry-over candidate alongside the
+        # three flags, not an inconsistency with them: a clip can be cut for a
+        # rally that a reviewer later un-stars/un-points (the flag changes;
+        # nothing re-cuts or deletes the file), so restricting this read-back
+        # to starred/rejected/point rows would silently drop clip_path for a
+        # real file still sitting on disk at that exact span.
         old = conn.execute(
-            "SELECT start_ms, end_ms, starred, rejected, point FROM rallies"
-            " WHERE source_id = ? AND (starred = 1 OR rejected = 1 OR point = 1)",
+            "SELECT start_ms, end_ms, starred, rejected, point, clip_path FROM rallies"
+            " WHERE source_id = ? AND (starred = 1 OR rejected = 1 OR point = 1"
+            " OR clip_path IS NOT NULL)",
             (source_id,),
         ).fetchall()
 
@@ -76,16 +101,17 @@ def replace_rallies(
             # tiebreaker -- the same class of loss the star carry-over exists
             # to prevent.
             point = _overlaps_any(iv, old, "point")
+            clip_path = _carried_clip_path(iv, old)
             # idx is a temporary, per-row-unique negative placeholder so a batch of
             # several new rows never collides with itself under UNIQUE(session_id,
             # idx) before _renumber() assigns the real sequential values below.
             conn.execute(
                 "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-                "det_start_ms,det_end_ms,confidence,starred,rejected,point)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "det_start_ms,det_end_ms,confidence,starred,rejected,point,clip_path)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, session_id, source_id, -placeholder_idx, iv.start_ms,
                  iv.end_ms, iv.start_ms, iv.end_ms, iv.confidence,
-                 int(starred), int(rejected), int(point)),
+                 int(starred), int(rejected), int(point), clip_path),
             )
 
         _renumber(conn, session_id)
