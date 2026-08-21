@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from bootleg.accel import detect_accel
+from bootleg.db.labels import FLAG_ORDER, VERDICTS, add_label, latest_labels, parse_flags
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     list_rallies,
@@ -57,6 +58,30 @@ class BoundsBody(BaseModel):
         if self.end_ms <= self.start_ms:
             raise ValueError("end_ms must be greater than start_ms")
         return self
+
+
+class LabelBody(BaseModel):
+    # `verdict` is required here even though the column is nullable. The only
+    # writer of a verdict-less row is the bounds route (Task 3), which derives
+    # everything server-side; an HTTP client asserting nothing at all would be
+    # writing an empty judgement.
+    verdict: str
+    boundary_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("verdict")
+    @classmethod
+    def check_verdict(cls, v: str) -> str:
+        if v not in VERDICTS:
+            raise ValueError(f"verdict must be one of {list(VERDICTS)}")
+        return v
+
+    @field_validator("boundary_flags")
+    @classmethod
+    def check_flags(cls, v: list[str]) -> list[str]:
+        unknown = set(v) - set(FLAG_ORDER)
+        if unknown:
+            raise ValueError(f"unknown boundary flag(s): {sorted(unknown)}")
+        return v
 
 
 class ResegmentBody(BaseModel):
@@ -142,6 +167,23 @@ def _session_id_for_rally(conn, rally_id: str) -> str:
     return row["session_id"]
 
 
+def _rally_det_span(conn, rally_id: str):
+    """The rally's immutable detector span, or 404.
+
+    Every label anchors to det_start_ms/det_end_ms rather than the editable
+    start_ms/end_ms, so this is resolved server-side and clients never send a
+    span -- a client that computed it from stale rally data could otherwise
+    anchor a judgement to a span the detector never produced.
+    """
+    row = conn.execute(
+        "SELECT source_id, det_start_ms, det_end_ms FROM rallies WHERE id = ?",
+        (rally_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rally not found")
+    return row
+
+
 @router.post("/api/rallies/{rally_id}/star")
 def api_star(rally_id: str, body: StarBody, request: Request):
     conn = _conn(request)
@@ -170,6 +212,44 @@ def api_reviewed(rally_id: str, request: Request):
 def api_bounds(rally_id: str, body: BoundsBody, request: Request):
     set_bounds(_conn(request), rally_id, body.start_ms, body.end_ms)
     return {"ok": True}
+
+
+@router.post("/api/rallies/{rally_id}/label")
+def api_label(rally_id: str, body: LabelBody, request: Request):
+    conn = _conn(request)
+    span = _rally_det_span(conn, rally_id)
+    label_id = add_label(
+        conn,
+        source_id=span["source_id"],
+        span_start_ms=span["det_start_ms"],
+        span_end_ms=span["det_end_ms"],
+        verdict=body.verdict,
+        boundary_flags=body.boundary_flags,
+        rally_id=rally_id,
+    )
+    # No session_status refresh: a label is a note about the detector, not a
+    # review decision, and flipping a session to 'reviewed' because someone
+    # labelled one clip would misreport the review pass.
+    return {"ok": True, "id": label_id}
+
+
+@router.get("/api/sources/{source_id}/labels")
+def api_source_labels(source_id: str, request: Request):
+    conn = _conn(request)
+    if get_source(conn, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return [
+        {
+            "span_start_ms": r["span_start_ms"],
+            "span_end_ms": r["span_end_ms"],
+            "verdict": r["verdict"],
+            "boundary_flags": parse_flags(r["boundary_flags"]),
+            "true_start_ms": r["true_start_ms"],
+            "true_end_ms": r["true_end_ms"],
+            "labelled_at": r["labelled_at"],
+        }
+        for r in latest_labels(conn, source_id)
+    ]
 
 
 @router.post("/api/sources/{source_id}/resegment")

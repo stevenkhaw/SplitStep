@@ -297,7 +297,11 @@ two-stage detector split was built for.
 - A label POST against a rally deleted by a re-segment in another tab returns
   404; the client toasts and re-keys, which the queue already does on detail swap
   (`web/tests/requeue-on-detail-swap.test.ts`).
-- A `CHECK` violation surfaces as 400, not 500.
+- A malformed body — unknown verdict, unknown boundary flag — is rejected by
+  pydantic before any SQL runs, giving FastAPI's standard 422. The table-level
+  `CHECK` is unreachable over HTTP: `LabelBody.verdict` is required, so no
+  request can produce a row carrying neither a verdict nor a corrected span.
+  `add_label` still validates the verdict itself, for the CLI path.
 - `bootleg labels score` on a source with no `features.jsonl` returns the same
   409 the re-segment route already returns for that condition.
 
