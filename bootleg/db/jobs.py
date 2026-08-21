@@ -41,6 +41,26 @@ def has_pending_job(conn: sqlite3.Connection, job_type: str, source_id: str) -> 
     return row is not None
 
 
+def has_pending_clip(
+    conn: sqlite3.Connection, source_id: str, start_ms: int, end_ms: int
+) -> bool:
+    """True if a clip job for exactly this span is already queued or running.
+
+    Separate from has_pending_job, which matches on source_id alone. That is
+    right for ingest/build_proxy/detect, which are one-per-source, and wrong
+    for clips: one source yields dozens, so a source-wide check would let the
+    first enqueued clip suppress every other clip from the same session.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM jobs WHERE type = 'clip' AND status IN ('queued', 'running')"
+        " AND json_extract(payload, '$.source_id') = ?"
+        " AND json_extract(payload, '$.start_ms') = ?"
+        " AND json_extract(payload, '$.end_ms') = ? LIMIT 1",
+        (source_id, start_ms, end_ms),
+    ).fetchone()
+    return row is not None
+
+
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
     # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from bootleg.config import Library
 from bootleg.db import jobs as jobq
-from bootleg.db.rallies import replace_rallies
+from bootleg.db.rallies import replace_rallies, set_clip_path
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
@@ -26,9 +26,10 @@ from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler
+from bootleg.media.clips import clip_relpath
 from bootleg.media.files import find_original
 from bootleg.media.probe import display_size, probe
-from bootleg.media.transcode import make_proxy, make_thumbs
+from bootleg.media.transcode import make_clip, make_proxy, make_thumbs
 
 log = logging.getLogger(__name__)
 
@@ -320,8 +321,49 @@ def _audio_grid(path: Path, duration_ms: int) -> list[tuple[int, float]]:
     return hits_to_grid(detect_hits(pcm, AUDIO_SR), duration_ms, step_ms=STEP_MS)
 
 
+def handle_clip(library: Library, payload: dict) -> None:
+    """Cut one rally's span to a clip at the locked profile.
+
+    Idempotent by overwrite, like every other handler: a clip half-written by
+    a killed worker is worthless, so a retry re-encodes rather than resuming.
+    """
+    conn = _open(library)
+    source = get_source(conn, payload["source_id"])
+    if source is None:
+        raise ValueError(f"No such source: {payload['source_id']}")
+
+    src_dir = library.source_dir(source["session_id"], source["idx"])
+    if source["has_original"]:
+        src = find_original(src_dir)
+        if src is None:
+            raise ValueError(f"No original on disk for source {source['id']}")
+    else:
+        # Reclaimed: cut from the proxy and let make_clip's scale/pad conform
+        # it to the locked frame. The clip is 1080p-sourced, which the UI
+        # flags, but it is still concat-compatible -- which is the property
+        # that cannot be compromised.
+        src = src_dir / "proxy.mp4"
+        if not src.exists():
+            raise ValueError(f"No proxy on disk for source {source['id']}")
+
+    start_ms, end_ms = payload["start_ms"], payload["end_ms"]
+    name = clip_relpath(source["idx"], start_ms, end_ms)
+    dst = library.clips_dir(source["session_id"]) / name
+
+    # A 4K CRF-20 clip runs roughly 4 MB per second of video. Doubling that
+    # leaves room for the muxer's own scratch and refuses early rather than
+    # dying at 90%, which is the whole point of the check.
+    library.require_free(int((end_ms - start_ms) / 1000 * 4_000_000 * 2))
+
+    make_clip(src, dst, start_ms=start_ms, end_ms=end_ms,
+              rotation_deg=source["rotation_deg"])
+
+    set_clip_path(conn, payload["rally_id"], str(dst.relative_to(library.root)))
+
+
 HANDLERS: dict[str, Handler] = {
     "ingest": handle_ingest,
     "build_proxy": handle_build_proxy,
     "detect": handle_detect,
+    "clip": handle_clip,
 }

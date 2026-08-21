@@ -176,3 +176,15 @@ def set_bounds(conn: sqlite3.Connection, rally_id: str,
         (start_ms, end_ms, rally_id),
     )
     conn.commit()
+
+
+def set_clip_path(conn: sqlite3.Connection, rally_id: str, clip_path: str) -> None:
+    """Record the library-relative path of the clip cut for this rally.
+
+    Stored rather than derived because a rally's bounds can move after its
+    clip was cut -- the path here is what WAS cut, while clip_relpath() of the
+    current bounds is what SHOULD be. Reclaim Space will need the former to
+    know an original is safe to delete.
+    """
+    conn.execute("UPDATE rallies SET clip_path = ? WHERE id = ?", (clip_path, rally_id))
+    conn.commit()

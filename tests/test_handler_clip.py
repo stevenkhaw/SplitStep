@@ -1,0 +1,128 @@
+import subprocess
+
+import pytest
+
+from bootleg.config import Library, NotEnoughSpace
+from bootleg.db.jobs import enqueue, has_pending_clip
+from bootleg.db.rallies import replace_rallies
+from bootleg.detect.segment import Interval
+from bootleg.jobs.handlers import handle_clip
+from bootleg.media.clips import clip_relpath
+from bootleg.media.probe import probe
+from bootleg.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
+
+
+@pytest.fixture
+def a_rally(library, conn, registered_source):
+    """One rally over a source whose original is on disk.
+
+    registered_source's sample video is 2 s long, so the span stays inside it
+    -- a cut past the end would produce a short clip and mask a real failure.
+    """
+    replace_rallies(conn, registered_source.session_id, registered_source.id,
+                    [Interval(200, 1200, 0.8)])
+    rally = conn.execute("SELECT * FROM rallies").fetchone()
+    return {
+        "payload": {
+            "source_id": registered_source.id,
+            "rally_id": rally["id"],
+            "start_ms": 200,
+            "end_ms": 1200,
+        },
+        "source": registered_source,
+        "rally_id": rally["id"],
+    }
+
+
+def _clip_path(library, source, start_ms, end_ms):
+    return library.clips_dir(source.session_id) / clip_relpath(source.idx, start_ms, end_ms)
+
+
+def test_handle_clip_writes_a_span_named_file(library, conn, a_rally):
+    handle_clip(library, a_rally["payload"])
+    dst = _clip_path(library, a_rally["source"], 200, 1200)
+    assert dst.exists()
+    info = probe(dst)
+    assert (info.width, info.height) == (CLIP_WIDTH, CLIP_HEIGHT)
+
+
+def test_handle_clip_records_a_library_relative_clip_path(library, conn, a_rally):
+    handle_clip(library, a_rally["payload"])
+    stored = conn.execute(
+        "SELECT clip_path FROM rallies WHERE id = ?", (a_rally["rally_id"],)
+    ).fetchone()["clip_path"]
+    # Library-relative, never absolute: the path is read on whatever machine
+    # has the drive mounted, and that mountpoint differs between them.
+    assert not stored.startswith("/")
+    assert (library.root / stored).exists()
+
+
+def test_handle_clip_is_idempotent(library, conn, a_rally):
+    # reclaim_stale() can requeue a handler that already ran, so a second run
+    # must overwrite rather than fail. A clip half-written by a killed worker
+    # is worthless; re-encoding is the only safe retry.
+    handle_clip(library, a_rally["payload"])
+    handle_clip(library, a_rally["payload"])
+    assert _clip_path(library, a_rally["source"], 200, 1200).exists()
+
+
+def test_handle_clip_raises_on_an_unknown_source(library, conn, a_rally):
+    payload = {**a_rally["payload"], "source_id": "nope"}
+    with pytest.raises(ValueError, match="No such source"):
+        handle_clip(library, payload)
+
+
+def test_handle_clip_cuts_from_the_proxy_when_the_original_is_reclaimed(
+    library, conn, a_rally
+):
+    source = a_rally["source"]
+    # Stand in for a reclaimed source: proxy present, original flag cleared.
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+         str(source.dir / "proxy.mp4")],
+        check=True, capture_output=True,
+    )
+    conn.execute("UPDATE sources SET has_original = 0 WHERE id = ?", (source.id,))
+    conn.commit()
+
+    handle_clip(library, a_rally["payload"])
+    info = probe(_clip_path(library, source, 200, 1200))
+    # Conformed to the locked frame even from 1080p. A 1080p-sourced clip is
+    # flagged in the UI, but it must stay concat-compatible -- that is the
+    # property that cannot be compromised.
+    assert (info.width, info.height) == (CLIP_WIDTH, CLIP_HEIGHT)
+
+
+def test_handle_clip_refuses_before_encoding_when_space_is_short(
+    library, conn, a_rally, monkeypatch
+):
+    def no_space(_self, _need):
+        raise NotEnoughSpace("nope")
+
+    # Library is a frozen dataclass, so its require_free cannot be
+    # monkeypatched on the instance (that raises FrozenInstanceError) --
+    # patch it on the class instead.
+    monkeypatch.setattr(Library, "require_free", no_space)
+    with pytest.raises(NotEnoughSpace):
+        handle_clip(library, a_rally["payload"])
+    # Refused before writing, not partway through: a 4K clip that dies at 90%
+    # is worse than a job that never started.
+    assert not _clip_path(library, a_rally["source"], 200, 1200).exists()
+
+
+def test_has_pending_clip_distinguishes_two_spans_of_one_source(conn, a_rally):
+    """The load-bearing case.
+
+    has_pending_job matches on source_id alone, which is right for
+    ingest/build_proxy/detect (one per source) and wrong for clips: one source
+    yields dozens, so a source-wide check would let the first enqueued clip
+    suppress every other clip from the same session.
+    """
+    source_id = a_rally["payload"]["source_id"]
+    enqueue(conn, "clip", {"source_id": source_id, "rally_id": "r1",
+                           "start_ms": 200, "end_ms": 1200})
+
+    assert has_pending_clip(conn, source_id, 200, 1200) is True
+    assert has_pending_clip(conn, source_id, 9000, 14000) is False
