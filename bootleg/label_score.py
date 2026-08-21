@@ -120,7 +120,19 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
             matched_not_play += 1
         # 'unsure' and a verdict-less boundary row fall through: neither is a
         # precision hit nor a miss, but both may still carry a corrected span.
-        if lab.true_start_ms is not None and lab.true_end_ms is not None:
+        # 'not_play' is excluded here even though it too may carry true_*: a
+        # span the human said contains no play has no correct boundary to be
+        # wrong about, so its dragged edges cannot feed a metric that claims
+        # to measure boundary accuracy. This is not the same exclusion as
+        # 'unsure' above -- an undecidable clip may still have a real,
+        # correctly-measured edge, only the play/no-play call could not be
+        # made -- so 'unsure' keeps contributing here unchanged. Letting
+        # 'not_play' in was Finding 2: start_bias_ms/end_mae_ms would then be
+        # describing something other than what their names say, the exact
+        # failure this branch exists to eliminate (CLAUDE.md, "Metric
+        # honesty is the point of the codebase").
+        has_correction = lab.true_start_ms is not None and lab.true_end_ms is not None
+        if lab.verdict != "not_play" and has_correction:
             # Signed, and positive means the candidate opens/closes AFTER the
             # human's edge.
             start_errs.append(iv.start_ms - lab.true_start_ms)

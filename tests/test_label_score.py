@@ -118,3 +118,40 @@ def test_a_verdict_less_boundary_row_still_contributes_boundary_stats_only():
     )
     assert (s.matched_play, s.matched_not_play, s.unknown) == (0, 0, 0)
     assert s.boundary_n == 1
+
+
+def test_a_not_play_label_does_not_contribute_boundary_stats():
+    # A span the human said contains no play has no correct boundary to be
+    # wrong about -- the human dragged the handles, but there is no "right"
+    # start/end for a rally that was never there. Letting this row into
+    # start_errs/end_errs would make start_bias_ms/end_mae_ms describe
+    # something other than boundary accuracy, exactly the kind of metric
+    # dishonesty this branch exists to eliminate elsewhere in the corpus.
+    s = score_against_labels(
+        [Interval(1000, 5000, 0.8)],
+        [label(1000, 5000, verdict="not_play", true_start=1400, true_end=4600)],
+    )
+    assert s.matched_not_play == 1
+    assert s.boundary_n == 0
+    assert s.start_bias_ms is None
+    assert s.end_bias_ms is None
+    assert s.start_mae_ms is None
+    assert s.end_mae_ms is None
+
+
+def test_neighbouring_verdicts_still_contribute_boundary_stats():
+    # Pins the boundary of the not_play exclusion above: clean/partly
+    # corrections and an unsure correction must all keep counting, so a
+    # future change cannot silently widen the exclusion to cover them too.
+    # unsure differs from not_play in kind, not just degree -- an undecidable
+    # clip may still have a real, correctly-measured edge, it is only the
+    # play/no-play judgement that could not be made.
+    s = score_against_labels(
+        [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7), Interval(20000, 24000, 0.6)],
+        [
+            label(1000, 5000, verdict="clean", true_start=1400, true_end=4600),
+            label(9000, 14000, verdict="partly", true_start=9400, true_end=13600),
+            label(20000, 24000, verdict="unsure", true_start=20400, true_end=23600),
+        ],
+    )
+    assert s.boundary_n == 3

@@ -280,8 +280,17 @@ carrying stars, reused rather than reinvented.
 | precision | candidates matching `clean`/`partly` against those matching `not_play` |
 | span recall | labelled `clean` spans with no candidate |
 | unknown | candidates matching no label at all |
-| start bias / end bias | signed median ms error over rows carrying `true_*` |
+| start bias / end bias | signed median ms error over rows carrying `true_*`, excluding `not_play` |
 | start MAE / end MAE | absolute median ms error over the same rows |
+
+**`not_play` rows are excluded from the boundary figures even when they carry
+`true_*`.** A span the human said contains no play has no correct boundary to
+be wrong about — the drag still happened and the corpus still keeps
+`true_start_ms`/`true_end_ms` for it (the write path stays lossless), but
+scoring it as a boundary measurement would make `start_bias_ms`/`end_mae_ms`
+describe something other than what their names say. `unsure` is not excluded
+the same way: an undecidable clip may still have a real, correctly-measured
+edge, it is only the play/no-play call that could not be made.
 
 Two constraints on the output, both of which exist to stop a known failure from
 recurring.
