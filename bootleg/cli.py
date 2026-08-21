@@ -12,6 +12,7 @@ from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import list_rallies, replace_rallies
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
+    get_session,
     get_source,
     refresh_session_review_status,
     set_source_preset,
@@ -19,6 +20,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
+from bootleg.export import SETS, plan_export
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
 from bootleg.label_score import rows_to_labels, score_against_labels
@@ -380,6 +382,31 @@ def cmd_source_set_preset(args) -> int:
     return 0
 
 
+def cmd_clips_export(args) -> int:
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    if get_session(conn, args.session_id) is None:
+        print(f"session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    plan = plan_export(library, conn, args.session_id, args.set)
+    for payload in plan.pending:
+        jobq.enqueue(conn, "clip", payload)
+    print(f"queued {len(plan.pending)} clip job(s) for {args.set} in {args.session_id}")
+    if not plan.pending:
+        if plan.in_flight or plan.unavailable:
+            # Same honesty problem the route had: a nonzero already_cut can
+            # coexist with jobs still encoding or rallies whose source is
+            # gone, and folding those into "already exists" would say every
+            # clip is done when some are not, or never will be.
+            print(f"nothing new to cut -- {plan.already_cut} already cut, "
+                  f"{plan.in_flight} in flight, {plan.unavailable} unavailable")
+        else:
+            print("nothing to cut -- every clip in that set already exists")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -457,6 +484,14 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--threshold", type=float, default=None,
                     help="override the profile's default score threshold")
     ls.set_defaults(func=cmd_labels_score)
+
+    p = sub.add_parser("clips", help="cut clips from a session's rallies")
+    clips_sub = p.add_subparsers(dest="clips_command", required=True)
+
+    ce = clips_sub.add_parser("export", help="queue clip jobs for a session's points or stars")
+    ce.add_argument("session_id")
+    ce.add_argument("--set", choices=SETS, default="points")
+    ce.set_defaults(func=cmd_clips_export)
 
     args = parser.parse_args(argv)
     try:

@@ -66,6 +66,18 @@ export interface Job {
   error: string | null
 }
 
+// The four outcomes plan_export sorts a set's rallies into (bootleg/export.py
+// ExportPlan): a clip on disk, a job already working the same span, and a
+// rally whose source vanished are distinct reasons nothing new was queued,
+// not one "already done" bucket -- see lib/export.ts's describeExportResult.
+export interface ExportResult {
+  queued: number
+  already_cut: number
+  in_flight: number
+  unavailable: number
+  total: number
+}
+
 export interface LabelRecord {
   source_id: string
   span_start_ms: number

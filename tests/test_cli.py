@@ -546,3 +546,58 @@ def test_labels_score_without_features_fails(library, conn, capsys):
     rc = main(["--library", str(library.root), "labels", "score", source_id])
     assert rc == 1
     assert "not been detected" in capsys.readouterr().err.lower()
+
+
+def test_clips_export_queues_a_job_per_point(library, conn, capsys):
+    from bootleg.db.rallies import replace_rallies, set_point
+    from bootleg.detect.segment import Interval
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    replace_rallies(conn, session_id, source_id,
+                    [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7)])
+    for row in conn.execute("SELECT id FROM rallies").fetchall():
+        set_point(conn, row["id"], True)
+    conn.close()
+
+    rc = main(["--library", str(library.root), "clips", "export", session_id])
+    assert rc == 0
+    assert "queued 2 clip job(s)" in capsys.readouterr().out
+
+    c = connect(library.db_path)
+    assert c.execute("SELECT COUNT(*) FROM jobs WHERE type='clip'").fetchone()[0] == 2
+
+
+def test_clips_export_a_second_time_queues_nothing_and_says_so(library, conn, capsys):
+    from bootleg.db.rallies import replace_rallies, set_point
+    from bootleg.detect.segment import Interval
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 5000, 0.8)])
+    set_point(conn, conn.execute("SELECT id FROM rallies").fetchone()["id"], True)
+    conn.close()
+
+    main(["--library", str(library.root), "clips", "export", session_id])
+    capsys.readouterr()
+    # The job from the first run is still queued, so the span is in flight --
+    # not cut -- and must not be enqueued twice, and must not be reported as
+    # "already exists" (it doesn't, yet).
+    rc = main(["--library", str(library.root), "clips", "export", session_id])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "queued 0 clip job(s)" in out
+    assert "in flight" in out
+
+
+def test_clips_export_on_an_unknown_session_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "clips", "export", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()

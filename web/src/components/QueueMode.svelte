@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { describeExportResult, exportSetLabel } from '../lib/export'
   import { isEditableTarget } from '../lib/keyboard'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
@@ -153,6 +154,20 @@
     }
   }
 
+  // Cutting is fire-and-forget from here: the jobs badge already shows
+  // encode progress, so this only needs to report what plan_export decided
+  // -- queued vs. the three reasons the rest were not -- through the same
+  // toaster star/reject failures use, so a second press mid-encode reads as
+  // honest progress rather than a dead button.
+  async function exportSet(which: 'points' | 'starred'): Promise<void> {
+    try {
+      const result = await api.exportClips(detail.session.id, which)
+      toaster.push(describeExportResult(which, result))
+    } catch (e) {
+      toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
+    }
+  }
+
   function onProgress(fraction: number) {
     // Written straight to the DOM. Routing a 60Hz update through Svelte state
     // would re-render the whole panel on every frame.
@@ -251,8 +266,27 @@
          into label mode -- pressing L -- was undiscoverable exactly when a
          reviewer who just finished a pass is most likely to want it. -->
     <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
-    <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
-         reel" here. Both need clip export, which is Plan 3. -->
+    <!-- Cutting only -- reel creation is a separate plan (Plan B). Encoding
+         progress is the jobs badge's job; this fires the request and reports
+         the plan's outcome, nothing more. -->
+    <div class="mt-4 flex items-center justify-center gap-3">
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.pointCount === 0}
+        onclick={() => exportSet('points')}
+      >
+        Export point clips ({stats.pointCount})
+      </button>
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.starredCount === 0}
+        onclick={() => exportSet('starred')}
+      >
+        Export starred clips ({stats.starredCount})
+      </button>
+    </div>
   </section>
 {:else}
   <!-- `relative` so the position counter can sit over the video. The counter
