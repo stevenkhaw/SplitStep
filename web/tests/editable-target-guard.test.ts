@@ -189,7 +189,11 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
     flushSync()
 
-    await vi.waitFor(() => expect(mockApi.reviewed).toHaveBeenCalledTimes(1))
-    expect(target.textContent).toMatch(/rally 2 \/ 2/)
+    // The cursor moving IS the proof the key landed. This used to assert on
+    // `mockApi.reviewed`, but a skip no longer persists anything (only star
+    // and reject mark a rally reviewed), so that call is not a signal any
+    // more -- it would pass whether or not the key was handled.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally 2 \/ 2/))
+    expect(mockApi.reviewed).not.toHaveBeenCalled()
   })
 })

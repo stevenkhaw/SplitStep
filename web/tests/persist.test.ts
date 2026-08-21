@@ -55,12 +55,6 @@ describe('persistAction', () => {
     expect(a.reject).toHaveBeenCalledWith('r2', true)
   })
 
-  it('calls api.reviewed for a skip action', async () => {
-    const a = api()
-    await persistAction(skipAction, a)
-    expect(a.reviewed).toHaveBeenCalledWith('r3')
-  })
-
   it('calls both api.star and api.reject, in order, for an undo action', async () => {
     const calls: string[] = []
     const a = api({
@@ -89,10 +83,17 @@ describe('persistAction', () => {
     expect(outcome).toEqual({ ok: false, revert: rejectAction })
   })
 
-  it('reports the failed action as the thing to revert when a skip persist fails', async () => {
-    const a = api({ reviewed: vi.fn().mockRejectedValue(new Error('network down')) })
+  it('cannot fail a skip -- it reaches the network at all', async () => {
+    // A skip persists nothing now, so there is no request to fail. Pinned
+    // because the alternative is a silent revert path that can never run:
+    // if someone reintroduces an API call here, this test catches it.
+    const a = api({
+      star: vi.fn().mockRejectedValue(new Error('network down')),
+      reject: vi.fn().mockRejectedValue(new Error('network down')),
+      reviewed: vi.fn().mockRejectedValue(new Error('network down')),
+    })
     const outcome = await persistAction(skipAction, a)
-    expect(outcome).toEqual({ ok: false, revert: skipAction })
+    expect(outcome).toEqual({ ok: true })
   })
 
   it('reports revert: null when an undo persist fails -- UndoAction cannot be reverted', async () => {
@@ -121,5 +122,29 @@ describe('describePersistFailure', () => {
 
   it('describes an undo failure without claiming anything was reverted', () => {
     expect(describePersistFailure(undoAction, 4)).toBe("Couldn't save undo on rally 4 -- please retry")
+  })
+})
+
+describe('persistAction — skip no longer marks a rally reviewed', () => {
+  const skipAction: PersistableAction = {
+    kind: 'skip',
+    rallyId: 'r3',
+    starred: false,
+    rejected: false,
+    previousStarred: false,
+    previousRejected: false,
+  }
+
+  it('calls nothing and reports success', async () => {
+    // `→` is now pressed on every clip, so persisting it as "reviewed" would
+    // mark a whole session reviewed just for walking through it. Only S and X
+    // count -- and the server already stamps reviewed_at inside set_star and
+    // set_rejected, so nothing is lost by dropping this call.
+    const a = api()
+    const out = await persistAction(skipAction, a)
+    expect(out).toEqual({ ok: true })
+    expect(a.reviewed).not.toHaveBeenCalled()
+    expect(a.star).not.toHaveBeenCalled()
+    expect(a.reject).not.toHaveBeenCalled()
   })
 })

@@ -140,7 +140,10 @@ export class QueueController {
     const nowStarred = !previousStarred
     if (nowStarred) this.#starred.add(r.id)
     else this.#starred.delete(r.id)
-    this.#index += 1
+    // Deliberately does NOT advance. Reviewing a detector that produces a
+    // large share of false positives means watching a clip more than once and
+    // changing your mind about it; auto-advance made both awkward. `skip()`
+    // (bound to the right arrow) is the only thing that moves the cursor.
     return {
       kind: 'star',
       rallyId: r.id,
@@ -157,14 +160,23 @@ export class QueueController {
     this.#record()
     const previousStarred = this.#starred.has(r.id)
     const previousRejected = this.#rejected.has(r.id)
-    this.#rejected.add(r.id)
-    this.#starred.delete(r.id)
-    this.#index += 1
+    // Toggles, mirroring star(). Rejected rallies are filtered out of the
+    // queue when it is constructed, so before this a mis-press could only be
+    // taken back via undo -- and not at all once the page reloaded. Toggling
+    // makes a second press the obvious remedy for the rest of the pass.
+    const nowRejected = !previousRejected
+    if (nowRejected) {
+      this.#rejected.add(r.id)
+      this.#starred.delete(r.id)
+    } else {
+      this.#rejected.delete(r.id)
+    }
+    // Does not advance, for the same reason star() does not.
     return {
       kind: 'reject',
       rallyId: r.id,
-      starred: false,
-      rejected: true,
+      starred: this.#starred.has(r.id),
+      rejected: nowRejected,
       previousStarred,
       previousRejected,
     }
@@ -177,11 +189,16 @@ export class QueueController {
     const previousStarred = this.#starred.has(r.id)
     const previousRejected = this.#rejected.has(r.id)
     this.#index += 1
+    // Carries BOTH flags through untouched. `rejected: false` was safe only
+    // while reject() advanced on its own, which made "reject then skip the
+    // same rally" unreachable. Now the right arrow is the only way forward,
+    // so it lands on rallies the user has just flagged -- and hard-coding
+    // false here would silently undo the reject they just made.
     return {
       kind: 'skip',
       rallyId: r.id,
       starred: previousStarred,
-      rejected: false,
+      rejected: previousRejected,
       previousStarred,
       previousRejected,
     }
