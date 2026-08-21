@@ -307,8 +307,12 @@ describe('Library', () => {
     instance = mount(Library, { target, props: {} })
     flushSync()
 
+    // Wait for the session row itself, not just "any button" -- the header's
+    // static Reels link is a button too and renders before the async
+    // listSessions() resolves, so a generic query would race the fetch.
     await vi.waitFor(() => {
-      expect(target.querySelector('button')).not.toBeNull()
+      const buttons = target.querySelectorAll('button')
+      expect([...buttons].some(b => b.textContent?.includes('Ready Session'))).toBe(true)
     })
 
     const buttons = target.querySelectorAll('button')
@@ -403,10 +407,13 @@ describe('Library', () => {
     flushSync()
 
     await vi.waitFor(() => {
-      expect(target.querySelector('button')).not.toBeNull()
+      expect(target.querySelector('span.font-mono')).not.toBeNull()
     })
 
-    const summary = target.querySelector('.font-mono')
+    // The header's Reels link is also .font-mono, so scope to the span the
+    // session row renders its summary into -- the header control is a
+    // button, not a span.
+    const summary = target.querySelector('span.font-mono')
     expect(summary?.textContent).toContain('P24')
     expect(summary?.textContent).toContain('★0')
     // Points is the structural fact (a session has points); starred is a

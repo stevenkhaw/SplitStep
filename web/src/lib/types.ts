@@ -88,3 +88,64 @@ export interface LabelRecord {
   true_start_ms: number | null
   true_end_ms: number | null
 }
+
+export interface Reel {
+  id: string
+  name: string
+  slug: string
+  rendered_path: string | null
+  rendered_at: string | null
+  dirty: number
+  created_at: string
+  item_count: number
+}
+
+/**
+ * One row of the builder, as the server resolves it.
+ *
+ * `session_id` and `source_idx` are here because a reel is session-agnostic:
+ * the item alone cannot say which proxy the preview should seek, and the
+ * clip path needs the same pair. `rally` is null for an ORPHAN -- an item
+ * whose span no rally holds any more, which a threshold sweep produces
+ * routinely. It is badged, never dropped: the clip on disk is what the reel
+ * is made of.
+ */
+export interface ReelItem {
+  source_id: string
+  session_id: string
+  source_idx: number
+  start_ms: number
+  end_ms: number
+  duration_ms: number
+  position: number
+  clip_ready: boolean
+  rally: Rally | null
+}
+
+/** How a reel addresses an item: a span of a source, never a rally id --
+ * replace_rallies deletes every rally on a sweep, so a held rally id
+ * expires and a span does not. */
+export interface SpanRef {
+  source_id: string
+  start_ms: number
+  end_ms: number
+}
+
+export interface ReelDetail {
+  reel: Reel
+  items: ReelItem[]
+}
+
+export interface ReelMergeResult {
+  added: number
+  existing: number
+  total: number
+  /** Present only on the session-set route, which creates or finds the reel. */
+  slug?: string
+  name?: string
+}
+
+export interface RenderResult {
+  job_id: string
+  already_running: boolean
+}

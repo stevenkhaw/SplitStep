@@ -57,3 +57,28 @@ describe('parseHash - setup route', () => {
     expect(parseHash('#/setup/abc123')).toEqual({ name: 'setup', id: 'abc123' })
   })
 })
+
+describe('parseHash - reel routes', () => {
+  it('parses the reels list', () => {
+    expect(parseHash('#/reels')).toEqual({ name: 'reels' })
+    expect(parseHash('#/reels/')).toEqual({ name: 'reels' })
+  })
+
+  it('parses a reel builder by slug', () => {
+    expect(parseHash('#/reels/2026-08-18-points')).toEqual({
+      name: 'reel',
+      slug: '2026-08-18-points',
+    })
+  })
+
+  it('keeps a collision-suffixed slug intact', () => {
+    expect(parseHash('#/reels/2026-08-18-points-2')).toEqual({
+      name: 'reel',
+      slug: '2026-08-18-points-2',
+    })
+  })
+
+  it('falls back to the library for a deeper reel path', () => {
+    expect(parseHash('#/reels/a/b')).toEqual({ name: 'library' })
+  })
+})
