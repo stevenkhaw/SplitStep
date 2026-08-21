@@ -76,8 +76,11 @@ def test_the_earlier_start_wins_when_raw_overlaps_tie(conn, seeded):
     # raw overlap, so the longest-overlap ranking alone cannot separate them.
     # This is the tie the docstring's third tie-break exists for; without it
     # the winner is whichever row sqlite's un-ordered read-back lists first.
+    # The later-starting rally is inserted FIRST so that a first-row-wins
+    # implementation would answer "later" and fail this test, ensuring the
+    # tie-break by start_ms actually discriminates.
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
-                    [Interval(0, 600, 0.8), Interval(400, 1000, 0.8)])
+                    [Interval(400, 1000, 0.8), Interval(0, 600, 0.8)])
     rows = _rows(conn, seeded)
     early_id = next(r["id"] for r in rows if r["start_ms"] == 0)
     late_id = next(r["id"] for r in rows if r["start_ms"] == 400)
