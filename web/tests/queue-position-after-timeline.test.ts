@@ -193,6 +193,31 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     await vi.waitFor(() => expect(target.textContent).toMatch(/back to queue/))
   })
 
+  it('opens label mode on the rally you had open, not rally 1', async () => {
+    // M4 regression: Session's openLabel captured the rally id into
+    // focusedRallyId but never threaded it into <LabelMode>, so pressing
+    // `l` on rally 3 of 3 opened on rally 1 -- the id was captured and used
+    // only for the return trip.
+    mockApi.getSession.mockResolvedValue(
+      detailWith([rally('r1', 1), rally('r2', 2), rally('r3', 3)]),
+    )
+
+    instance = mount(SessionHarness, { target })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 3/))
+
+    // Walk to rally 3.
+    press('ArrowRight')
+    press('ArrowRight')
+    expect(target.textContent).toMatch(/rally 3 \/ 3/)
+
+    press('l')
+    // LabelMode's own position counter ("N / M · K labelled") is a
+    // different format from the queue's "rally N / M" line, so this can
+    // only match LabelMode's own display, never stale queue text.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/3 \/ 3 · 0 labelled/))
+  })
+
   it('still opens on the first unreviewed rally when the timeline was never used', async () => {
     // The restore must not defeat the normal resume behaviour: with rallies
     // 1 and 2 already judged, a fresh session opens on rally 3.

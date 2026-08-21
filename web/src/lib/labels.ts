@@ -196,6 +196,19 @@ export class LabelController {
     if (this.#index > 0) this.#index -= 1
   }
 
+  /**
+   * Opens on `rallyId` instead of index 0. Mirrors QueueController.jumpTo,
+   * including its "silently does nothing for an unknown id" fallback -- which
+   * matters more here than there: this controller's list is unfiltered while
+   * the queue's excludes rejected rallies, so the two genuinely differ and an
+   * id from one can be absent from the other (e.g. a re-segment gave every
+   * rally a new uuid since the id was captured).
+   */
+  jumpTo(rallyId: string): void {
+    const i = this.#rallies.findIndex((r) => r.id === rallyId)
+    if (i !== -1) this.#index = i
+  }
+
   undo(): LabelAction | null {
     const entry = this.#history.pop()
     if (!entry) return null

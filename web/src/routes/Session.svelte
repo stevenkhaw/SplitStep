@@ -193,7 +193,7 @@
         startAtRallyId={focusedRallyId}
       />
     {:else if mode === 'label'}
-      <LabelMode {detail} onclose={closeLabel} />
+      <LabelMode {detail} onclose={closeLabel} startAtRallyId={focusedRallyId} />
     {:else if focusedRallyId}
       <TimelineMode
         {detail}

@@ -12,8 +12,17 @@
   interface Props {
     detail: SessionDetail
     onclose: () => void
+    /** Open on this rally instead of the first one, when it is still in this
+     * session's (unfiltered) rally list. Session passes the rally that had
+     * focus in the queue when `l` opened this mode -- the M4 fix for the
+     * regression where that id was captured into focusedRallyId and then
+     * used only for the return trip, never threaded through to here.
+     * `null` (M3: `l` now works with no current rally, e.g. from the
+     * "Session reviewed" screen) falls through to index 0 the same way an
+     * id LabelController.jumpTo can't find would. */
+    startAtRallyId?: string | null
   }
-  let { detail, onclose }: Props = $props()
+  let { detail, onclose, startAtRallyId = null }: Props = $props()
 
   const VERDICT_KEYS: Record<string, Verdict> = {
     '1': 'clean',
@@ -48,10 +57,16 @@
   $effect(() => {
     const sources = untrack(() => detail.sources)
     const rallies = untrack(() => detail.rallies)
+    const startAt = untrack(() => startAtRallyId)
     Promise.all(sources.map((s) => api.sourceLabels(s.id)))
       .then((lists) => {
         const flat: LabelRecord[] = lists.flat()
         controller = new LabelController(rallies, flat)
+        // Mirrors QueueMode's `if (initialRallyId) queue.jumpTo(...)` --
+        // jumpTo itself already no-ops for an id it can't find, and the
+        // guard here means null (no rally was focused) takes the same
+        // path, leaving the controller on its constructor default of 0.
+        if (startAt) controller.jumpTo(startAt)
         version += 1
       })
       .catch((e) => (loadError = String(e)))
