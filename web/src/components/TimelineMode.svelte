@@ -3,7 +3,7 @@
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
   import { isEditableTarget } from '../lib/keyboard'
-  import { createToaster } from '../lib/toaster.svelte'
+  import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatTs, frameStep } from '../lib/time'
   import {
     clampMinGap,
@@ -378,7 +378,7 @@
   {#if toaster.toasts.length > 0}
     <div class="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 space-y-2">
       {#each toaster.toasts as t (t.id)}
-        <div class="rounded bg-red-900/90 px-3 py-2 text-sm text-red-100 shadow-lg">
+        <div class="rounded {toastToneClasses(t.tone, 'muted')} px-3 py-2 text-sm shadow-lg">
           {t.message}
         </div>
       {/each}

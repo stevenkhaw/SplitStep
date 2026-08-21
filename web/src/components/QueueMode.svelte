@@ -5,7 +5,7 @@
   import { isEditableTarget } from '../lib/keyboard'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
-  import { createToaster } from '../lib/toaster.svelte'
+  import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { QueueAction } from '../lib/queue'
   import type { Rally, SessionDetail, Source } from '../lib/types'
@@ -162,7 +162,11 @@
   async function exportSet(which: 'points' | 'starred'): Promise<void> {
     try {
       const result = await api.exportClips(detail.session.id, which)
-      toaster.push(describeExportResult(which, result))
+      // 'info': this is the plan's outcome, not a failure -- a queued/
+      // already-cut/in-flight/unavailable breakdown is the primary success
+      // feedback for the export feature, and rendering it red would read as
+      // the request having failed when it did exactly what was asked.
+      toaster.push(describeExportResult(which, result), 'info')
     } catch (e) {
       toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
     }
@@ -350,7 +354,7 @@
 {#if toaster.toasts.length > 0}
   <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
     {#each toaster.toasts as t (t.id)}
-      <div class="rounded bg-red-500/90 px-3 py-2 text-sm text-white shadow-lg">
+      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-sm shadow-lg">
         {t.message}
       </div>
     {/each}
