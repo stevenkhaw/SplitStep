@@ -183,9 +183,9 @@ lateral displacement is 0.0048 vs 0.0032 per 200 ms — a separation of only
 Audio carries the discrimination; motion and the gate constrain it.
 
 > **SUPERSEDED 2026-08-20.** The premise of that last sentence is false. Audio
-> does not carry the discrimination: impacts fire at 0.62/s in a window where
-> nobody is playing on our court against 0.65/s during a confirmed rally, at
-> every prominence floor tested, and stereo localisation fails too. Subject mode
+> does not carry the discrimination: impacts fire at 0.56/s across windows a pose
+> track confirms are swing-free, against 0.67/s while playing, at every prominence
+> floor tested. Stereo localisation and spectral timbre fail too. Subject mode
 > therefore has *neither* a strong signal nor a weak one — the weak motion term
 > is all that is left. See the validation document.
 

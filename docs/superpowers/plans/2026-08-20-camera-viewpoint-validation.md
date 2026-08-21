@@ -4,6 +4,8 @@
 **Plan task:** `docs/superpowers/plans/2026-08-20-camera-viewpoint.md` Task 5
 **Source:** `sessions/2026-08-18/sources/01` (19.5 min, ground-level camera)
 **Verdict:** ❌ **Subject mode is not validated. Do not treat spec §7's numbers as real.**
+**Corrected 2026-08-21** — clip #1's verdict below was wrong, which weakened one of the
+supporting arguments. The verdict itself survives re-testing. See §"Correction" at the end.
 
 ---
 
@@ -18,18 +20,22 @@ were then inspected frame by frame at their boundaries and interior: the 1st, 10
 
 | # | Span | Dur | conf | median `near.h` | max `near.h` | frames w/ impact | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1 | 0:05.1–0:30.7 | 25.6 s | 0.40 | 0.290 | **0.939** | 41% | ❌ **Camera setup.** Person crouching over the lens, then walking to position. No play. |
+| 1 | 0:05.1–0:30.7 | 25.6 s | 0.40 | 0.290 | **0.939** | 41% | ⚠️ **MIXED — originally misjudged as pure camera setup.** The first ~8 s is the operator at the lens, but from ~10 s there is real play (racket raised mid-swing at 11.5 s, hitting at 22–24 s). See the Correction. |
 | 10 | 3:22.7–3:26.3 | 3.6 s | 0.44 | 0.248 | 0.256 | 39% | ❓ Walking, racket down, no ball visible. Stills cannot settle it. |
 | 20 | 6:07.3–6:13.7 | 6.4 s | 0.43 | 0.223 | 0.229 | 50% | ❓ Walking, racket down, no ball visible. Stills cannot settle it. |
 | 35 | 10:09.7–10:13.1 | 3.4 s | 0.36 | 0.220 | 0.234 | 76% | ✅ **Serve.** Ball visible above the player at contact. |
 | 50 | 15:12.3–15:28.7 | 16.4 s | 0.39 | 0.234 | 0.326 | 55% | ✅ **Rally.** Swings, overhead, ready stance. End boundary may cut ~1 s early. |
 | 61 | 19:26.7–19:30.3 | 3.6 s | 0.46 | 0.276 | **0.675** | 72% | ❌ **Teardown.** Player walking back to the camera to stop recording. |
 
-Two unambiguous false positives, two confirmed true, two unresolvable from stills.
+One unambiguous false positive (#61), two confirmed true, one mixed (#1), two unresolvable
+from stills.
 
-**Confidence is inverted.** The two known-false clips score 0.40 and 0.46; the two
-known-true score 0.36 and 0.39. Raising the threshold removes true rallies *before* it
-removes the false ones, so no threshold setting fixes this.
+**Confidence looks inverted, on thin evidence.** The one clean known-false clip scores
+0.46 against known-true clips at 0.36 and 0.39, so raising the threshold would remove real
+rallies before that false one. This was originally stated on two known-false clips; the
+correction below reduces it to one, which is a single data point and should not be leaned
+on. The verdict does not rest on it — it rests on the audio measurement, which was re-run
+against clean windows and held.
 
 ## Why: neither discriminating signal actually discriminates
 
@@ -47,6 +53,14 @@ Impact counts in a window with **no play on our court** (camera setup, 5–31 s)
 
 The rate is the same to within noise, at every prominence floor. Raising the floor culls
 both equally. **The detector is measuring a busy multi-court venue, not this player.**
+
+> **Caveat, and its resolution.** The "setup 5–31 s" window used here was later shown to
+> contain roughly 8 s of real play, so it was about 30% contaminated. The comparison was
+> re-run against windows the pose track confirms are swing-free (`above` = 0.00
+> throughout): 4–9 s, 14–20 s and 26–31 s pooled give **0.56 impacts/sec** against
+> **0.67/sec** across the two confirmed-playing windows. Two of those clean not-playing
+> windows individually run at 0.67/s and 0.80/s — *above* the confirmed rally's 0.65/s.
+> The conclusion is unchanged and now rests on correctly labelled data.
 
 This invalidates the ground truth the whole subject-mode fit was built on: the "59 audio
 clusters, median 8.0 s, 59% coverage" in spec §7 describes *the venue's activity*, not
@@ -124,10 +138,92 @@ direction, 27% against 38%, but that is 19 impacts against 19 on populations of 
 The phone's mics are too close together to resolve sources at court distances. Stereo does
 not rescue the audio path.
 
+## Spectral timbre was tested too. Also dead.
+
+Amplitude and direction having failed, timbre is a third independent axis: air absorbs
+high frequencies with distance, so a racket at 3 m and one at 30 m should differ in
+brightness even at matched loudness.
+
+A first attempt measured a spectral centroid of ~430 Hz, which is implausible for a racket
+strike — the window had no high-pass, so low-frequency ambience dominated and the
+measurement described the venue's noise floor rather than the transient. Corrected by
+subtracting the spectrum of the 12 ms immediately before each onset, so only the energy
+the strike *added* is measured:
+
+| | not playing | rally | serve |
+|---|---|---|---|
+| excess centroid | 630 Hz | 575 Hz | 594 Hz |
+| excess HF/LF | −22.84 dB | −24.22 dB | −22.49 dB |
+| loudness-matched HF/LF | −23.24 dB | −22.53 dB | |
+
+No separation, and the bright tail runs the wrong way: 4% of playing impacts clear the
+not-playing p90, against 10% by construction. A 3.9 dB hint in the uncorrected version
+vanished entirely once measured properly.
+
+The recording is not the limitation — it carries real energy out to 16 kHz, and the proxy
+is spectrally identical to `original.mov` within 0.2 dB in every band, so audio work never
+needs the 5.5 GB source files. The physics simply does not bite: a few dB of absorption
+over 20–30 m of open air, with clear line of sight through a chain-link fence, is not
+enough to make the next court sound dull.
+
+**Audio is exhausted.** Three independent axes — amplitude, direction, timbre — all
+negative on correctly labelled windows.
+
+## Correction (2026-08-21): clip #1 was misjudged, and pose found the error
+
+Clip #1 was recorded above as "camera setup, no play". That was wrong, and it was wrong in
+a way worth recording, because the error was found by the very signal being evaluated.
+
+A pose track (YOLO11-pose at 30 fps, the whole source, aggregated onto the same 200 ms
+grid) was extracted to test whether arm movement discriminates. Sampling at 30 fps rather
+than the detector's 5 fps matters: a tennis swing lasts ~0.3 s, so at 5 fps it is one or
+two aliased samples — which is why an earlier 5 fps attempt showed nothing.
+
+Within clip #1 the wrist-above-shoulder fraction is 0.00 for most of the window but spikes
+to 0.20 at 10–12 s and 0.23 at 22–24 s. Frames pulled at those timestamps show the racket
+raised mid-swing at 11.5 s and an athletic hitting stance at 22–24 s. The operator places
+the camera in the first few seconds, walks out, and starts playing. **The pose feature was
+right and the hand label was wrong.**
+
+On the four labelled clips, one pose feature separates cleanly:
+
+| clip | verdict | wrist above shoulder |
+|---|---|---|
+| #1 camera setup (first 8 s only) | NOT | 6% |
+| #61 teardown | NOT | 4% |
+| #50 rally | PLAY | 14% |
+| #35 serve | PLAY | 16% |
+
+Wrist *speed* and wrist *reach* both overlap — the teardown clip has the highest speed p90
+of all four, because walking toward the lens swings the arms fast in normalised terms.
+Only the positional feature holds.
+
+Segmenting the whole source on that feature alone (4 s smoothing, threshold 0.10) gives 46
+intervals, median 5.9 s, 32% coverage. The teardown false positive disappears entirely,
+and the 25.6 s clip #1 collapses to two ~4 s intervals which are both genuine play.
+
+Caveats that keep this from being a validated result: four labelled clips is thin, and one
+of them was labelled wrong by the person writing this document. 30 fps pose is roughly six
+times the inference cost of the current expensive stage. And the player is tracked in only
+81% of bins — a missed detection currently scores identically to "not playing".
+
 ## Conclusion
 
-Subject mode has no working discriminator on this footage. Neither of its two inputs
-carries the signal: the audio detector measures the venue rather than the player, in mono
-or in stereo, and near-player motion separates by only +0.10. This is a capture problem
-and a feature-set problem, not a tuning problem. Raising the camera so both players are
-genuinely visible (the pair model's assumption) is the intervention most likely to work.
+Subject mode as specified has no working discriminator on this footage. Its dominant input,
+audio, measures the venue rather than the player — in amplitude, in direction, and in
+timbre — and near-player motion separates by only +0.10. That is a capture and feature-set
+problem, not a tuning problem, and no threshold fixes it.
+
+Two live routes out, in order of confidence:
+
+1. **Raise the camera.** A fence mount puts the two players at genuinely different depths,
+   which is what the pair model assumes and the only configuration with a strong signal
+   available. `analyze_view` switches profiles on its own.
+2. **Pose features.** Wrist-above-shoulder is the first thing measured in this whole
+   exercise that separates play from non-play, and it caught a labelling error its
+   evaluator had made. It needs more labelled clips before it justifies the 6x inference
+   cost of building it into the pipeline.
+
+Hand-labelling ten to fifteen clips would do more for either route than any further
+threshold work. The absence of hand labels is what let audio-impact clustering stand in as
+ground truth in the first place.

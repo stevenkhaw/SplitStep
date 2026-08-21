@@ -114,13 +114,18 @@ Recall-biased by design: rejecting a false rally is one keystroke, a missed
 rally means rescrubbing an hour. Prefer slight over-segmentation.
 
 **Neither profile is validated.** `pair` has never seen real two-player footage.
-`subject` was validated on 2026-08-20 and **failed** — camera setup and teardown
-score as rallies, and confidence is inverted so no threshold separates them,
-because on ground-level footage the audio detector measures the venue rather
-than the player (0.62 impacts/sec with nobody playing vs 0.65/sec mid-rally).
+`subject` was validated on 2026-08-20 and **failed**: camera teardown scores as
+a rally, and on ground-level footage the audio detector — subject mode's
+dominant input — measures the venue rather than the player. On windows verified
+swing-free by a pose track it fires at 0.56 impacts/sec, against 0.67/sec while
+actually playing; two of those idle windows individually beat a confirmed
+rally's rate. Amplitude, stereo direction and spectral timbre were all tested
+and all fail to separate our court from the neighbouring ones.
+
 Read `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before
-tuning anything here. Do not re-fit against audio-impact clusters — that ground
-truth is the venue's activity, not the player's.
+tuning anything here — including its 2026-08-21 correction, where one clip's
+hand label turned out to be wrong. Do not re-fit against audio-impact clusters:
+that ground truth is the venue's activity, not the player's.
 
 ### Play region
 

@@ -244,8 +244,10 @@ result was negative, and the reasons are now measured rather than suspected:
   teardown score as rallies, and confidence is *inverted* — the known-false
   clips scored higher than the known-true ones — so no threshold separates them.
 - **Audio impact detection works; it just measures the wrong thing.** Not wind —
-  neighbours. Impacts fire at 0.62/sec when nobody is playing on our court
-  against 0.65/sec mid-rally. Stereo localisation was tested and also failed.
+  neighbours. Impacts fire at 0.56/sec across windows verified swing-free by a
+  pose track, against 0.67/sec while actually playing — and two of those idle
+  windows individually beat a confirmed rally's rate. Stereo direction and
+  spectral timbre were tested too, and both fail.
 - Still genuinely unverified: playback of a real 4K-derived 1080p proxy end to
   end in the UI.
 
