@@ -9,10 +9,12 @@ from bootleg.db.labels import (
     latest_labels,
     parse_flags,
     record_boundary_correction,
+    retract_label,
 )
 from bootleg.db.rallies import replace_rallies
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
+from bootleg.label_score import rows_to_labels, score_against_labels
 
 
 @pytest.fixture
@@ -218,3 +220,138 @@ def test_record_boundary_correction_carries_an_existing_verdict_forward(conn, se
     # boundary_flags is still freshly derived from this drag's sign, not
     # copied from the verdict-only row (which had none to copy anyway).
     assert parse_flags(rows[0]["boundary_flags"]) == ["start_early", "end_late"]
+
+
+def test_retracting_a_verdict_leaves_the_span_with_no_current_label(conn, seeded):
+    # `U` in label mode. The reviewer is looking at an unlabelled clip
+    # afterwards, so every reader must agree with them -- a local-only undo
+    # that left the old verdict standing in the corpus is what this row
+    # exists to prevent.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+
+    label_id = retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                             span_end_ms=5000, rally_id="r1")
+
+    assert label_id is not None
+    assert latest_labels(conn, seeded["source_id"]) == []
+
+
+def test_a_retraction_preserves_the_judgement_it_retracts(conn, seeded):
+    # Append-only, exactly like a re-label: the retracted verdict stays on
+    # record, it just stops being current.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, rally_id="r1")
+
+    rows = conn.execute(
+        "SELECT verdict, retracted FROM rally_labels ORDER BY rowid"
+    ).fetchall()
+    assert [(r["verdict"], r["retracted"]) for r in rows] == [("clean", 0), (None, 1)]
+
+
+def test_a_retraction_keeps_a_boundary_correction_on_record(conn, seeded):
+    # Undo retracts the reviewer's judgement, not the measurement: the drag
+    # that produced true_start_ms/true_end_ms is a separate writer's fact and
+    # the reviewer never asked to take it back.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="partly")
+    record_boundary_correction(
+        conn, rally_id="r1", source_id=seeded["source_id"],
+        det_start_ms=1000, det_end_ms=5000, true_start_ms=1400, true_end_ms=4600,
+    )
+
+    retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, rally_id="r1")
+
+    rows = latest_labels(conn, seeded["source_id"])
+    assert len(rows) == 1
+    assert rows[0]["verdict"] is None
+    assert (rows[0]["true_start_ms"], rows[0]["true_end_ms"]) == (1400, 4600)
+    # Still a pure function of det_* vs true_*, same rule as everywhere else.
+    assert parse_flags(rows[0]["boundary_flags"]) == ["start_early", "end_late"]
+
+
+def test_retracting_a_span_that_carries_no_verdict_writes_nothing(conn, seeded):
+    # Nothing to retract. Mirrors record_boundary_correction returning None
+    # for a drag that went nowhere -- an append-only table should not collect
+    # rows that assert nothing.
+    assert retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                         span_end_ms=5000, rally_id="r1") is None
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == 0
+
+    record_boundary_correction(
+        conn, rally_id="r1", source_id=seeded["source_id"],
+        det_start_ms=1000, det_end_ms=5000, true_start_ms=1400, true_end_ms=4600,
+    )
+    assert retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                         span_end_ms=5000, rally_id="r1") is None
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == 1
+
+
+def test_a_verdict_written_after_a_retraction_is_current_again(conn, seeded):
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, rally_id="r1")
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="not_play")
+
+    rows = latest_labels(conn, seeded["source_id"])
+    assert [r["verdict"] for r in rows] == ["not_play"]
+
+
+def test_a_boundary_drag_after_a_retraction_does_not_resurrect_the_verdict(conn, seeded):
+    # record_boundary_correction carries the prior verdict forward. The
+    # retraction row is that prior, so what it carries forward is NULL --
+    # reading past it to the retracted verdict would undo the undo.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, rally_id="r1")
+
+    record_boundary_correction(
+        conn, rally_id="r1", source_id=seeded["source_id"],
+        det_start_ms=1000, det_end_ms=5000, true_start_ms=1400, true_end_ms=4600,
+    )
+
+    rows = latest_labels(conn, seeded["source_id"])
+    assert len(rows) == 1
+    assert rows[0]["verdict"] is None
+    assert rows[0]["true_start_ms"] == 1400
+
+
+def test_a_retracted_span_is_not_scored_as_a_labelled_span(conn, seeded):
+    # The scorer sees resolved current state, not history: a candidate on a
+    # retracted span is one nobody currently judges, which is `unknown` --
+    # counting it as matched would let a withdrawn verdict keep voting.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    retract_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, rally_id="r1")
+
+    labels = rows_to_labels(latest_labels(conn, seeded["source_id"]))
+    score = score_against_labels([Interval(1000, 5000, 0.8)], labels)
+    assert score.unknown == 1
+    assert score.labelled_clean == 0
+    assert score.precision is None
+
+
+def test_add_label_refuses_to_mark_a_verdict_row_as_retracted(conn, seeded):
+    # A retraction asserts "there is no current verdict here". Carrying one
+    # would make the row say both things at once.
+    with pytest.raises(ValueError, match="retracted"):
+        add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+                  span_end_ms=5000, verdict="clean", retracted=True)
+
+
+def test_labels_are_still_deleted_with_their_source(conn, seeded):
+    # Migration 004 rebuilds rally_labels (sqlite cannot ALTER a CHECK), and
+    # a rebuild that quietly dropped `REFERENCES sources(id) ON DELETE
+    # CASCADE` would leave orphan labels no reader can ever attribute.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    conn.execute("DELETE FROM sources WHERE id = ?", (seeded["source_id"],))
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == 0

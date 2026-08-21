@@ -468,6 +468,34 @@ def test_labels_export_writes_the_corpus_as_json(library, conn, capsys, tmp_path
     }]
 
 
+def test_labels_export_omits_a_retracted_span(library, conn, capsys, tmp_path):
+    # The export is the corpus as it currently stands, not its history: a
+    # span whose verdict the reviewer took back carries no judgement, and
+    # writing it out as a null-verdict entry would put a span nobody judges
+    # into a committed fixture where the scorer would count it as covered.
+    from bootleg.db.labels import add_label, retract_label
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    add_label(conn, source_id=source_id, span_start_ms=1000, span_end_ms=5000,
+              verdict="clean")
+    add_label(conn, source_id=source_id, span_start_ms=9000, span_end_ms=14000,
+              verdict="not_play")
+    retract_label(conn, source_id=source_id, span_start_ms=1000, span_end_ms=5000,
+                  rally_id=None)
+    conn.close()
+
+    out = tmp_path / "labels.json"
+    assert main(["--library", str(library.root), "labels", "export", source_id,
+                 "--out", str(out)]) == 0
+
+    payload = json.loads(out.read_text())
+    assert [lab["span_start_ms"] for lab in payload["labels"]] == [9000]
+
+
 def test_labels_export_on_an_unknown_source_fails(library, conn, capsys):
     conn.close()
     rc = main(["--library", str(library.root), "labels", "export", "nope"])

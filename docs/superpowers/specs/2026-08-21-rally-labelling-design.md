@@ -153,6 +153,28 @@ it.
 **`source_id` cascades.** A source deleted takes its footage with it, and a label
 whose video is gone cannot be re-verified. Export before deleting a source.
 
+**Retraction (migration `004_label_retraction.sql`, 2026-08-21).** `U` in label
+mode has to be able to say "the reviewer took that judgement back" durably, and
+the only append-only way to say it is another row. `retracted INTEGER NOT NULL
+DEFAULT 0` marks it; the table-level CHECK becomes `verdict IS NOT NULL OR
+true_start_ms IS NOT NULL OR retracted = 1`, so an empty row is legal only when
+it is an explicit retraction, and a second CHECK forbids a retraction that also
+carries a verdict. sqlite cannot ALTER a CHECK, so 004 rebuilds the table —
+create, copy, drop, rename, same FK, same index, no PRAGMA toggling (an
+unrestored `foreign_keys=OFF` would leak into the app's own long-lived
+connection).
+
+**Current-label resolution, in full.** For each `(source_id, span_start_ms,
+span_end_ms)`: take the newest row by `labelled_at DESC, rowid DESC`; if it
+carries neither a verdict nor a corrected span, the span has no current label
+and `latest_labels` omits it entirely. Only a retraction can reach that state.
+A retraction of a span that also carries a drag's correction keeps the
+correction (flags re-derived from it) and reads exactly like the drag-only row
+it effectively is — undo retracts the reviewer's judgement, never another
+writer's measurement. `latest_label_for_span` deliberately does *not* filter:
+writers must see a retraction, or `record_boundary_correction` would read past
+it to the verdict it withdrew and carry that forward on the next drag.
+
 ## 5. Capture
 
 Two write paths. `bootleg/db/labels.py` holds `add_label()` and
@@ -166,6 +188,29 @@ cannot drift.
 resolves the rally to its `source_id`, `det_start_ms` and `det_end_ms` and
 inserts. The client never sends a span — deriving it server-side is what
 guarantees the anchor is always the detector's own guess.
+
+`POST /api/rallies/{rally_id}/label/retract` withdraws it again — no body, span
+resolved server-side the same way, and a no-op (200, `id: null`) on a span that
+carries no verdict, so a retry or a second tab cannot pile up rows. It is a
+separate route rather than `POST .../label` with a null verdict because a
+verdict-less label row is what a boundary drag writes, and the two carry
+opposite meanings.
+
+**Writes are serialised per rally in the client** (`LabelWriter`,
+`web/src/lib/labels.ts`). Each POST carries the span's whole state and the
+server resolves by latest row, so a fast `clean` → `q` → `p` burst reaching the
+server out of order left it holding an older state than the screen showed —
+silently and permanently. One in-flight write per rally (= per detector span)
+makes the reordering unreachable rather than merely unlikely; per rally rather
+than global so one slow request cannot stall the whole pass. Nothing is
+coalesced: every action still gets its own row. An older write failing while a
+newer one is queued is absorbed, not reverted — the newer write carries the
+whole state — and a failure with nothing queued behind it restores the last
+state the server actually accepted, which after a burst of failures is not the
+failed action's own predecessor. Two tabs on the same rally remain unordered;
+that is a server-revision problem, and its cost (one reviewer overwriting their
+own other window, visible on the next reload, recoverable from history) is far
+below the cost of intra-tab reordering.
 
 ### 5.2 Boundary drag
 
@@ -215,7 +260,7 @@ Entered and left with `l` from queue mode.
 | `o` `p` | toggle `end_early` / `end_late` |
 | `r` | replay span |
 | `←` `→` | previous / next rally |
-| `u` | undo |
+| `u` | undo (persists a retraction, not just a local clear) |
 | space | play / pause |
 
 Left-hand keys are the clip's start and right-hand keys its end; the first of

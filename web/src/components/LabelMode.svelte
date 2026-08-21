@@ -2,7 +2,7 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { isEditableTarget } from '../lib/keyboard'
-  import { FLAG_ORDER, LabelController, persistLabel } from '../lib/labels'
+  import { FLAG_ORDER, LabelController, LabelWriter } from '../lib/labels'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
@@ -47,6 +47,12 @@
   }
 
   const toaster = createToaster()
+  // One queue for the whole mode, living across controller rebuilds: it
+  // serialises writes per rally so a fast burst of keystrokes cannot reach
+  // the server out of order, and remembers what the server last accepted so
+  // a failure restores that rather than a state no reader ever held. Not
+  // $state -- nothing renders from it.
+  const writer = new LabelWriter(api)
   let controller = $state<LabelController | null>(null)
   let loadError = $state<string | null>(null)
   let version = $state(0)
@@ -168,12 +174,19 @@
   async function apply(action: LabelAction | null): Promise<void> {
     version += 1
     if (!action) return
-    const outcome = await persistLabel(action, api)
-    if (!outcome.ok) {
-      // Same reasoning as QueueMode: revert this action's rally without
+    const outcome = await writer.submit(action)
+    if (outcome.status === 'failed') {
+      // Same reasoning as QueueMode: put this action's rally back without
       // moving the cursor or consuming the undo stack, surface it, and do
       // not halt the pass over a rare failure on a LAN box.
-      controller?.revert(action)
+      //
+      // `restore` rather than `revert(action)`: the writer hands back the
+      // last state the server actually accepted, which after a burst where
+      // several writes failed is not this action's own predecessor.
+      // 'superseded' is deliberately silent -- a newer action for the same
+      // rally is still queued and carries the whole state, so the reviewer
+      // has nothing to fix and nothing to be told about.
+      controller?.restore(action.rallyId, outcome.restore)
       version += 1
       toaster.push("Couldn't save that label -- reverted")
     }

@@ -29,6 +29,11 @@ export const api = {
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),
   label: (id: string, verdict: string, boundary_flags: string[]) =>
     post(`/api/rallies/${id}/label`, { verdict, boundary_flags }),
+  // Withdraws the current verdict for the rally's detector span, appending a
+  // retraction row rather than deleting anything. Its own route because a
+  // verdict-less label row is what a boundary drag writes, and the two mean
+  // opposite things -- see api_label_retract in bootleg/api/routes.py.
+  retractLabel: (id: string) => post(`/api/rallies/${id}/label/retract`),
   sourceLabels: (sourceId: string) => req<LabelRecord[]>(`/api/sources/${sourceId}/labels`),
 
   resegment: (sourceId: string, threshold: number) =>

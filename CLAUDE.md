@@ -17,7 +17,7 @@ Python lives in the `bootleg` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate bootleg` first):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q                              # 393 tests
+~/miniconda3/envs/bootleg/bin/pytest -q                              # 418 tests
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
@@ -213,6 +213,24 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   Two writers: label mode in the UI (verdict + boundary flags) and
   `POST /api/rallies/{id}/bounds`, which turns every manual drag into a signed
   millisecond correction for free.
+- **The current label for a span is resolved, not just read.** Newest row per
+  `(source_id, span_start_ms, span_end_ms)` by `labelled_at DESC, rowid DESC`,
+  then dropped if it carries neither a verdict nor a corrected span. Only a
+  retraction (`retract_label`, what label mode's `U` writes, migration 004)
+  reaches that state, and a span in it is exactly as unjudged as one nobody
+  opened — so label mode, the exporter and the scorer all agree without any of
+  them knowing retractions exist. `latest_label_for_span` deliberately does not
+  filter: a writer that could not see a retraction would carry the verdict it
+  withdrew forward on the next drag. Undo retracts the reviewer's judgement
+  only; a drag's `true_*` measurement is carried across it untouched.
+- **Label writes are serialised per rally in the client** (`LabelWriter`,
+  `web/src/lib/labels.ts`). Every POST carries the span's whole state and the
+  server resolves by latest row, so an out-of-order burst used to leave the
+  corpus holding a state the reviewer had already moved on from. One in-flight
+  write per rally; an older write's failure with a newer one queued is absorbed
+  rather than reverted; a failure with nothing behind it restores the last
+  state the server accepted. Two tabs on one rally are still unordered — that
+  would need a server-side revision.
 - **`bootleg labels score <source_id> --threshold X` is the tuning loop.**
   It re-runs `segment()` over cached features (~200 ms, no GPU) and scores it
   against the corpus, matching candidates to labelled spans by the same >50%

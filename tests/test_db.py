@@ -8,7 +8,7 @@ from bootleg.db.rallies import (
     set_rejected,
     set_star,
 )
-from bootleg.db.schema import connect, migrate
+from bootleg.db.schema import MIGRATIONS, connect, migrate
 from bootleg.db.sessions import (
     add_source,
     find_or_create_session_for_date,
@@ -45,8 +45,49 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 3
-    assert migrate(conn) == 3
+    assert migrate(conn) == 4
+    assert migrate(conn) == 4
+
+
+def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
+    # 004 adds `retracted` and relaxes a CHECK, which sqlite can only do by
+    # rebuilding the table -- create, copy, drop, rename. A rebuild that
+    # forgot the copy would take an already-collected corpus with it, and
+    # nothing else in the app would notice until the next export came back
+    # empty. Migrate to 003, plant a row, then let 004 run over it.
+    # A raw database, not the `library` fixture -- that one is already fully
+    # migrated, and this test needs to stand at 003 with data in it.
+    conn = connect(tmp_path / "old.db")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        n = int(path.name.split("_", 1)[0])
+        if n > 3:
+            break
+        conn.executescript(path.read_text())
+        conn.execute(f"PRAGMA user_version={n}")
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s1','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src1','s1',1,'now',0,1000,1920,1080,30.0,0,'a.mov','ready')"
+    )
+    conn.execute(
+        "INSERT INTO rally_labels (id,source_id,span_start_ms,span_end_ms,verdict,"
+        "boundary_flags,labelled_at) VALUES ('l1','src1',1000,5000,'clean','end_late','T')"
+    )
+    conn.commit()
+
+    assert migrate(conn) == 4
+
+    row = conn.execute("SELECT * FROM rally_labels").fetchone()
+    assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
+    # Pre-004 rows are judgements, not retractions.
+    assert row["retracted"] == 0
+    # The rebuild must not have quietly disabled enforcement for the rest of
+    # this connection's life -- 004 deliberately toggles no pragmas.
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
 def test_rally_cascades_when_source_deleted(library):

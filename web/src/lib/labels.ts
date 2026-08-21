@@ -19,12 +19,27 @@ export const FLAG_ORDER: readonly BoundaryFlag[] = [
 // judged at all.
 const FLAGGABLE: readonly Verdict[] = ['clean', 'partly']
 
+/**
+ * One write to make: the state `rallyId`'s span should be left in, plus the
+ * state it had before, so a failed write can be undone locally.
+ *
+ * `verdict: null` is a retraction -- the reviewer took a judgement back (`U`)
+ * and the span should read as unlabelled everywhere, not just on their
+ * screen. It is a distinct route server-side, not a label with a missing
+ * field; see persistLabel.
+ */
 export interface LabelAction {
   rallyId: string
-  verdict: Verdict
+  verdict: Verdict | null
   flags: BoundaryFlag[]
   previousVerdict: Verdict | null
   previousFlags: BoundaryFlag[]
+}
+
+/** A rally's label state, as the controller holds it and the server stores it. */
+export interface LabelState {
+  verdict: Verdict | null
+  flags: BoundaryFlag[]
 }
 
 interface HistoryEntry {
@@ -223,10 +238,13 @@ export class LabelController {
     else this.#verdicts.set(r.id, entry.verdict)
     this.#flags.set(r.id, [...entry.flags])
 
-    // Returns null when the restored state has no verdict: there is nothing
-    // to POST, since the API has no "unlabel" and the corpus is append-only.
-    // The caller simply has nothing to persist.
-    if (entry.verdict === null) return null
+    // Returns an action even when the restored state has no verdict. That
+    // case used to return null and persist nothing, on the reasoning that
+    // the append-only corpus has no "unlabel" -- but the reviewer was then
+    // left looking at a clip the corpus still called 'clean', and a reload
+    // brought the verdict back. `retract_label` (bootleg/db/labels.py) is
+    // the append-only way to say it: one more row, superseding the
+    // judgement without erasing it.
     return {
       rallyId: r.id,
       verdict: entry.verdict,
@@ -237,23 +255,30 @@ export class LabelController {
   }
 
   /**
-   * Restores one rally's state after its POST failed.
+   * Puts one rally into an explicit state after its POST failed.
    *
-   * Action-correlated rather than position-correlated, exactly like
-   * QueueController.revert: it targets `action.rallyId` wherever that sits,
-   * never touches `#index`, and never pops `#history`. A failed network call
-   * must not move the reviewer's position or consume their undo.
+   * Rally-correlated rather than position-correlated, exactly like
+   * QueueController.revert: it targets `rallyId` wherever that sits, never
+   * touches `#index`, and never pops `#history`. A failed network call must
+   * not move the reviewer's position or consume their undo.
+   *
+   * Takes a state rather than the failed action, which is the one difference
+   * from QueueController.revert: LabelWriter can have several writes queued
+   * for one rally, and when a run of them fails the state to fall back to is
+   * the last one the server actually accepted -- not the failed action's own
+   * predecessor, which may never have landed either.
    */
-  revert(action: LabelAction): void {
-    if (action.previousVerdict === null) this.#verdicts.delete(action.rallyId)
-    else this.#verdicts.set(action.rallyId, action.previousVerdict)
-    this.#flags.set(action.rallyId, [...action.previousFlags])
+  restore(rallyId: string, state: LabelState): void {
+    if (state.verdict === null) this.#verdicts.delete(rallyId)
+    else this.#verdicts.set(rallyId, state.verdict)
+    this.#flags.set(rallyId, [...state.flags])
   }
 }
 
 /** The subset of `api` that persisting a LabelAction needs. */
 export interface LabelApi {
   label: (id: string, verdict: string, boundaryFlags: string[]) => Promise<unknown>
+  retractLabel: (id: string) => Promise<unknown>
 }
 
 export type LabelOutcome = { ok: true } | { ok: false }
@@ -271,9 +296,110 @@ export async function persistLabel(
   api: LabelApi,
 ): Promise<LabelOutcome> {
   try {
-    await api.label(action.rallyId, action.verdict, action.flags)
+    // A retraction is its own route, not a label with a null verdict: a
+    // verdict-less label row is what a boundary drag writes, and the two
+    // carry opposite meanings server-side (one withdraws a judgement, the
+    // other asserts a measurement while making no judgement at all).
+    if (action.verdict === null) await api.retractLabel(action.rallyId)
+    else await api.label(action.rallyId, action.verdict, action.flags)
     return { ok: true }
   } catch {
     return { ok: false }
+  }
+}
+
+/**
+ * The outcome of one queued write.
+ *
+ * `superseded` is the interesting one: the write failed, but the reviewer
+ * has already made a newer action for the same rally that is still queued.
+ * Reverting there would drag the screen back to a state the reviewer left
+ * two keystrokes ago, and the newer write carries the whole state anyway --
+ * so the failure is absorbed and the newer write decides what is true.
+ */
+export type WriteOutcome =
+  | { status: 'ok' }
+  | { status: 'superseded' }
+  | { status: 'failed'; restore: LabelState }
+
+/**
+ * Serialises label writes per rally.
+ *
+ * LabelMode fires a POST per keystroke without awaiting the previous one, so
+ * a fast `clean` -> `Q` -> `P` burst put three requests on the wire at once.
+ * Every request carries the span's whole state (verdict + flags) and the
+ * server resolves the current label as the latest row written, so whichever
+ * request happened to land last won -- and that is not necessarily the last
+ * one the reviewer made. The screen and the corpus then disagreed, silently
+ * and permanently.
+ *
+ * One in-flight write per rally fixes the ordering at the source instead of
+ * detecting the reordering afterwards. Per rally, not global: a rally is a
+ * detector span (one source's spans are disjoint, and the server anchors
+ * every label to (source_id, span)), so two rallies' writes cannot collide,
+ * and making them queue behind each other would stall a whole labelling pass
+ * behind one slow request on a LAN box.
+ *
+ * Every action still gets its own POST -- the corpus is append-only and its
+ * history is the point (clip #1's hand label was wrong, and the correction
+ * was itself the finding), so nothing here coalesces a burst into one write.
+ *
+ * What this does NOT order is two browser tabs labelling the same rally. A
+ * queue is per client. Nothing short of a server-side revision would order
+ * that, and the cost of getting it wrong there is one reviewer overwriting
+ * their own other window -- rare, visible on the next reload, and still
+ * fully recoverable from history. Reordering inside ONE tab was neither
+ * rare nor visible.
+ */
+export class LabelWriter {
+  #api: LabelApi
+  // Per rally: the tail of its write chain, how many of its writes are
+  // queued-but-unsettled, and the last state the server is known to hold.
+  #tail = new Map<string, Promise<unknown>>()
+  #queued = new Map<string, number>()
+  #confirmed = new Map<string, LabelState>()
+
+  constructor(api: LabelApi) {
+    this.#api = api
+  }
+
+  submit(action: LabelAction): Promise<WriteOutcome> {
+    const key = action.rallyId
+    const depth = (this.#queued.get(key) ?? 0) + 1
+    this.#queued.set(key, depth)
+    // Nothing was in flight for this rally, so what the server holds right
+    // now is exactly what this action supersedes. Captured here rather than
+    // read off the failed action later, because a whole burst can fail and
+    // then the action's own predecessor never reached the server either.
+    if (depth === 1) {
+      this.#confirmed.set(key, {
+        verdict: action.previousVerdict,
+        flags: [...action.previousFlags],
+      })
+    }
+
+    const run = async (): Promise<WriteOutcome> => {
+      const outcome = await persistLabel(action, this.#api)
+      const remaining = (this.#queued.get(key) ?? 1) - 1
+      this.#queued.set(key, remaining)
+
+      if (outcome.ok) {
+        this.#confirmed.set(key, { verdict: action.verdict, flags: [...action.flags] })
+        return { status: 'ok' }
+      }
+      if (remaining > 0) return { status: 'superseded' }
+      const confirmed = this.#confirmed.get(key) ?? {
+        verdict: action.previousVerdict,
+        flags: [...action.previousFlags],
+      }
+      return { status: 'failed', restore: { verdict: confirmed.verdict, flags: [...confirmed.flags] } }
+    }
+
+    // `then(run, run)` rather than `then(run)`: persistLabel swallows its own
+    // rejections today, but a chain that breaks on one rejected link would
+    // strand every later write for that rally with no way to notice.
+    const next = (this.#tail.get(key) ?? Promise.resolve()).then(run, run)
+    this.#tail.set(key, next)
+    return next
   }
 }

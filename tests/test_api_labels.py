@@ -264,3 +264,67 @@ def test_a_label_with_no_carried_correction_still_honours_explicit_client_flags(
 
     rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
     assert rows[0]["boundary_flags"] == ["start_early"]
+
+
+def test_retract_route_leaves_the_span_unlabelled_for_readers(client, conn, seeded):
+    # `U` in label mode after a first-time label. Without a durable
+    # retraction the undo was local only: the reviewer saw an unlabelled
+    # clip while the corpus still said 'clean', and a reload brought the
+    # verdict back.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": []})
+
+    r = client.post(f"/api/rallies/{rally['id']}/label/retract")
+    assert r.status_code == 200
+
+    assert client.get(f"/api/sources/{seeded['source_id']}/labels").json() == []
+    # Append-only: the retracted judgement is still on record, just not current.
+    total = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+    assert total == 2
+
+
+def test_retract_route_keeps_a_boundary_correction_visible(client, conn, seeded):
+    # The drag is a measurement by a different writer; undoing a verdict in
+    # label mode does not ask for it back.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": []})
+
+    client.post(f"/api/rallies/{rally['id']}/label/retract")
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] is None
+    assert (rows[0]["true_start_ms"], rows[0]["true_end_ms"]) == (1400, 4600)
+    assert rows[0]["boundary_flags"] == ["start_early", "end_late"]
+
+
+def test_retract_route_is_a_no_op_on_a_span_with_no_verdict(client, conn, seeded):
+    rally = _first_rally(conn)
+    r = client.post(f"/api/rallies/{rally['id']}/label/retract")
+    assert r.status_code == 200
+    assert r.json()["id"] is None
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == 0
+
+
+def test_retract_route_404s_on_a_rally_a_resegment_deleted(client, conn, seeded):
+    rally = _first_rally(conn)
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"], [Interval(2000, 6000, 0.9)])
+    r = client.post(f"/api/rallies/{rally['id']}/label/retract")
+    assert r.status_code == 404
+
+
+def test_a_label_after_a_retraction_is_current_again(client, conn, seeded):
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": []})
+    client.post(f"/api/rallies/{rally['id']}/label/retract")
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "not_play", "boundary_flags": []})
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "not_play"

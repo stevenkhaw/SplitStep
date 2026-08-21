@@ -18,6 +18,7 @@ from bootleg.db.labels import (
     latest_labels,
     parse_flags,
     record_boundary_correction,
+    retract_label,
 )
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
@@ -306,6 +307,35 @@ def api_label(rally_id: str, body: LabelBody, request: Request):
     # No session_status refresh: a label is a note about the detector, not a
     # review decision, and flipping a session to 'reviewed' because someone
     # labelled one clip would misreport the review pass.
+    return {"ok": True, "id": label_id}
+
+
+@router.post("/api/rallies/{rally_id}/label/retract")
+def api_label_retract(rally_id: str, request: Request):
+    """Withdraw the current verdict for this rally's detector span.
+
+    Label mode's `U`. Deliberately its own route rather than
+    `POST .../label` with a null verdict: a verdict-less label row is what a
+    boundary drag writes, so overloading that body would make "the reviewer
+    took their judgement back" and "the reviewer moved an edge" the same
+    request, and the carry-forward rules for the two are opposites.
+
+    Takes no body -- the span is resolved server-side from the immutable
+    det_* columns, same as every other label write. Idempotent: retracting a
+    span that carries no verdict writes nothing and still reports success,
+    so a retry (or two tabs undoing the same clip) cannot pile up rows.
+    """
+    conn = _conn(request)
+    span = _rally_det_span(conn, rally_id)
+    label_id = retract_label(
+        conn,
+        source_id=span["source_id"],
+        span_start_ms=span["det_start_ms"],
+        span_end_ms=span["det_end_ms"],
+        rally_id=rally_id,
+    )
+    # No session_status refresh, same as api_label: a label is a note about
+    # the detector, not a review decision.
     return {"ok": True, "id": label_id}
 
 
