@@ -247,6 +247,19 @@ def set_rejected(conn: sqlite3.Connection, rally_id: str, rejected: bool) -> Non
     conn.commit()
 
 
+def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
+    """Write (or clear) a rally's note.
+
+    Deliberately does NOT stamp reviewed_at, unlike set_star/set_point/
+    set_rejected. Those three are rulings on the clip and reviewed_at records
+    that a human ruled on it; a note carries no verdict at all -- "check this
+    later" is an ordinary thing to write -- so flipping a session to reviewed
+    on the strength of one would report a judgement nobody made.
+    """
+    conn.execute("UPDATE rallies SET note = ? WHERE id = ?", (note, rally_id))
+    conn.commit()
+
+
 def mark_reviewed(conn: sqlite3.Connection, rally_id: str) -> None:
     conn.execute(
         "UPDATE rallies SET reviewed_at = COALESCE(reviewed_at, ?) WHERE id = ?",

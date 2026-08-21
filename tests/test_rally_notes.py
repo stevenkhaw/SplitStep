@@ -106,3 +106,32 @@ def test_a_note_alone_keeps_a_rally_in_the_carry_over_read_back(conn, seeded):
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1100, 5100, 0.8)])
     assert _rows(conn, seeded)[0]["note"] == "only a note"
+
+
+def test_set_note_writes_and_overwrites(conn, seeded):
+    from bootleg.db.rallies import set_note
+
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"],
+                    [Interval(1000, 5000, 0.8)])
+    rally_id = _rows(conn, seeded)[0]["id"]
+
+    set_note(conn, rally_id, "first")
+    assert _rows(conn, seeded)[0]["note"] == "first"
+
+    set_note(conn, rally_id, "second")
+    assert _rows(conn, seeded)[0]["note"] == "second"
+
+
+def test_set_note_does_not_stamp_reviewed_at(conn, seeded):
+    # Unlike set_star/set_point/set_rejected. Those are verdicts on the rally;
+    # a note is not one. "check this later" is a perfectly ordinary note, and
+    # flipping the session to reviewed because someone typed it would report a
+    # judgement nobody made.
+    from bootleg.db.rallies import set_note
+
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"],
+                    [Interval(1000, 5000, 0.8)])
+    rally_id = _rows(conn, seeded)[0]["id"]
+
+    set_note(conn, rally_id, "check this later")
+    assert _rows(conn, seeded)[0]["reviewed_at"] is None

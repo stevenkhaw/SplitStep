@@ -550,3 +550,43 @@ def test_setup_409s_while_a_job_is_running(client, registered_source, a_preset, 
         json={"rotation_deg": 0, "preset_id": a_preset},
     )
     assert r.status_code == 409
+
+
+def test_note_route_writes_the_note(client, conn, seeded):
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+
+    r = client.post(f"/api/rallies/{rally_id}/note", json={"note": "  late on the backhand  "})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+    # Trimmed at the boundary, so what the exporter renders is what the
+    # reviewer meant -- trailing spaces would silently widen the caption pill.
+    assert list_rallies(conn, seeded["session_id"])[0]["note"] == "late on the backhand"
+
+
+def test_note_route_refuses_an_over_long_note(client, conn, seeded):
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+
+    r = client.post(f"/api/rallies/{rally_id}/note", json={"note": "x" * 121})
+    # 422, the same shape every other pydantic validator in this router
+    # produces -- the UI is not the only writer a library ever has.
+    assert r.status_code == 422
+    assert list_rallies(conn, seeded["session_id"])[0]["note"] == ""
+
+
+def test_note_route_accepts_a_note_at_exactly_the_cap(client, conn, seeded):
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+
+    r = client.post(f"/api/rallies/{rally_id}/note", json={"note": "x" * 120})
+    assert r.status_code == 200
+
+
+def test_note_route_clears_a_note_with_an_empty_string(client, conn, seeded):
+    # Deleting a note is the same write as setting one. A separate DELETE
+    # route would be a second code path for "the note is now empty".
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+
+    client.post(f"/api/rallies/{rally_id}/note", json={"note": "typo"})
+    client.post(f"/api/rallies/{rally_id}/note", json={"note": ""})
+
+    assert list_rallies(conn, seeded["session_id"])[0]["note"] == ""
