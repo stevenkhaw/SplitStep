@@ -17,7 +17,7 @@ Python lives in the `bootleg` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate bootleg` first):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q                              # 348 tests
+~/miniconda3/envs/bootleg/bin/pytest -q                              # 393 tests
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
@@ -201,6 +201,27 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   across by >50% overlap. Manual boundary edits are intentionally lost — the
   caller confirms first. `det_start_ms`/`det_end_ms` are immutable and record
   what the detector originally guessed.
+- **`rally_labels` is the human-judgement corpus, and it survives a re-segment.**
+  Rows anchor to `(source_id, det_start_ms, det_end_ms)` — the detector's own
+  span — not to a rally row, so a threshold sweep leaves them intact.
+  `rally_id` is provenance only and deliberately carries **no foreign key**:
+  `replace_rallies` deletes every rally for a source, and a cascade would wipe
+  the corpus. `tests/test_labels.py::test_the_corpus_survives_replace_rallies`
+  is what catches anyone adding one back. The table is append-only —
+  re-labelling appends and `latest_labels` resolves the current row, so a
+  corrected judgement never erases the one it corrected.
+  Two writers: label mode in the UI (verdict + boundary flags) and
+  `POST /api/rallies/{id}/bounds`, which turns every manual drag into a signed
+  millisecond correction for free.
+- **`bootleg labels score <source_id> --threshold X` is the tuning loop.**
+  It re-runs `segment()` over cached features (~200 ms, no GPU) and scores it
+  against the corpus, matching candidates to labelled spans by the same >50%
+  overlap rule `replace_rallies` uses. Its recall figure is `span recall
+  (labelled spans only)` and cannot see play the detector never proposed —
+  every label sits on a span it did. Do not rename it to plain "recall";
+  letting a metric imply coverage it lacks is what cost the last round.
+  `bootleg labels export <source_id>` writes the corpus as JSON for
+  `tests/fixtures/`.
 - **`features.jsonl` floats are quantized to 4dp** so read/write cycles are
   byte-stable. Round-tripping is exact only for already-quantized values.
 - Design rationale and decision log: `docs/superpowers/specs/`, implementation
