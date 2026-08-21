@@ -232,6 +232,15 @@
         // The idle element is already this rally, buffered and seeked --
         // swap to it instead of re-seeking the live one. No stall: this is
         // the entire reason this component owns two elements.
+        //
+        // Silence the element being swapped away from, here rather than
+        // relying on the preload effect below to do it. That effect pauses
+        // the newly-idle element only as a side effect of loading the rally
+        // after next into it, and it returns early when there is no next
+        // rally -- so advancing onto the LAST rally of a pass used to orphan
+        // this element still playing. Audio kept running under the new clip
+        // and nothing could stop it, since pause() only ever reaches live().
+        liveEl?.pause()
         aIsLive = !aIsLive
         return idleEl
       }
