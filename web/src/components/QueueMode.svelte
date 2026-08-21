@@ -205,18 +205,30 @@
          reel" here. Both need clip export, which is Plan 3. -->
   </section>
 {:else}
-  <VideoDeck
-    bind:this={deck}
-    src={srcFor(current.source_id)}
-    startMs={current.start_ms}
-    endMs={current.end_ms}
-    nextSrc={next ? srcFor(next.source_id) : undefined}
-    nextStartMs={next?.start_ms}
-    {speed}
-    onended={() => apply(queue.skip())}
-    onprogress={onProgress}
-    onblocked={onBlocked}
-  />
+  <!-- `relative` so the position counter can sit over the video. The counter
+       duplicates the "rally N / M" in the metadata line below on purpose: while
+       a clip is playing your eyes are on the video, and looking away to find
+       your place in a 61-rally pass is the thing this removes. -->
+  <div class="relative">
+    <VideoDeck
+      bind:this={deck}
+      src={srcFor(current.source_id)}
+      startMs={current.start_ms}
+      endMs={current.end_ms}
+      nextSrc={next ? srcFor(next.source_id) : undefined}
+      nextStartMs={next?.start_ms}
+      {speed}
+      onended={() => deck?.replay()}
+      onprogress={onProgress}
+      onblocked={onBlocked}
+    />
+    <div
+      class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
+             font-mono text-xs tabular-nums text-neutral-200"
+    >
+      {stats.index + 1} / {stats.total}
+    </div>
+  </div>
 
   <div class="mt-3 h-1 overflow-hidden rounded bg-neutral-800">
     <div
@@ -243,7 +255,7 @@
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · X reject · R replay · ← back · → skip · U undo · 1/2/3 speed · T timeline
+    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline
   </p>
 {/if}
 

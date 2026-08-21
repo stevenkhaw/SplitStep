@@ -3,6 +3,7 @@
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
   import { isEditableTarget } from '../lib/keyboard'
+  import { createToaster } from '../lib/toaster.svelte'
   import { formatTs, frameStep } from '../lib/time'
   import { clampMinGap, msToFraction, toSessionMs, zoomWindow } from '../lib/timeline'
   import type { Rally, SessionDetail } from '../lib/types'
@@ -28,6 +29,13 @@
 
   const ZOOM_SPAN_MS = 40000
   const SCORE_DEBOUNCE_MS = 150
+  const SAVED_NOTICE_MS = 1500
+
+  const toaster = createToaster()
+  // 'error' is sticky until the next successful save, unlike 'saved' which
+  // clears itself: a failed edit is not something to glance past.
+  let saveState = $state<'idle' | 'saved' | 'error'>('idle')
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   let currentId = $state(untrack(() => rallyId))
   let rallies = $state<Rally[]>(untrack(() => [...(initialRallies ?? detail.rallies)]))
@@ -208,8 +216,20 @@
     updateBoundsLocal(clamped.startMs, clamped.endMs)
     try {
       await api.setBounds(currentId, Math.round(clamped.startMs), Math.round(clamped.endMs))
+      // There is no save button -- a commit persists immediately -- so without
+      // this the user has no way to tell an edit landed. Worse, the catch
+      // below used to log to the console only, which made a FAILED save look
+      // exactly like a successful one.
+      saveState = 'saved'
+      if (saveTimer !== undefined) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        saveState = 'idle'
+        saveTimer = undefined
+      }, SAVED_NOTICE_MS)
     } catch (e) {
       console.error('failed to save bounds', e)
+      saveState = 'error'
+      toaster.push('Could not save the new boundaries — check that the server is running.')
     }
   }
 
@@ -321,10 +341,29 @@
       </span>
     </div>
 
-    <p class="font-mono text-[11px] text-neutral-500">
-      detector score — dashed line is the threshold · [ ] set in/out · , . step one frame · esc back
+    <p class="flex items-center gap-2 font-mono text-[11px] text-neutral-500">
+      <span>
+        detector score — dashed line is the threshold · [ ] set in/out · , . step one frame · esc back
+      </span>
+      <!-- Edits persist on drag-release and on [ / ], with no save button, so
+           this is the only thing telling the user an edit took. -->
+      {#if saveState === 'saved'}
+        <span class="text-green-400" role="status">✓ saved</span>
+      {:else if saveState === 'error'}
+        <span class="text-red-400" role="status">✕ not saved</span>
+      {/if}
     </p>
   </section>
+
+  {#if toaster.toasts.length > 0}
+    <div class="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 space-y-2">
+      {#each toaster.toasts as t (t.id)}
+        <div class="rounded bg-red-900/90 px-3 py-2 text-sm text-red-100 shadow-lg">
+          {t.message}
+        </div>
+      {/each}
+    </div>
+  {/if}
 {:else}
   <p class="text-sm text-neutral-400">No rallies to show.</p>
 {/if}

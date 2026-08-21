@@ -33,7 +33,12 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         await api.reject(action.rallyId, action.rejected)
         break
       case 'skip':
-        await api.reviewed(action.rallyId)
+        // Persists nothing. The right arrow is now pressed on every clip just
+        // to move through the pass, so marking each one reviewed would flip a
+        // whole session to 'reviewed' without a single judgement being made.
+        // Only star and reject count -- and the server already stamps
+        // reviewed_at inside set_star/set_rejected (COALESCE, so the first
+        // one wins), which is why dropping this call loses nothing.
         break
       case 'undo':
         // Undo can restore either flag (or both back to their prior

@@ -55,13 +55,13 @@ describe('QueueController', () => {
       previousStarred: false,
       previousRejected: false,
     })
-    expect(q.current?.id).toBe('r2')
+    expect(q.current?.id).toBe('r1') // stays put: only skip() advances
     expect(q.starredCount).toBe(1)
   })
 
-  it('advances on reject', () => {
+  it('records a reject and reports the action', () => {
     q.reject()
-    expect(q.current?.id).toBe('r2')
+    expect(q.current?.id).toBe('r1') // stays put: only skip() advances
     expect(q.rejectedCount).toBe(1)
   })
 
@@ -245,9 +245,13 @@ describe('QueueController revert (Fix 2)', () => {
   })
 
   it('reverts only the targeted rally, leaving index and other rallies untouched', () => {
-    const a1 = q.star() // r1
-    q.reject() // r2
-    q.star() // r3
+    // skip() is what advances now, so the walk is explicit
+    const a1 = q.star()
+    q.skip() // -> r2
+    q.reject()
+    q.skip() // -> r3
+    q.star()
+    q.skip() // -> past the end
     expect(q.index).toBe(3)
 
     q.revert(a1!)
@@ -268,6 +272,7 @@ describe('QueueController revert (Fix 2)', () => {
 
   it('does not consume undo history', () => {
     const a1 = q.star() // r1
+    q.skip() // -> r2
     q.reject() // r2
 
     q.revert(a1!)
@@ -288,7 +293,8 @@ describe('QueueController revert (Fix 2)', () => {
     const a2 = q.reject()
     expect(a2).toMatchObject({ previousStarred: true, previousRejected: false })
 
-    const a3 = q.skip()
+    q.skip() // leave r1, which now carries a reject
+    const a3 = q.skip() // r2, untouched
     expect(a3).toMatchObject({ previousStarred: false, previousRejected: false })
   })
 })
@@ -364,7 +370,8 @@ describe('QueueController.liveSnapshot (Finding: OverviewBand rendered stale col
   it('overwrites starred/rejected from this session live state, not the snapshot the Rally was constructed with', () => {
     const q = new QueueController([rally(1), rally(2), rally(3)])
     q.star() // r1, live-only -- the Rally objects are never mutated
-    q.reject() // now current is r2, live-only
+    q.skip() // -> r2
+    q.reject() // r2, live-only
 
     const snap = q.liveSnapshot([rally(1), rally(2), rally(3)])
     expect(snap.find((r) => r.id === 'r1')?.starred).toBe(1)
@@ -394,5 +401,65 @@ describe('QueueController.liveSnapshot (Finding: OverviewBand rendered stale col
     const q = new QueueController([rally(1, { starred: 1 })])
     const snap = q.liveSnapshot([rally(1, { starred: 1 })])
     expect(snap[0].starred).toBe(1)
+  })
+})
+
+describe('QueueController — non-advancing review (2026-08-20 review UX spec)', () => {
+  let q: QueueController
+
+  beforeEach(() => {
+    q = new QueueController([rally(1), rally(2), rally(3)])
+  })
+
+  it('leaves the cursor where it is when starring', () => {
+    q.star()
+    expect(q.index).toBe(0)
+    expect(q.current?.id).toBe('r1')
+    expect(q.isStarred('r1')).toBe(true)
+  })
+
+  it('leaves the cursor where it is when rejecting', () => {
+    q.reject()
+    expect(q.index).toBe(0)
+    expect(q.isRejected('r1')).toBe(true)
+  })
+
+  it('toggles a reject off on a second press', () => {
+    q.reject()
+    const second = q.reject()
+    expect(q.isRejected('r1')).toBe(false)
+    expect(second?.rejected).toBe(false)
+  })
+
+  it('does not clear a reject when skipping past it', () => {
+    // Before the cursor changes landed, reject() advanced immediately so this
+    // sequence was unreachable. Now `→` lands on a rally the user just
+    // rejected, and skip() hard-coded `rejected: false`.
+    q.reject()
+    const action = q.skip()
+    expect(action?.rejected).toBe(true)
+    expect(q.isRejected('r1')).toBe(true)
+  })
+
+  it('does not clear a star when skipping past it', () => {
+    q.star()
+    const action = q.skip()
+    expect(action?.starred).toBe(true)
+    expect(q.isStarred('r1')).toBe(true)
+  })
+
+  it('advances only on skip', () => {
+    q.star()
+    q.reject()
+    expect(q.index).toBe(0)
+    q.skip()
+    expect(q.index).toBe(1)
+  })
+
+  it('undoes a non-advancing reject back to its prior flags', () => {
+    q.reject()
+    q.undo()
+    expect(q.index).toBe(0)
+    expect(q.isRejected('r1')).toBe(false)
   })
 })
