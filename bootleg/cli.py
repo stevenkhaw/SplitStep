@@ -10,7 +10,11 @@ from bootleg.db import jobs as jobq
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import list_rallies, replace_rallies
 from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import get_source, set_source_preset
+from bootleg.db.sessions import (
+    get_source,
+    refresh_session_review_status,
+    set_source_preset,
+)
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
@@ -218,6 +222,13 @@ def cmd_segment(args) -> int:
         return 0
 
     replace_rallies(conn, source["session_id"], args.source_id, intervals)
+    # Mirrors api_resegment: replace_rallies inserts every new rally with
+    # reviewed_at NULL, so a session that read 'reviewed' before this call now
+    # contains nothing anyone has seen. Without the refresh the Library keeps
+    # showing it as done and never prompts for the new rallies. HTTP and
+    # terminal must not drift here, the same way setup.py::queue_setup keeps
+    # them from drifting on validation.
+    refresh_session_review_status(conn, source["session_id"])
     print(f"wrote {len(intervals)} rallies")
     print(json.dumps([dict(r) for r in list_rallies(conn, source["session_id"])],
                      indent=2)[:2000])
