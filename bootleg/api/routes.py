@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from bootleg.accel import detect_accel
+from bootleg.db import jobs as jobq
 from bootleg.db.labels import (
     FLAG_ORDER,
     VERDICTS,
@@ -41,6 +42,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
+from bootleg.export import SETS, spans_to_cut
 from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
@@ -134,6 +136,17 @@ class SetupBody(BaseModel):
     preset_id: str
 
 
+class ExportBody(BaseModel):
+    which: str
+
+    @field_validator("which")
+    @classmethod
+    def check_which(cls, v: str) -> str:
+        if v not in SETS:
+            raise ValueError(f"which must be one of {list(SETS)}")
+        return v
+
+
 def _conn(request: Request) -> sqlite3.Connection:
     return request.app.state.conns.get()
 
@@ -171,6 +184,26 @@ def api_get_session(session_id: str, request: Request):
         "sources": [dict(r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
     }
+
+
+@router.post("/api/sessions/{session_id}/export")
+def api_export(session_id: str, body: ExportBody, request: Request):
+    conn = _conn(request)
+    if get_session(conn, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    library = _library(request)
+
+    pending = spans_to_cut(library, conn, session_id, body.which)
+    for payload in pending:
+        jobq.enqueue(conn, "clip", payload)
+
+    column = "point" if body.which == "points" else "starred"
+    total = conn.execute(
+        f"SELECT COUNT(*) AS n FROM rallies WHERE session_id = ?"
+        f" AND {column} = 1 AND rejected = 0",
+        (session_id,),
+    ).fetchone()["n"]
+    return {"queued": len(pending), "already_cut": total - len(pending), "total": total}
 
 
 def _session_id_for_rally(conn, rally_id: str) -> str:
