@@ -142,15 +142,30 @@
     <div
       class="pointer-events-none absolute top-2 bottom-2 rounded bg-blue-500/30"
       style={`left:${frac(n.start_ms) * 100}%;width:${
-        Math.max(0.2, frac(n.end_ms) - frac(n.start_ms)) * 100
+        Math.max(0.2, (frac(n.end_ms) - frac(n.start_ms)) * 100)
       }%`}
     ></div>
   {/each}
 
+  <!--
+    The floors below are PERCENTAGES, so the `* 100` belongs inside the
+    Math.max, not outside it. Outside, `Math.max(0.4, fraction)` compares a
+    0..1 fraction against 0.4 and reads as a 40% minimum -- which, against
+    TimelineMode's 40 s zoom window, silently inflated every rally shorter
+    than 16 s to a fixed 16 s wide. Median rally here is 7.6 s.
+
+    That is not merely cosmetic: `nearestHandle` hit-tests the pointer
+    against frac(start_ms)/frac(end_ms), while the user aims at the box's
+    drawn edges. Inflating the width moved the drawn right handle ~21% of the
+    band away from where the hit test looked for it, far outside the 12px
+    grab radius, so grabbing it fell through to a scrub and the right handle
+    could not be dragged at all. The left edge was unaffected, since `left`
+    was always the true fraction -- which is why only the right handle broke.
+  -->
   <div
     class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-blue-400 bg-blue-400/25"
     style={`left:${frac(rally.start_ms) * 100}%;width:${
-      Math.max(0.4, frac(rally.end_ms) - frac(rally.start_ms)) * 100
+      Math.max(0.4, (frac(rally.end_ms) - frac(rally.start_ms)) * 100)
     }%`}
   >
     <div class="absolute -top-0.5 -bottom-0.5 -left-1 w-2 rounded bg-blue-400"></div>
