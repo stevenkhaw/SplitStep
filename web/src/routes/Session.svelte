@@ -154,7 +154,7 @@
   -->
   {#key rallyRevision}
     {#if mode === 'queue'}
-      <QueueMode {detail} onopen_timeline={openTimeline} />
+      <QueueMode {detail} onopen_timeline={openTimeline} startAtRallyId={focusedRallyId} />
     {:else if focusedRallyId}
       <TimelineMode
         {detail}
