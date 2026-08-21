@@ -52,6 +52,7 @@ function rally(id: string, idx: number): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    note: '',
   }
 }
 

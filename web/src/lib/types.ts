@@ -38,6 +38,7 @@ export interface Rally {
   rejected: number
   point: number
   reviewed_at: string | null
+  note: string
 }
 
 export interface SessionDetail {

@@ -54,6 +54,7 @@ function rally(overrides: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    note: '',
     ...overrides,
   }
 }
