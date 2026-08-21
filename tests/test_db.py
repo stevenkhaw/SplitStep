@@ -45,8 +45,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 2
-    assert migrate(conn) == 2
+    assert migrate(conn) == 3
+    assert migrate(conn) == 3
 
 
 def test_rally_cascades_when_source_deleted(library):
