@@ -84,6 +84,21 @@ describe('ResegmentPanel', () => {
     vi.useRealTimers()
   })
 
+  // The panel ships collapsed, and its /scores effect is gated on that --
+  // parsing features.jsonl on every session load for a panel nobody opened
+  // is the cost the collapse removes. Every test here is about what happens
+  // once it *is* open, so each one expands it first. Setting `open` and
+  // dispatching the toggle by hand rather than clicking <summary>: jsdom
+  // fires the real toggle asynchronously, which would race both flushSync
+  // and the fake timers the debounce test installs.
+  function expand() {
+    const details = target.querySelector('details')
+    if (!details) throw new Error('panel details not found')
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
+  }
+
   function slider(): HTMLInputElement {
     const el = target.querySelector('input[type="range"]')
     if (!el) throw new Error('threshold slider not found')
@@ -106,6 +121,7 @@ describe('ResegmentPanel', () => {
       props: { sources: [source('src1', 1)], rallies: [rally()], onresegmented: vi.fn() },
     })
     flushSync()
+    expand()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
     flushSync()
 
@@ -136,6 +152,7 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    expand()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined))
     flushSync()
     expect(slider().value).toBe('0.45')
@@ -183,6 +200,7 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    expand()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined))
 
     // Switch before src1's (slow) response has arrived.
@@ -213,6 +231,7 @@ describe('ResegmentPanel', () => {
       props: { sources: [source('src1', 1)], rallies: [rally()], onresegmented: vi.fn() },
     })
     flushSync()
+    expand()
     // The initial mount effect fetches scores once for the default source --
     // unrelated to the slider, so it's excluded from the burst count below.
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledTimes(1))
@@ -248,6 +267,7 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    expand()
     // The button is disabled until the initial /scores response resolves
     // the threshold (see the null-window handling) -- a real user can't
     // click it any sooner, and neither can this test.
@@ -282,6 +302,7 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    expand()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
     flushSync()
 
@@ -308,6 +329,7 @@ describe('ResegmentPanel', () => {
       },
     })
     flushSync()
+    expand()
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
     flushSync()
 

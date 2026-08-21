@@ -61,6 +61,13 @@
   // (usually) the same name -- same double-submit class ResegmentPanel's
   // `busy` already guards against.
   let busy = $state(false)
+  // Collapsed by default. This panel is a once-per-source setup step -- the
+  // wizard already walked the user through it at ingest -- so on a session
+  // you are reviewing it is chrome between you and the queue. Collapsed also
+  // means QuadCanvas never mounts (see the `{#if open}` in the template),
+  // and its frame <img> is one server-side ffmpeg extraction per distinct
+  // timestamp, so an unopened panel now costs nothing instead of an encode.
+  let open = $state(false)
 
   async function refreshPresets(): Promise<void> {
     try {
@@ -144,80 +151,88 @@
   }
 </script>
 
-<section class="mt-6 rounded-lg border border-neutral-800 p-4">
-  <h2 class="text-sm font-semibold">Play region</h2>
-  <p class="mt-1 text-xs text-neutral-400">
-    Drag the four corners to cover the area both players move in, extended to the bottom of
-    frame. Without this, adjacent public courts stay visible to detection and can be picked as
-    the far player.
-  </p>
+<details bind:open class="mt-6 rounded-lg border border-neutral-800">
+  <summary class="cursor-pointer select-none p-4 text-sm font-semibold">Play region</summary>
 
-  {#if sources.length > 1}
-    <select
-      value={sourceId}
-      onchange={(e) => onSourceChange(e.currentTarget.value)}
-      class="mt-3 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-      aria-label="source to edit"
-    >
-      {#each sources as s (s.id)}
-        <option value={s.id}>source {s.idx}</option>
-      {/each}
-    </select>
-  {/if}
+  <!-- `{#if open}` rather than letting <details> merely hide a mounted
+       subtree: hidden children still load, and QuadCanvas' frame request
+       makes the server extract a frame with ffmpeg. -->
+  {#if open}
+    <div class="px-4 pb-4">
+      <p class="text-xs text-neutral-400">
+        Drag the four corners to cover the area both players move in, extended to the bottom of
+        frame. Without this, adjacent public courts stay visible to detection and can be picked as
+        the far player.
+      </p>
 
-  {#if source}
-    <p class="mt-2 font-mono text-[11px] text-neutral-500">
-      currently assigned: {assignedLabel}
-    </p>
+      {#if sources.length > 1}
+        <select
+          value={sourceId}
+          onchange={(e) => onSourceChange(e.currentTarget.value)}
+          class="mt-3 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          aria-label="source to edit"
+        >
+          {#each sources as s (s.id)}
+            <option value={s.id}>source {s.idx}</option>
+          {/each}
+        </select>
+      {/if}
 
-    <QuadCanvas
-      frameSrc={api.frameUrl(sessionId, source.idx, frameMs)}
-      timeMs={scrubMs}
-      maxMs={maxMs}
-      fps={source.fps}
-      points={points}
-      onpoints={(p) => (points = p)}
-      onseek={seek}
-      alt="source {source.idx} at {formatTs(frameMs)}"
-    />
+      {#if source}
+        <p class="mt-2 font-mono text-[11px] text-neutral-500">
+          currently assigned: {assignedLabel}
+        </p>
 
-    <div class="mt-3 flex items-center gap-2">
-      <input
-        bind:value={name}
-        placeholder={defaultPresetName(sessionId, source.idx)}
-        class="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-        aria-label="preset name"
-      />
-      <button
-        class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
-        onclick={save}
-        disabled={busy}
-      >
-        {busy ? 'working…' : 'Save & assign'}
-      </button>
-    </div>
+        <QuadCanvas
+          frameSrc={api.frameUrl(sessionId, source.idx, frameMs)}
+          timeMs={scrubMs}
+          maxMs={maxMs}
+          fps={source.fps}
+          points={points}
+          onpoints={(p) => (points = p)}
+          onseek={seek}
+          alt="source {source.idx} at {formatTs(frameMs)}"
+        />
 
-    {#if presets.length > 0}
-      <div class="mt-3 flex flex-wrap gap-2">
-        <span class="text-xs text-neutral-500">reuse:</span>
-        {#each presets as p (p.id)}
+        <div class="mt-3 flex items-center gap-2">
+          <input
+            bind:value={name}
+            placeholder={defaultPresetName(sessionId, source.idx)}
+            class="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            aria-label="preset name"
+          />
           <button
-            class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800
-                   disabled:opacity-40"
-            onclick={() => assignExisting(p)}
+            class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
+            onclick={save}
             disabled={busy}
           >
-            {p.name}
+            {busy ? 'working…' : 'Save & assign'}
           </button>
-        {/each}
-      </div>
-    {/if}
+        </div>
 
-    {#if status}
-      <p class="mt-2 font-mono text-xs text-amber-300">{status}</p>
-    {/if}
-    {#if error}
-      <p class="mt-2 font-mono text-xs text-red-300">{error}</p>
-    {/if}
+        {#if presets.length > 0}
+          <div class="mt-3 flex flex-wrap gap-2">
+            <span class="text-xs text-neutral-500">reuse:</span>
+            {#each presets as p (p.id)}
+              <button
+                class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800
+                       disabled:opacity-40"
+                onclick={() => assignExisting(p)}
+                disabled={busy}
+              >
+                {p.name}
+              </button>
+            {/each}
+          </div>
+        {/if}
+
+        {#if status}
+          <p class="mt-2 font-mono text-xs text-amber-300">{status}</p>
+        {/if}
+        {#if error}
+          <p class="mt-2 font-mono text-xs text-red-300">{error}</p>
+        {/if}
+      {/if}
+    </div>
   {/if}
-</section>
+</details>

@@ -72,6 +72,17 @@ describe('QuadEditor frame scrubbing', () => {
       props: { sessionId: 's1', sources: [s], onassigned: vi.fn() },
     })
     flushSync()
+    // The panel ships collapsed, and collapsed means QuadCanvas is not
+    // mounted at all -- no frame <img>, so no ffmpeg extraction on the
+    // server for a panel nobody opened. Every scrubbing test below therefore
+    // has to expand it first. Setting `open` and dispatching the toggle by
+    // hand rather than clicking <summary>: jsdom fires the real toggle event
+    // asynchronously, which would race flushSync.
+    const details = target.querySelector('details')
+    if (!details) throw new Error('panel details not found')
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
   }
 
   function frameAtMs(): number {

@@ -96,6 +96,20 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     instance = undefined
   })
 
+  // Both setup panels below the queue ship collapsed, and QuadEditor renders
+  // nothing at all until opened (its frame <img> costs a server-side ffmpeg
+  // extraction). The keystroke this test is about only exists once the panel
+  // is open, so expand every panel first. `open` + a hand-dispatched toggle
+  // rather than clicking <summary>, because jsdom fires the real toggle
+  // asynchronously and it would race flushSync.
+  function expandPanels() {
+    for (const details of target.querySelectorAll('details')) {
+      details.open = true
+      details.dispatchEvent(new Event('toggle'))
+    }
+    flushSync()
+  }
+
   function presetNameInput(): HTMLInputElement {
     const el = target.querySelector('input[aria-label="preset name"]')
     if (!el) throw new Error('preset-name input not found')
@@ -121,6 +135,7 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     instance = mount(Session, { target, props: { id: 's1' } })
     flushSync()
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 2/))
+    expandPanels()
 
     const input = presetNameInput()
     input.focus()

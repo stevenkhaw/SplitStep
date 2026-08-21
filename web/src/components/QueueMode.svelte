@@ -5,6 +5,7 @@
   import { isEditableTarget } from '../lib/keyboard'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
+  import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { QueueAction } from '../lib/queue'
@@ -69,6 +70,11 @@
   let speed = $state(1)
   let deck = $state<VideoDeck>()
   let progressBar = $state<HTMLDivElement>()
+  let scrubTrack = $state<HTMLDivElement>()
+  // Plain let, not $state: only the pointer handlers read it, and a drag
+  // that re-rendered the panel on every pointermove is exactly what the
+  // direct-to-DOM painting below exists to avoid.
+  let scrubbing = false
 
   // `version` is the dependency that forces a re-read after a mutation --
   // QueueController is a plain class, so Svelte cannot track it directly:
@@ -175,7 +181,53 @@
   function onProgress(fraction: number) {
     // Written straight to the DOM. Routing a 60Hz update through Svelte state
     // would re-render the whole panel on every frame.
+    paintScrub(fraction)
+  }
+
+  function paintScrub(fraction: number) {
     if (progressBar) progressBar.style.transform = `scaleX(${fraction})`
+  }
+
+  function scrubFraction(e: PointerEvent): number {
+    if (!scrubTrack) return 0
+    const rect = scrubTrack.getBoundingClientRect()
+    return (e.clientX - rect.left) / rect.width
+  }
+
+  // Shared by click-to-seek and every pointermove of a drag, mirroring label
+  // mode's bar. Seek first, then paint immediately instead of waiting for
+  // VideoDeck's next onprogress tick -- that is ~16ms away, which a drag
+  // (firing far faster) reads as lag on the one control the hand is on.
+  //
+  // Scrubbing deliberately does not pause: the clip keeps running under the
+  // playhead, so releasing mid-rally leaves queue mode in the state it was
+  // already in rather than needing a resume rule.
+  function seekToFraction(fraction: number) {
+    if (!current) return
+    // Clamped inside the rally's span by fractionToScrubMs. Overshooting the
+    // track is routine once the pointer has capture, and an unclamped seek
+    // would put the next rally's footage on screen -- the exact thing
+    // VideoDeck's out-point guard exists to prevent.
+    const ms = fractionToScrubMs(fraction, current.start_ms, current.end_ms)
+    deck?.seekTo(ms)
+    paintScrub(scrubMsToFraction(ms, current.start_ms, current.end_ms))
+  }
+
+  function onScrubDown(e: PointerEvent) {
+    if (!scrubTrack) return
+    scrubbing = true
+    scrubTrack.setPointerCapture(e.pointerId)
+    seekToFraction(scrubFraction(e))
+  }
+
+  function onScrubMove(e: PointerEvent) {
+    if (!scrubbing) return
+    seekToFraction(scrubFraction(e))
+  }
+
+  function endScrub(e: PointerEvent) {
+    scrubbing = false
+    scrubTrack?.releasePointerCapture(e.pointerId)
   }
 
   function onBlocked() {
@@ -326,10 +378,35 @@
     </div>
   </div>
 
-  <div class="mt-3 h-1 overflow-hidden rounded bg-neutral-800">
+  <!--
+    Taller than the h-1 indicator this replaced, and cursor-ew-resize, because
+    it now has to read as draggable at a glance. pointerdown/pointermove drive
+    both click-to-seek and the drag rather than onclick -- matching label mode
+    and ZoomBand, and it is what lets a plain tabindex="0" + role="slider"
+    satisfy svelte-check's a11y rules with no keyboard handler, since
+    click-events-have-key-events only fires for onclick.
+
+    No arrow-key seeking here on purpose: ArrowLeft/Right are back/next rally
+    in queue mode, and a second meaning that depended on which element had
+    focus is worse than none.
+  -->
+  <div
+    bind:this={scrubTrack}
+    class="relative mt-3 h-2 cursor-ew-resize overflow-hidden rounded bg-neutral-800"
+    onpointerdown={onScrubDown}
+    onpointermove={onScrubMove}
+    onpointerup={endScrub}
+    onpointercancel={endScrub}
+    role="slider"
+    tabindex="0"
+    aria-label="scrub within rally"
+    aria-valuemin={current.start_ms}
+    aria-valuemax={current.end_ms}
+    aria-valuenow={current.start_ms}
+  >
     <div
       bind:this={progressBar}
-      class="h-full origin-left bg-blue-500"
+      class="h-full origin-left rounded bg-blue-500"
       style="transform: scaleX(0)"
     ></div>
   </div>
