@@ -50,6 +50,14 @@ def add_label(
     Never updates. Re-labelling the same span appends another row and
     `latest_labels` resolves which one is current, so a corrected judgement
     never erases the one it corrected.
+
+    Deliberately dumb: this function does not look up what a previous row for
+    the same span already said, so a caller that always passes verdict=None
+    (or always true_start_ms=None) will silently blank that field out of the
+    latest row every time it runs. Carrying the other half of a label forward
+    is the caller's job -- see `record_boundary_correction` below and
+    `api_label` in `bootleg/api/routes.py`, which is why `latest_label_for_span`
+    exists.
     """
     if verdict is not None and verdict not in VERDICTS:
         raise ValueError(f"unknown verdict: {verdict!r}")
@@ -66,23 +74,44 @@ def add_label(
     return label_id
 
 
-def latest_labels(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
-    """The current judgement for each distinct span of a source.
+# Shared by latest_labels and latest_label_for_span so the "newest row per
+# span" window function has one definition. The tie-break on `rowid DESC` is
+# not decoration: two labels written inside the same clock tick share a
+# `labelled_at`, and without it sqlite would be free to return either. Higher
+# rowid is the later INSERT, which is the later judgement.
+_LATEST_PER_SPAN = (
+    "SELECT *, ROW_NUMBER() OVER ("
+    "         PARTITION BY span_start_ms, span_end_ms"
+    "         ORDER BY labelled_at DESC, rowid DESC) AS rn"
+    "  FROM rally_labels WHERE source_id = ?"
+)
 
-    The tie-break on `rowid DESC` is not decoration: two labels written inside
-    the same clock tick share a `labelled_at`, and without it sqlite would be
-    free to return either. Higher rowid is the later INSERT, which is the
-    later judgement.
-    """
+
+def latest_labels(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
+    """The current judgement for each distinct span of a source."""
     return conn.execute(
-        "SELECT * FROM ("
-        "  SELECT *, ROW_NUMBER() OVER ("
-        "           PARTITION BY span_start_ms, span_end_ms"
-        "           ORDER BY labelled_at DESC, rowid DESC) AS rn"
-        "    FROM rally_labels WHERE source_id = ?"
-        ") WHERE rn = 1 ORDER BY span_start_ms",
+        f"SELECT * FROM ({_LATEST_PER_SPAN}) WHERE rn = 1 ORDER BY span_start_ms",
         (source_id,),
     ).fetchall()
+
+
+def latest_label_for_span(
+    conn: sqlite3.Connection, source_id: str, span_start_ms: int, span_end_ms: int
+) -> sqlite3.Row | None:
+    """The current latest row for one exact span, or None if never labelled.
+
+    Exists so a writer can carry the other half of a label forward onto its
+    own new row -- see `record_boundary_correction` and `api_label` in
+    `bootleg/api/routes.py`. Without this lookup, whichever of the two
+    writers runs second has no way to know a row already exists for this
+    span, and its own row (which always leaves the other writer's field NULL)
+    would be the only one `latest_labels` ever returns.
+    """
+    return conn.execute(
+        f"SELECT * FROM ({_LATEST_PER_SPAN}) WHERE rn = 1"
+        " AND span_start_ms = ? AND span_end_ms = ?",
+        (source_id, span_start_ms, span_end_ms),
+    ).fetchone()
 
 
 def record_boundary_correction(
@@ -100,10 +129,16 @@ def record_boundary_correction(
     Returns the new label id, or None when the saved span equals the
     detector's -- a drag that went nowhere is not a correction.
 
-    `verdict` stays NULL on purpose. Dragging the handles asserts that the
-    edges were wrong and supplies the right ones; it does not assert that the
-    span contains a rally, and defaulting it to 'clean' would fabricate a
-    judgement the reviewer never made.
+    This call never asserts a verdict of its own -- dragging the handles
+    supplies corrected edges, not a judgement that the span contains a rally,
+    and defaulting to 'clean' would fabricate one the reviewer never made.
+    But if a verdict was already recorded for this exact span (label mode ran
+    first), it carries that verdict forward onto this new row rather than
+    leaving it NULL. Without this, this row -- append-only, so it becomes the
+    one `latest_labels` returns -- would silently erase the earlier verdict
+    from every reader (H1, docs/superpowers/specs/2026-08-21-rally-labelling-
+    design.md). The mirror carry-forward, for the opposite write order, lives
+    in `api_label` (bootleg/api/routes.py).
     """
     if (true_start_ms, true_end_ms) == (det_start_ms, det_end_ms):
         return None
@@ -120,8 +155,17 @@ def record_boundary_correction(
     elif true_end_ms > det_end_ms:
         flags.append("end_early")
 
+    # boundary_flags is NOT carried forward the same way: it is a pure
+    # function of (true_start_ms, true_end_ms, det_start_ms, det_end_ms), all
+    # four of which this call already has, so it is always recomputed fresh
+    # above rather than copied from `prior`. Copying it would let a stale or
+    # manually-guessed flag from an earlier row outlive a measurement that
+    # just proved it wrong.
+    prior = latest_label_for_span(conn, source_id, det_start_ms, det_end_ms)
+    verdict = prior["verdict"] if prior is not None else None
+
     return add_label(
         conn, source_id=source_id, span_start_ms=det_start_ms, span_end_ms=det_end_ms,
-        verdict=None, boundary_flags=flags,
+        verdict=verdict, boundary_flags=flags,
         true_start_ms=true_start_ms, true_end_ms=true_end_ms, rally_id=rally_id,
     )

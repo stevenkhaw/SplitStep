@@ -39,7 +39,7 @@ def test_migrate_creates_all_tables(library):
     }
     assert {
         "sessions", "sources", "rallies", "court_presets",
-        "reels", "reel_items", "jobs",
+        "reels", "reel_items", "jobs", "rally_labels",
     } <= names
 
 

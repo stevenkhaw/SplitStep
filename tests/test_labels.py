@@ -5,6 +5,7 @@ import pytest
 from bootleg.db.labels import (
     add_label,
     format_flags,
+    latest_label_for_span,
     latest_labels,
     parse_flags,
     record_boundary_correction,
@@ -177,3 +178,43 @@ def test_record_boundary_correction_flags_only_the_edge_that_moved(conn, seeded)
     )
     row = latest_labels(conn, seeded["source_id"])[0]
     assert parse_flags(row["boundary_flags"]) == ["end_late"]
+
+
+def test_latest_label_for_span_returns_none_when_never_labelled(conn, seeded):
+    assert latest_label_for_span(conn, seeded["source_id"], 1000, 5000) is None
+
+
+def test_latest_label_for_span_returns_the_latest_row_for_that_exact_span(conn, seeded):
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="not_play")
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="clean")
+    # A different span for the same source must not be picked up.
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=9000,
+              span_end_ms=14000, verdict="unsure")
+
+    row = latest_label_for_span(conn, seeded["source_id"], 1000, 5000)
+    assert row["verdict"] == "clean"
+
+
+def test_record_boundary_correction_carries_an_existing_verdict_forward(conn, seeded):
+    # H1: label mode ran first and wrote a verdict-only row for this exact
+    # span. The drag must not leave verdict NULL on the row it appends, or
+    # the verdict silently drops out of every reader (latest_labels returns
+    # only the newest row per span).
+    add_label(conn, source_id=seeded["source_id"], span_start_ms=1000,
+              span_end_ms=5000, verdict="partly")
+
+    record_boundary_correction(
+        conn, rally_id="r1", source_id=seeded["source_id"],
+        det_start_ms=1000, det_end_ms=5000,
+        true_start_ms=1400, true_end_ms=4600,
+    )
+
+    rows = latest_labels(conn, seeded["source_id"])
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "partly"
+    assert (rows[0]["true_start_ms"], rows[0]["true_end_ms"]) == (1400, 4600)
+    # boundary_flags is still freshly derived from this drag's sign, not
+    # copied from the verdict-only row (which had none to copy anyway).
+    assert parse_flags(rows[0]["boundary_flags"]) == ["start_early", "end_late"]

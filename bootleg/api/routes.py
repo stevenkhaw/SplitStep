@@ -13,6 +13,7 @@ from bootleg.db.labels import (
     FLAG_ORDER,
     VERDICTS,
     add_label,
+    latest_label_for_span,
     latest_labels,
     parse_flags,
     record_boundary_correction,
@@ -255,6 +256,16 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
 def api_label(rally_id: str, body: LabelBody, request: Request):
     conn = _conn(request)
     span = _rally_det_span(conn, rally_id)
+    # Mirror of the carry-forward in record_boundary_correction: this route
+    # always writes true_start_ms/true_end_ms=NULL, so without copying a
+    # boundary correction already on record for this exact span forward, the
+    # append-only row this call writes -- being the newest -- would become
+    # the one latest_labels returns, silently erasing the correction from
+    # every reader (H1, docs/superpowers/specs/2026-08-21-rally-labelling-
+    # design.md). boundary_flags is not carried the same way: it comes
+    # straight from the request, which is the reviewer's live, explicit
+    # choice for this judgement, not something to infer from an older row.
+    prior = latest_label_for_span(conn, span["source_id"], span["det_start_ms"], span["det_end_ms"])
     label_id = add_label(
         conn,
         source_id=span["source_id"],
@@ -262,6 +273,8 @@ def api_label(rally_id: str, body: LabelBody, request: Request):
         span_end_ms=span["det_end_ms"],
         verdict=body.verdict,
         boundary_flags=body.boundary_flags,
+        true_start_ms=prior["true_start_ms"] if prior is not None else None,
+        true_end_ms=prior["true_end_ms"] if prior is not None else None,
         rally_id=rally_id,
     )
     # No session_status refresh: a label is a note about the detector, not a

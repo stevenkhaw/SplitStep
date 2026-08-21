@@ -160,15 +160,45 @@ def test_a_boundary_drags_label_survives_a_failed_bounds_write(client, conn, see
     assert (row["start_ms"], row["end_ms"]) == (1000, 5000)
 
 
-def test_a_boundary_drag_does_not_overwrite_an_existing_verdict(client, conn, seeded):
-    # Two rows for one span: the verdict from label mode and the correction
-    # from the drag. latest_labels returns the drag (it is later), and the
-    # verdict row is still in the table for the exporter to find.
+def test_a_boundary_drag_carries_the_existing_verdict_forward(client, conn, seeded):
+    # Judge, then trim. latest_labels returns exactly one row per span (the
+    # newest), so the drag's row is the only one any reader -- the exporter,
+    # the scorer, LabelController -- will ever see for this span. If that row
+    # doesn't carry the verdict forward, the judgement silently vanishes: not
+    # "still in the table for the exporter to find" (the old, false claim
+    # here), since cmd_labels_export reads latest_labels same as everyone
+    # else, not the raw table.
     rally = _first_rally(conn)
     client.post(f"/api/rallies/{rally['id']}/label",
                 json={"verdict": "clean", "boundary_flags": []})
     client.post(f"/api/rallies/{rally['id']}/bounds",
                 json={"start_ms": 1400, "end_ms": 4600})
 
+    # Append-only still holds -- both writes landed as separate rows.
     total = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
     assert total == 2
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "clean"
+    assert rows[0]["true_start_ms"] == 1400
+    assert rows[0]["true_end_ms"] == 4600
+
+
+def test_a_label_carries_an_existing_boundary_correction_forward(client, conn, seeded):
+    # Mirror case: trim, then judge. Same requirement in the other order --
+    # whichever write happens second must not erase the first's half.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": []})
+
+    total = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+    assert total == 2
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "clean"
+    assert rows[0]["true_start_ms"] == 1400
+    assert rows[0]["true_end_ms"] == 4600
