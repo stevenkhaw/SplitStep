@@ -288,8 +288,16 @@ def api_source_labels(source_id: str, request: Request):
     conn = _conn(request)
     if get_source(conn, source_id) is None:
         raise HTTPException(status_code=404, detail="Source not found")
+    # source_id rides along so a caller merging labels from several sources
+    # (LabelMode fetches one list per source and flattens them) can key on
+    # (source_id, span) rather than span alone -- two independent sources'
+    # timelines both start at 0 and segment() lands every edge on a fixed
+    # sample grid, so identical (span_start_ms, span_end_ms) pairs across
+    # sources of one session are entirely possible, and a span-only key would
+    # let one source's verdict render on another source's rally (M2).
     return [
         {
+            "source_id": r["source_id"],
             "span_start_ms": r["span_start_ms"],
             "span_end_ms": r["span_end_ms"],
             "verdict": r["verdict"],

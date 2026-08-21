@@ -22,6 +22,7 @@ function rally(idx: number, over: Partial<Rally> = {}): Rally {
 
 function record(over: Partial<LabelRecord> = {}): LabelRecord {
   return {
+    source_id: 'src',
     span_start_ms: 10000,
     span_end_ms: 18000,
     verdict: 'clean',
@@ -131,6 +132,27 @@ describe('LabelController', () => {
       [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
     )
     expect(seeded.currentVerdict).toBeNull()
+  })
+
+  it('does not seed a label from one source onto another source\'s rally at the same span', () => {
+    // M2 regression. Sources are independent clips whose timelines each
+    // start at 0, and segment() places every edge on a fixed sample grid,
+    // so two sources can produce rallies with an identical
+    // (det_start_ms, det_end_ms) pair -- guaranteed at the start edge for
+    // any rally within the start pad, since the clamp puts both at 0.
+    // LabelMode fetches labels per source and flattens them into one list
+    // before handing it to the controller, so a span-only key would let
+    // source A's verdict render on source B's rally of the same span --
+    // exactly what exact-span matching (see the constructor doc comment)
+    // exists to prevent, reintroduced through a different door.
+    const rallyA = rally(1, { id: 'rA', source_id: 'srcA', det_start_ms: 0, det_end_ms: 8000 })
+    const rallyB = rally(1, { id: 'rB', source_id: 'srcB', det_start_ms: 0, det_end_ms: 8000 })
+    const labelA = record({ source_id: 'srcA', span_start_ms: 0, span_end_ms: 8000, verdict: 'clean' })
+
+    const seeded = new LabelController([rallyA, rallyB], [labelA])
+    expect(seeded.currentVerdict).toBe('clean') // rA: source A's own label
+    seeded.next()
+    expect(seeded.currentVerdict).toBeNull() // rB: must not inherit it
   })
 
   it('ignores a verdict-less boundary row when seeding', () => {

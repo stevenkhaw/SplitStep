@@ -33,8 +33,18 @@ interface HistoryEntry {
   flags: BoundaryFlag[]
 }
 
-function spanKey(startMs: number, endMs: number): string {
-  return `${startMs}:${endMs}`
+// Keyed on (source_id, span), not span alone. Sources are independent clips
+// whose timelines each start at 0, and segment() places every edge on a
+// fixed sample grid, so two sources can produce identical
+// (det_start_ms, det_end_ms) pairs -- guaranteed at the start edge for any
+// rally within the start pad, since the clamp puts both at 0. LabelMode
+// fetches labels per source and flattens them into one list before handing
+// it to this controller, so a span-only key let source A's verdict render
+// on source B's rally of the same span (M2) -- precisely the collision
+// exact-span matching exists to prevent, reintroduced through a different
+// door.
+function spanKey(sourceId: string, startMs: number, endMs: number): string {
+  return `${sourceId}:${startMs}:${endMs}`
 }
 
 /**
@@ -66,10 +76,12 @@ export class LabelController {
   constructor(rallies: Rally[], existing: LabelRecord[]) {
     this.#rallies = rallies
     const bySpan = new Map<string, LabelRecord>()
-    for (const rec of existing) bySpan.set(spanKey(rec.span_start_ms, rec.span_end_ms), rec)
+    for (const rec of existing) {
+      bySpan.set(spanKey(rec.source_id, rec.span_start_ms, rec.span_end_ms), rec)
+    }
 
     for (const r of rallies) {
-      const rec = bySpan.get(spanKey(r.det_start_ms, r.det_end_ms))
+      const rec = bySpan.get(spanKey(r.source_id, r.det_start_ms, r.det_end_ms))
       // A verdict-less row is a boundary correction from a drag, not a
       // judgement -- rendering it as one would invent a verdict the reviewer
       // never gave.

@@ -66,6 +66,7 @@ export interface Job {
 }
 
 export interface LabelRecord {
+  source_id: string
   span_start_ms: number
   span_end_ms: number
   verdict: 'clean' | 'not_play' | 'partly' | 'unsure' | null

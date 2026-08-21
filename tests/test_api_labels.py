@@ -47,6 +47,10 @@ def test_label_route_anchors_to_the_detector_span_not_the_edited_bounds(client, 
     # det span, not the 1400/4600 the reviewer dragged to.
     assert verdict_rows[0]["span_start_ms"] == 1000
     assert verdict_rows[0]["span_end_ms"] == 5000
+    # M2: source_id must ride along so a caller merging labels from several
+    # sources of one session can key on (source_id, span) rather than span
+    # alone -- two sources' rallies can land on an identical span.
+    assert verdict_rows[0]["source_id"] == seeded["source_id"]
 
 
 def test_label_route_stores_boundary_flags(client, conn, seeded):
