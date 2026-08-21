@@ -9,12 +9,26 @@ from typing import Self
 from bootleg.config import Library
 from bootleg.db import jobs as jobq
 from bootleg.db.schema import connect, migrate
+from bootleg.media.transcode import ProgressFn
 
 log = logging.getLogger(__name__)
 
-Handler = Callable[[Library, dict], None]
+# Handlers are handed a reporter rather than their own job id: a handler
+# that knew the id would also have to know the queue's schema to use it, and
+# the only thing it actually has to say is "this fraction of me is done".
+# The CLI and the tests call handlers directly, with no row behind them, so
+# every handler defaults this to `no_progress` and none of them branch on it.
+Handler = Callable[[Library, dict, ProgressFn], None]
 POLL_SECONDS = 1.0
 HEARTBEAT_SECONDS = 30.0
+
+
+def no_progress(_fraction: float) -> None:
+    """The reporter a handler gets when nothing is listening.
+
+    A no-op rather than None so no handler has to guard the call, and
+    so a direct caller (the CLI, a test) never has to invent one.
+    """
 
 
 class _Heartbeat:
@@ -81,9 +95,16 @@ class Worker:
             jobq.finish(self.conn, job["id"], error=f"Unknown job type: {job['type']}")
             return True
 
+        def report(fraction: float) -> None:
+            # Same connection the heartbeat thread ticks, and set_progress
+            # writes heartbeat_at too -- so a handler that reports at all
+            # cannot be mistaken for an abandoned job even if the timer
+            # thread were to die.
+            jobq.set_progress(self.conn, job["id"], fraction)
+
         try:
             with _Heartbeat(self.conn, job["id"], self.heartbeat_interval_s):
-                handler(self.library, json.loads(job["payload"]))
+                handler(self.library, json.loads(job["payload"]), report)
         except Exception:
             jobq.finish(self.conn, job["id"], error=traceback.format_exc(limit=6))
             log.exception("job %s failed", job["id"])

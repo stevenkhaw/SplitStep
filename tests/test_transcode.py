@@ -235,3 +235,64 @@ def test_make_proxy_output_carries_no_rotation_side_data_at_nonzero_rotation(tmp
         capture_output=True, text=True, check=True,
     ).stdout
     assert "rotation=" not in side_data
+
+
+# -- progress reporting ------------------------------------------------------
+
+
+def test_run_ffmpeg_reports_progress_against_the_output_duration(tmp_path):
+    """A 4K clip encode runs for minutes, and until now the only feedback
+    anywhere was the jobs badge's "N jobs running" -- true from the first
+    second to the last. ffmpeg already emits its position; this reads it.
+    """
+    out = tmp_path / "out.mp4"
+    seen: list[float] = []
+    run_ffmpeg(
+        ["-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)],
+        on_progress=seen.append, total_ms=2000,
+    )
+    assert out.exists()
+    assert seen, "ffmpeg's -progress stream produced nothing"
+    assert all(0.0 <= f <= 1.0 for f in seen), seen
+    assert seen == sorted(seen), f"progress went backwards: {seen}"
+    # ffmpeg's final block reports the full output duration, so a completed
+    # encode must land on exactly 1.0 -- a bar that stops at 0.97 and then
+    # vanishes reads as a failure.
+    assert seen[-1] == 1.0
+
+
+def test_run_ffmpeg_reports_progress_at_most_once_per_percent(tmp_path):
+    """The callback ends up committing a row per call. ffmpeg emits a
+    progress block far more often than a percent changes, and a commit per
+    block would put hundreds of writes through the worker's connection --
+    the one the heartbeat thread shares -- for a bar nobody can see move.
+    """
+    out = tmp_path / "out.mp4"
+    seen: list[float] = []
+    run_ffmpeg(
+        ["-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)],
+        on_progress=seen.append, total_ms=2000,
+    )
+    assert len(seen) == len({round(f, 2) for f in seen})
+
+
+def test_run_ffmpeg_with_progress_still_raises_with_stderr_attached(tmp_path):
+    """The streaming path must fail exactly like the plain one. ffmpeg's
+    stderr is what lands verbatim in jobs.error, and a zero-byte clip that
+    looks like a decode bug three days later is what losing it costs.
+    """
+    with pytest.raises(TranscodeError, match="ffmpeg failed") as exc:
+        run_ffmpeg(
+            ["-i", str(tmp_path / "does-not-exist.mp4"), str(tmp_path / "out.mp4")],
+            on_progress=lambda _f: None, total_ms=1000,
+        )
+    assert "No such file or directory" in str(exc.value)
+
+
+def test_run_ffmpeg_without_a_callback_is_unchanged(tmp_path):
+    out = tmp_path / "out.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)])
+    assert out.exists()

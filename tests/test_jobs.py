@@ -97,7 +97,7 @@ def test_set_progress_updates_the_row(conn):
 
 def test_worker_run_once_dispatches_to_the_handler(library, conn):
     seen = []
-    worker = Worker(library, handlers={"ingest": lambda lib, payload: seen.append(payload)})
+    worker = Worker(library, handlers={"ingest": lambda lib, payload, _progress: seen.append(payload)})
     enqueue(conn, "ingest", {"path": "x.mov"})
 
     assert worker.run_once() is True
@@ -110,7 +110,7 @@ def test_worker_run_once_returns_false_when_idle(library):
 
 
 def test_worker_records_handler_exceptions_as_failures(library, conn):
-    def boom(lib, payload):
+    def boom(lib, payload, _progress):
         raise ValueError("nope")
 
     worker = Worker(library, handlers={"ingest": boom})
@@ -143,7 +143,7 @@ def test_worker_heartbeats_a_running_job_on_a_timer(library, conn):
     job_id = enqueue(conn, "ingest", {})
     seen: list[str | None] = []
 
-    def slow_handler(_lib, _payload):
+    def slow_handler(_lib, _payload, _progress):
         for _ in range(4):
             time.sleep(0.03)
             row = conn.execute(
@@ -162,7 +162,7 @@ def test_worker_heartbeats_a_running_job_on_a_timer(library, conn):
 
 def test_heartbeat_thread_stops_when_the_handler_raises(library, conn):
     """The heartbeat timer must not leak a thread on the failure path either."""
-    def boom(_lib, _payload):
+    def boom(_lib, _payload, _progress):
         time.sleep(0.03)
         raise ValueError("boom")
 
@@ -293,3 +293,38 @@ def test_has_pending_job_does_not_match_on_a_source_id_prefix(conn):
 
 def test_has_pending_job_false_when_the_queue_is_empty(conn):
     assert has_pending_job(conn, "detect", "src-1") is False
+
+
+def test_worker_records_a_handlers_progress_on_the_job_row(library, conn):
+    """The wiring that makes jobs.progress mean something. The handler is
+    handed a reporter and knows nothing about job ids or the queue; the
+    worker is the only place that knows which row is being worked on.
+    """
+    job_id = enqueue(conn, "ingest", {})
+
+    def handler(_lib, _payload, progress):
+        progress(0.25)
+        progress(1.0)
+
+    worker = Worker(library, {"ingest": handler})
+    assert worker.run_once() is True
+    row = conn.execute("SELECT status, progress FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["status"] == "done"
+    assert row["progress"] == pytest.approx(1.0)
+
+
+def test_worker_progress_is_visible_while_the_job_is_still_running(library, conn):
+    """A fraction only written once the job finishes is a fraction nobody
+    ever sees. Each report commits, so a reader on another connection --
+    which is every API request -- can watch it move."""
+    job_id = enqueue(conn, "ingest", {})
+    mid_run: list[float] = []
+
+    def handler(_lib, _payload, progress):
+        progress(0.5)
+        mid_run.append(conn.execute(
+            "SELECT progress FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()["progress"])
+
+    Worker(library, {"ingest": handler}).run_once()
+    assert mid_run == [pytest.approx(0.5)]

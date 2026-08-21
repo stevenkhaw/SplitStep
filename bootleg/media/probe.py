@@ -20,6 +20,7 @@ class MediaInfo:
     has_audio: bool
     codec_name: str                     # e.g. "h264", "hevc" -- ffprobe's video stream codec_name
     rotation_deg: int                   # clockwise degrees to apply to the coded frame
+    sar: float                          # sample (pixel) aspect ratio; 1.0 for square pixels
 
 
 def _pick_fps(*rates: str | None) -> float:
@@ -41,6 +42,25 @@ def _pick_fps(*rates: str | None) -> float:
             continue
         return float(frac)
     return 0.0
+
+
+def _sar(video: dict) -> float:
+    """The sample (pixel) aspect ratio, reading anything unusable as square.
+
+    ffprobe spells an unrecorded SAR "0:1", and omits the field entirely for
+    some containers. Both mean "assume square pixels", which is what every
+    player does -- and it matters more than usual here, because `make_clip`
+    multiplies a scale target by this number to conform an anamorphic source:
+    a literal 0.0 would ask ffmpeg for a zero-width frame and fail the encode.
+    """
+    raw = video.get("sample_aspect_ratio")
+    if not raw:
+        return 1.0
+    try:
+        frac = Fraction(str(raw).replace(":", "/"))
+    except (ZeroDivisionError, ValueError):
+        return 1.0
+    return float(frac) if frac > 0 else 1.0
 
 
 def _display_rotation(video: dict) -> int:
@@ -162,4 +182,5 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
         codec_name=video.get("codec_name", ""),
         rotation_deg=_display_rotation(video),
+        sar=_sar(video),
     )

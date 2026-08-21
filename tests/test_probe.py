@@ -174,3 +174,45 @@ def test_recorded_at_falls_back_when_the_apple_tag_is_malformed():
         "com.apple.quicktime.creationdate": "garbage",
     }
     assert _recorded_at(tags) is not None
+
+
+def test_probe_reads_square_pixels_as_a_sar_of_one(sample_video):
+    assert probe(sample_video).sar == 1.0
+
+
+def test_probe_reads_a_non_square_sample_aspect_ratio(tmp_path):
+    """Anamorphic sources exist, and their SAR is what libx264 writes into
+    the SPS VUI -- a codec parameter the concat demuxer compares. make_clip
+    needs the number to conform it away, so probe has to report it."""
+    out = tmp_path / "anamorphic.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=1",
+         "-vf", "setsar=2/1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)],
+        check=True, capture_output=True,
+    )
+    assert probe(out).sar == 2.0
+
+
+def test_probe_reports_an_unknown_sample_aspect_ratio_as_square(tmp_path, monkeypatch):
+    """ffprobe spells "no SAR recorded" as "0:1" -- and a naive parse of that
+    is 0.0, which would multiply a de-anamorphizing scale's target width to
+    zero and fail the encode outright. Unknown means square here, which is
+    also what every player assumes.
+    """
+    real_run = subprocess.run
+
+    def sar_free(args, **kwargs):
+        proc = real_run(args, **kwargs)
+        if args and args[0] == "ffprobe":
+            proc.stdout = proc.stdout.replace('"sample_aspect_ratio": "1:1"',
+                                              '"sample_aspect_ratio": "0:1"')
+        return proc
+
+    monkeypatch.setattr(subprocess, "run", sar_free)
+    src = tmp_path / "unknown-sar.mp4"
+    real_run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=1",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    assert probe(src).sar == 1.0

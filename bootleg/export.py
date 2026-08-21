@@ -1,10 +1,11 @@
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from bootleg.config import Library
 from bootleg.db.jobs import has_pending_clip
 from bootleg.db.sessions import get_source
-from bootleg.media.clips import clip_relpath
+from bootleg.media.clips import clip_relpath, parse_clip_name
 
 SETS = ("points", "starred")
 
@@ -117,3 +118,114 @@ def plan_export(
     return ExportPlan(
         pending=pending, already_cut=already_cut, in_flight=in_flight, unavailable=unavailable
     )
+
+
+@dataclass(frozen=True)
+class OrphanClip:
+    """A clip file no rally's current bounds resolve to.
+
+    Everything here is read back out of the filename rather than looked up:
+    span-derived naming is what makes an orphan self-identifying, so a
+    stranded file can be reported ("source 01, 9.0s-14.0s, 38 MB") without
+    a row anywhere to explain it.
+    """
+
+    path: Path
+    source_idx: int
+    start_ms: int
+    end_ms: int
+    size_bytes: int
+
+
+def find_orphan_clips(
+    library: Library, conn: sqlite3.Connection, session_id: str
+) -> list[OrphanClip]:
+    """Clips in this session's `clips/` that no rally's current bounds claim.
+
+    The inverse of `plan_export`, and the other half of what span-derived
+    naming buys. Export asks "does the file this rally implies exist"; this
+    asks "does a rally imply this file". A re-segment answers no for every
+    span that moved, and nothing else enumerates what it left behind -- at
+    roughly 2 MB per second of clip, a few threshold sweeps is real dead
+    weight on the drive.
+
+    Membership is by name and nothing else, which is why staleness needs no
+    bookkeeping: a rally whose bounds moved simply stops naming the file it
+    used to. Note the flags play no part -- a clip whose rally was rejected
+    or un-pointed after it was cut is not stranded, because a rally still
+    holds those bounds and the verdict is one keystroke from changing back.
+
+    `iterdir()` rather than `glob("*.mp4")`: the glob would silently skip
+    `make_clip`'s dot-prefixed temp files, which is the right outcome by
+    accident rather than on purpose. `parse_clip_name` is the real gate --
+    it admits exactly the names this library writes, so an encode in flight
+    and a file the user dropped in here are both left alone, and only what
+    we cut can be swept.
+    """
+    clips_dir = library.clips_dir(session_id)
+    if not clips_dir.is_dir():
+        # clips/ is created by the first encode, so its absence is the
+        # ordinary state of a session rather than a problem.
+        return []
+
+    claimed = {
+        clip_relpath(row["idx"], row["start_ms"], row["end_ms"])
+        for row in conn.execute(
+            "SELECT s.idx AS idx, r.start_ms AS start_ms, r.end_ms AS end_ms"
+            " FROM rallies r JOIN sources s ON s.id = r.source_id"
+            " WHERE r.session_id = ?",
+            (session_id,),
+        )
+    }
+
+    orphans = []
+    for path in sorted(clips_dir.iterdir()):
+        if path.name in claimed or not path.is_file():
+            continue
+        parsed = parse_clip_name(path.name)
+        if parsed is None:
+            continue
+        source_idx, start_ms, end_ms = parsed
+        orphans.append(OrphanClip(
+            path=path, source_idx=source_idx, start_ms=start_ms, end_ms=end_ms,
+            size_bytes=path.stat().st_size,
+        ))
+    return orphans
+
+
+def delete_orphan_clips(
+    library: Library, conn: sqlite3.Connection, orphans: list[OrphanClip]
+) -> int:
+    """Delete the given orphans and return how many files were removed.
+
+    Takes the list rather than re-deriving it, so what a caller printed is
+    exactly what it deletes -- re-running the sweep between the two would
+    leave a window for the set to change under a user who has already been
+    shown it and said yes.
+
+    `clip_path` is cleared BEFORE the file goes, and that order is
+    deliberate. The column records what WAS cut rather than what the current
+    bounds imply (see `set_clip_path`), so a rally whose bounds were dragged
+    still names the file being swept, and Reclaim Space is going to read
+    that column to decide a 5.6 GB original is safe to delete. Clearing
+    first means the worst a failed unlink can leave behind is a column that
+    understates what is on disk, which makes Reclaim Space more cautious;
+    the other order would leave it claiming a clip that no longer exists.
+    """
+    deleted = 0
+    for orphan in orphans:
+        conn.execute(
+            "UPDATE rallies SET clip_path = NULL WHERE clip_path = ?",
+            (str(orphan.path.relative_to(library.root)),),
+        )
+        conn.commit()
+        try:
+            orphan.path.unlink()
+        except FileNotFoundError:
+            # Someone else got there first. Not an error, and not a reason to
+            # skip the clip_path clear above -- a column naming a file that
+            # is already gone is precisely the dangling reference this exists
+            # to prevent.
+            continue
+        deleted += 1
+    return deleted

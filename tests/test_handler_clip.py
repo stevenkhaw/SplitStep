@@ -89,8 +89,9 @@ def test_handle_clip_cuts_from_the_proxy_when_the_original_is_reclaimed(
 
     handle_clip(library, a_rally["payload"])
     info = probe(_clip_path(library, source, 200, 1200))
-    # Conformed to the locked frame even from 1080p. A 1080p-sourced clip is
-    # flagged in the UI, but it must stay concat-compatible -- that is the
+    # Conformed to the locked frame even from 1080p. Nothing marks the clip
+    # as upscaled -- see handle_clip on why that claim was removed rather
+    # than made true -- but it must stay concat-compatible, which is the
     # property that cannot be compromised.
     assert (info.width, info.height) == (CLIP_WIDTH, CLIP_HEIGHT)
 
@@ -126,3 +127,25 @@ def test_has_pending_clip_distinguishes_two_spans_of_one_source(conn, a_rally):
 
     assert has_pending_clip(conn, source_id, 200, 1200) is True
     assert has_pending_clip(conn, source_id, 9000, 14000) is False
+
+
+def test_handle_clip_reports_progress_through_the_callback_it_is_given(
+    library, conn, a_rally
+):
+    """`jobs.progress` has existed since 001_init.sql and nothing has ever
+    written it -- so the only feedback during a half-hour export was the
+    badge's "N jobs running", true from the first second to the last. The
+    handler takes the reporter rather than a job id so it never has to know
+    the queue exists.
+    """
+    seen: list[float] = []
+    handle_clip(library, a_rally["payload"], seen.append)
+    assert seen, "no progress reported"
+    assert seen[-1] == 1.0
+
+
+def test_handle_clip_still_runs_without_a_progress_callback(library, conn, a_rally):
+    # The CLI and the tests call handlers directly, with no queue behind
+    # them and nothing to report to.
+    handle_clip(library, a_rally["payload"])
+    assert _clip_path(library, a_rally["source"], 200, 1200).exists()

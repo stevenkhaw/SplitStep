@@ -655,3 +655,100 @@ def test_clips_export_when_everything_is_unavailable_says_so(library, conn, caps
     assert "1 unavailable" in out
     assert "no rallies in the points set" not in out
     assert "already exists" not in out
+
+
+# -- clips orphans / clips prune --------------------------------------------
+
+
+@pytest.fixture
+def stranded(library, conn):
+    """A session whose re-segment left one clip behind.
+
+    Three clips cut, then a sweep moves the middle span: the file at the old
+    bounds is what nothing enumerates and nothing removes.
+    """
+    from bootleg.db.rallies import replace_rallies
+    from bootleg.detect.segment import Interval
+    from bootleg.media.clips import clip_relpath
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    spans = [(1000, 5000), (9000, 14000), (20000, 26000)]
+    replace_rallies(conn, session_id, source_id, [Interval(a, b, 0.8) for a, b in spans])
+
+    clips_dir = library.clips_dir(session_id)
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    for start_ms, end_ms in spans:
+        (clips_dir / clip_relpath(idx, start_ms, end_ms)).write_bytes(b"x" * 1_000_000)
+
+    replace_rallies(conn, session_id, source_id, [
+        Interval(1000, 5000, 0.8), Interval(9200, 13800, 0.7), Interval(20000, 26000, 0.6),
+    ])
+    orphan = clips_dir / clip_relpath(idx, 9000, 14000)
+    conn.close()
+    return {"session_id": session_id, "orphan": orphan, "clips_dir": clips_dir}
+
+
+def test_clips_orphans_names_the_stranded_file_and_its_size(library, stranded, capsys):
+    rc = main(["--library", str(library.root), "clips", "orphans", stranded["session_id"]])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert stranded["orphan"].name in out
+    assert "1.0 MB" in out
+
+
+def test_clips_orphans_deletes_nothing(library, stranded, capsys):
+    """Listing is listing. Deleting a clip costs four to eight minutes of
+    re-encode to get back, so nothing removes one as a side effect of being
+    asked what is there."""
+    main(["--library", str(library.root), "clips", "orphans", stranded["session_id"]])
+    assert stranded["orphan"].exists()
+
+
+def test_clips_orphans_on_a_clean_session_says_so(library, stranded, capsys):
+    stranded["orphan"].unlink()
+    rc = main(["--library", str(library.root), "clips", "orphans", stranded["session_id"]])
+    assert rc == 0
+    assert "no orphan" in capsys.readouterr().out.lower()
+
+
+def test_clips_prune_without_yes_refuses_and_keeps_the_file(library, stranded, capsys):
+    """Explicit rather than automatic, and the dry run is the default: a
+    prune that deleted on sight would make `--help` exploration expensive."""
+    rc = main(["--library", str(library.root), "clips", "prune", stranded["session_id"]])
+    assert rc == 0
+    assert stranded["orphan"].exists()
+    out = capsys.readouterr().out
+    assert "--yes" in out
+    assert stranded["orphan"].name in out
+
+
+def test_clips_prune_with_yes_deletes_the_orphan(library, stranded, capsys):
+    rc = main(["--library", str(library.root), "clips", "prune",
+               stranded["session_id"], "--yes"])
+    assert rc == 0
+    assert not stranded["orphan"].exists()
+    assert "deleted 1" in capsys.readouterr().out.lower()
+
+
+def test_clips_prune_leaves_the_clips_a_rally_still_claims(library, stranded, capsys):
+    main(["--library", str(library.root), "clips", "prune", stranded["session_id"], "--yes"])
+    survivors = sorted(p.name for p in stranded["clips_dir"].iterdir())
+    assert survivors == ["01-1000-5000.mp4", "01-20000-26000.mp4"]
+
+
+def test_clips_orphans_on_an_unknown_session_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "clips", "orphans", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()
+
+
+def test_clips_prune_on_an_unknown_session_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "clips", "prune", "nope", "--yes"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()

@@ -20,7 +20,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
-from bootleg.export import SETS, plan_export
+from bootleg.export import SETS, delete_orphan_clips, find_orphan_clips, plan_export
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
 from bootleg.label_score import rows_to_labels, score_against_labels
@@ -413,6 +413,77 @@ def cmd_clips_export(args) -> int:
     return 0
 
 
+def _fmt_bytes(n: int) -> str:
+    """Decimal MB/GB, the same units the drive's own free-space figure uses --
+    a sweep that reports MiB against a Finder reading GB invites arithmetic
+    the user should not have to do."""
+    return f"{n / 1e9:.1f} GB" if n >= 1_000_000_000 else f"{n / 1e6:.1f} MB"
+
+
+def _load_orphans(args):
+    """(library, conn, orphans) for the session, or None if it does not exist.
+
+    Shared by `clips orphans` and `clips prune` so the list a user is shown
+    is produced by exactly the code that would delete it -- two separate
+    walks could disagree, and the one that deletes must never see more than
+    the one that reported.
+    """
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    if get_session(conn, args.session_id) is None:
+        print(f"session not found: {args.session_id}", file=sys.stderr)
+        return None
+    return library, conn, find_orphan_clips(library, conn, args.session_id)
+
+
+def _print_orphans(orphans) -> None:
+    for orphan in orphans:
+        print(f"  {orphan.path.name}  source {orphan.source_idx:02d}  "
+              f"{_format_ts(orphan.start_ms)}-{_format_ts(orphan.end_ms)}  "
+              f"{_fmt_bytes(orphan.size_bytes)}")
+
+
+def cmd_clips_orphans(args) -> int:
+    loaded = _load_orphans(args)
+    if loaded is None:
+        return 1
+    _library, _conn, orphans = loaded
+    if not orphans:
+        print(f"no orphan clips in {args.session_id}")
+        return 0
+    total = sum(o.size_bytes for o in orphans)
+    print(f"{len(orphans)} orphan clip(s) in {args.session_id}, {_fmt_bytes(total)} total:")
+    _print_orphans(orphans)
+    print("delete them with: clips prune <session_id> --yes")
+    return 0
+
+
+def cmd_clips_prune(args) -> int:
+    loaded = _load_orphans(args)
+    if loaded is None:
+        return 1
+    library, conn, orphans = loaded
+    if not orphans:
+        print(f"no orphan clips in {args.session_id}")
+        return 0
+
+    total = sum(o.size_bytes for o in orphans)
+    if not args.yes:
+        # Dry run by default. A deleted clip costs a four-to-eight-minute
+        # re-encode to get back, and unlike a re-segment there is no undo --
+        # so the destructive reading of this command has to be the one the
+        # user typed on purpose.
+        print(f"would delete {len(orphans)} orphan clip(s), {_fmt_bytes(total)}:")
+        _print_orphans(orphans)
+        print("nothing deleted -- re-run with --yes")
+        return 0
+
+    deleted = delete_orphan_clips(library, conn, orphans)
+    print(f"deleted {deleted} orphan clip(s), {_fmt_bytes(total)} reclaimed")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -498,6 +569,16 @@ def main(argv: list[str] | None = None) -> int:
     ce.add_argument("session_id")
     ce.add_argument("--set", choices=SETS, default="points")
     ce.set_defaults(func=cmd_clips_export)
+
+    co = clips_sub.add_parser("orphans", help="list clips no rally's current bounds claim")
+    co.add_argument("session_id")
+    co.set_defaults(func=cmd_clips_orphans)
+
+    cp = clips_sub.add_parser("prune", help="delete orphaned clips (dry run without --yes)")
+    cp.add_argument("session_id")
+    cp.add_argument("--yes", action="store_true",
+                    help="actually delete; without it the orphans are only listed")
+    cp.set_defaults(func=cmd_clips_prune)
 
     args = parser.parse_args(argv)
     try:

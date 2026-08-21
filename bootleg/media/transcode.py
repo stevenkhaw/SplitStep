@@ -1,7 +1,9 @@
 import contextlib
 import os
 import subprocess
+import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from bootleg.accel import Accel, detect_accel
@@ -12,7 +14,99 @@ class TranscodeError(Exception):
     """An ffmpeg invocation failed."""
 
 
-def run_ffmpeg(args: list[str], timeout: float | None = None) -> None:
+ProgressFn = Callable[[float], None]
+
+
+def _failed(returncode: int, args: list[str], stderr: str) -> TranscodeError:
+    """The one place a non-zero exit is turned into an exception.
+
+    Shared by both run paths below so they cannot drift on what the message
+    says: ffmpeg's stderr lands verbatim in `jobs.error`, and losing it is
+    what turns a failed encode into a zero-byte file that looks like a
+    decode bug three days later.
+    """
+    return TranscodeError(
+        f"ffmpeg failed (exit {returncode})\nargs: {' '.join(args)}\n{stderr.strip()}"
+    )
+
+
+def _stream_progress(
+    args: list[str], on_progress: ProgressFn, total_ms: int
+) -> None:
+    """Run ffmpeg, reporting completed fraction as it goes.
+
+    `-progress pipe:1` makes ffmpeg write machine-readable key=value blocks
+    to stdout, which is free to use because every call here writes its real
+    output to a file. stderr goes to a temp file rather than a second pipe:
+    reading one pipe while the other fills is the classic deadlock, and a
+    failing encode can emit far more than a pipe buffer holds.
+
+    `readline` rather than `for line in stdout`: iterating a text stream
+    reads ahead in block-sized chunks, so the progress a caller is watching
+    would arrive in bursts minutes apart instead of as ffmpeg emits it.
+    """
+    cmd = ["ffmpeg", "-v", "error", "-y", "-nostats", "-progress", "pipe:1", *args]
+    last = -1.0
+    with tempfile.TemporaryFile("w+") as stderr:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr, text=True)
+        try:
+            assert proc.stdout is not None
+            for line in iter(proc.stdout.readline, ""):
+                key, _, value = line.strip().partition("=")
+                fraction = _progress_fraction(key, value, total_ms)
+                if fraction is None:
+                    continue
+                # One callback per whole percent. Each one ends up as a
+                # committed row (see the Worker), ffmpeg emits a block twice
+                # a second, and a bar nobody can see move is not worth a
+                # write on the connection the heartbeat thread shares.
+                if round(fraction, 2) > round(last, 2):
+                    last = fraction
+                    on_progress(fraction)
+            returncode = proc.wait()
+        except BaseException:
+            # Never leave an orphaned encode behind writing to a temp path
+            # nothing will ever clean up.
+            proc.kill()
+            proc.wait()
+            raise
+        finally:
+            proc.stdout.close()
+        if returncode != 0:
+            stderr.seek(0)
+            raise _failed(returncode, args, stderr.read())
+
+
+def _progress_fraction(key: str, value: str, total_ms: int) -> float | None:
+    """The fraction a `-progress` line reports, or None if it reports none.
+
+    `out_time_us` and `out_time_ms` are both MICROSECONDS -- the `_ms` name
+    is a long-standing ffmpeg wart, not a unit. Both are read so this works
+    across versions; within one block they carry the same value, and the
+    caller's per-percent filter drops the duplicate.
+
+    Values before the first frame are literally "N/A", which is a normal
+    state and not something to raise over.
+    """
+    if key == "progress" and value == "end":
+        # The final block is the only place a completed encode says so. A
+        # bar that stops at 0.97 and then vanishes reads as a failure.
+        return 1.0
+    if key not in ("out_time_us", "out_time_ms"):
+        return None
+    try:
+        elapsed_us = int(value)
+    except ValueError:
+        return None
+    return min(1.0, max(0.0, elapsed_us / (total_ms * 1000)))
+
+
+def run_ffmpeg(
+    args: list[str],
+    timeout: float | None = None,
+    on_progress: ProgressFn | None = None,
+    total_ms: int | None = None,
+) -> None:
     """Run ffmpeg with the given args.
 
     `timeout` is None by default so the long-running background-job call
@@ -21,7 +115,21 @@ def run_ffmpeg(args: list[str], timeout: float | None = None) -> None:
     pass a short timeout instead: every route runs on Starlette's shared
     anyio worker-thread pool, so a hung ffmpeg there would tie up a
     request-handling thread indefinitely.
+
+    `on_progress` (with `total_ms`, the expected output duration) switches to
+    a streaming run that reports completed fraction as ffmpeg works. The two
+    options are mutually exclusive on purpose rather than by omission: the
+    streaming path blocks on ffmpeg's stdout, so a wedged encode producing no
+    output would sit there forever and a `timeout` passed alongside would be
+    a guarantee this does not actually make. Nothing needs both -- progress
+    is for background jobs, timeouts are for request handlers -- so the
+    combination raises instead of quietly weakening.
     """
+    if on_progress is not None and total_ms:
+        if timeout is not None:
+            raise ValueError("run_ffmpeg cannot both stream progress and enforce a timeout")
+        _stream_progress(args, on_progress, total_ms)
+        return
     try:
         proc = subprocess.run(
             ["ffmpeg", "-v", "error", "-y", *args],
@@ -32,10 +140,7 @@ def run_ffmpeg(args: list[str], timeout: float | None = None) -> None:
             f"ffmpeg timed out after {timeout}s\nargs: {' '.join(args)}"
         ) from exc
     if proc.returncode != 0:
-        raise TranscodeError(
-            f"ffmpeg failed (exit {proc.returncode})\n"
-            f"args: {' '.join(args)}\n{proc.stderr.strip()}"
-        )
+        raise _failed(proc.returncode, args, proc.stderr)
 
 
 # transpose=1 is 90 degrees clockwise, transpose=2 is 90 counter-clockwise.
@@ -95,11 +200,17 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: i
 
 
 # The locked clip profile. CHANGING ANY OF THESE BREAKS `-c copy` AGAINST
-# EVERY CLIP EVER CUT: the concat demuxer refuses streams whose codec
-# parameters differ, so a reel mixing an old clip and a new one either fails
-# or produces artifacts. Sources that do not match are conformed at cut time
-# rather than at concat time -- an upscale is a smaller price than a clip
-# library that cannot be concatenated.
+# EVERY CLIP EVER CUT. Not loudly, which is the trouble: measured on ffmpeg
+# 9.0.1, the concat demuxer does not refuse a mismatched clip -- it exits 0
+# without a word and reads every input through the FIRST clip's parameters,
+# so a differing sample aspect is ignored and a clip with no audio stream
+# simply contributes no audio, leaving the reel's track to stop early. See
+# test_clips_from_mismatched_sources_concat_with_c_copy, which asserts the
+# two things -c copy will not.
+#
+# Sources that do not match are therefore conformed at cut time rather than
+# at concat time -- an upscale is a smaller price than a clip library that
+# cannot be concatenated.
 CLIP_WIDTH = 3840
 CLIP_HEIGHT = 2160
 CLIP_FPS = 30
@@ -113,30 +224,64 @@ def make_clip(
     start_ms: int,
     end_ms: int,
     rotation_deg: int = 0,
+    on_progress: ProgressFn | None = None,
 ) -> None:
     """Cut one span to the locked clip profile.
 
     Software libx264 on purpose, never a hardware encoder: those emit
     vendor-specific SPS/PPS headers, so a clip cut on the Mac and one cut on
     the 4070Ti would fail to concat cleanly or concat with artifacts. libx264
-    produces identical headers on every machine, permanently. Roughly 30
-    seconds per 20-second 4K clip, which is the right trade for an artifact
-    that must stay byte-compatible for years.
+    produces identical headers on every machine, permanently. It runs at
+    roughly 4-8x realtime on the Mac -- a 20-second clip takes 80-160
+    seconds -- which is the right trade for an artifact that must stay
+    byte-compatible for years.
+
+    Conforming is not only about the frame: the source is probed first
+    because two of the things the encoded stream carries come from it rather
+    than from the profile, and each breaks `-c copy` on its own. See the
+    comments on the filter chain and on the audio input below.
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     duration_ms = end_ms - start_ms
     if duration_ms <= 0:
         raise ValueError(f"clip needs a positive duration, got {duration_ms}ms")
 
+    info = probe(src)
+
+    # A non-square SAR is a property of the source, and the locked profile
+    # never pinned it: libx264 writes the sample aspect ratio into the SPS
+    # VUI, so an anamorphic source yields a clip whose codec parameters
+    # differ from every square-pixel clip already cut -- exactly what the
+    # concat demuxer refuses, and permanent once the clip exists.
+    #
+    # `setsar=1` alone would fix the parameter and wreck the picture: it
+    # declares the pixels square without making them square, so a 1920x1080
+    # source at SAR 2:1 (which displays as 3840x1080) would come out
+    # stretched to twice its real height. Scaling to the source's own
+    # display width first is what conforms it honestly, and it goes BEFORE
+    # rotation because SAR describes the coded frame and `transpose` inverts
+    # it. Even width because yuv420p subsamples horizontally: an odd one is
+    # not representable and ffmpeg refuses the scale outright.
+    unsquish = ""
+    if info.sar != 1.0:
+        unsquish = f"scale={max(2, round(info.width * info.sar / 2) * 2)}:{info.height}"
+
     # Rotation FIRST, then scale, then pad. At 90 and 270 the rotation swaps
     # the frame's axes, so scaling before rotating pads against the wrong one.
     # Irrelevant at 0 and 180, wrong the moment the camera is mounted sideways.
+    #
+    # `setsar=1` goes LAST rather than next to the unsquish: scale and pad
+    # each recompute the output SAR to preserve display aspect, so a
+    # rounding remainder in either could otherwise put a fractional ratio
+    # back into the stream. Last is the only position that is a guarantee.
     vf = ",".join(
         f
         for f in (
+            unsquish,
             rotation_filter(rotation_deg),
             f"scale={CLIP_WIDTH}:{CLIP_HEIGHT}:force_original_aspect_ratio=decrease",
             f"pad={CLIP_WIDTH}:{CLIP_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+            "setsar=1",
         )
         if f
     )
@@ -164,6 +309,28 @@ def make_clip(
     # with or being mistaken for a real clip_relpath name, which is always
     # exactly "NN-START-END.mp4" with no extra segments.
     tmp = dst.with_name(f".{dst.stem}.{uuid.uuid4().hex}.part{dst.suffix}")
+
+    # Whether the source has an audio stream at all is the second property
+    # the profile never pinned. A silent source produces a video-only clip,
+    # and concatenating that against clips that carry audio either fails or
+    # silently drops the track for the rest of the reel. Synthesized silence
+    # at the profile's own rate and layout rather than a refusal: a source
+    # with no microphone is still perfectly good footage, and the clip that
+    # cannot be concatenated is the failure worth preventing.
+    #
+    # anullsrc is an infinite input, so it is `-t` (an output option, already
+    # bounding the cut) that stops it -- without an explicit end the muxer
+    # would happily write audio on past the last frame. The explicit -map is
+    # required as soon as there are two inputs: ffmpeg's default stream
+    # selection would take the video and then look for the "best" audio,
+    # which is the synthesized one either way, but relying on that leaves the
+    # pairing up to a heuristic rather than to us.
+    silence: list[str] = []
+    mapping: list[str] = []
+    if not info.has_audio:
+        silence = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        mapping = ["-map", "0:v:0", "-map", "1:a:0"]
+
     try:
         run_ffmpeg([
             # -noautorotate before the input, exactly as make_proxy does: a
@@ -180,7 +347,9 @@ def make_clip(
             # by hand.
             "-ss", f"{start_ms / 1000:.3f}",
             "-i", str(src),
+            *silence,
             "-t", f"{duration_ms / 1000:.3f}",
+            *mapping,
             "-vf", vf,
             # CFR at the locked rate. The first real source runs at 29.964 fps, so
             # this duplicates roughly one frame in 830 -- imperceptible, and
@@ -194,7 +363,7 @@ def make_clip(
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
             "-movflags", "+faststart",
             str(tmp),
-        ])
+        ], on_progress=on_progress, total_ms=duration_ms)
         os.replace(tmp, dst)
     except BaseException:
         # Best-effort only: a failure here (e.g. permissions) must never

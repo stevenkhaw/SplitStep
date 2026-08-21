@@ -137,40 +137,70 @@ points costs three encodes, not twenty-four.
 ### 4.2 The locked profile
 
 ```
-mp4 · H.264 High · yuv420p · 3840×2160 · 30 fps CFR · CRF 20 · AAC 128k 48 kHz stereo
+mp4 · H.264 High · yuv420p · 3840×2160 · SAR 1:1 · 30 fps CFR · CRF 20
+     · AAC 128k 48 kHz stereo, always present
 ```
+
+**`SAR 1:1` and "always present" were added after the fact**, and they are not
+new decisions — they are two properties the profile always relied on and never
+stated, so nothing conformed them. See §4.3.
 
 **Changing this breaks `-c copy` against every clip ever cut.** It is locked in
 the original design and stays locked here.
 
+**And it breaks quietly.** This document assumed the concat demuxer refuses
+streams whose codec parameters differ. Measured on ffmpeg 9.0.1 it does not: it
+exits 0 with empty stderr and reads every input through the *first* clip's
+parameters, so a mismatched sample aspect is ignored (the clip plays at the
+wrong shape) and a clip with no audio stream contributes no audio (the reel's
+track stops early while the picture runs on). A loud failure would have been
+the better outcome; this is why the parameters are conformed at cut time
+instead of trusted to be checked at concat time.
+
 Clips are software-encoded (libx264, `-preset medium`) on purpose. Hardware
 encoders emit vendor-specific SPS/PPS headers, so a clip cut on the Mac and one
 cut on the 4070Ti would fail to concat cleanly or concat with artifacts.
-libx264 produces identical headers on every machine, permanently. Roughly 30 s
-per 20-second clip; the whole first session is ~9 minutes.
+libx264 produces identical headers on every machine, permanently.
+
+**Measured cost, replacing this section's original estimate.** It runs at
+**4–8x realtime** on this Mac — roughly 80–160 s for a 20-second clip — and the
+first real 24-point export took about **30 minutes**, against the ~9 minutes
+estimated here before anything had been cut. That is a difference in kind
+rather than degree: nine minutes is a coffee, half an hour is a decision about
+whether to start now. `handle_clip` therefore reports `jobs.progress` — see
+§4.5.
 
 Sources that do not match are conformed at cut time rather than at concat time:
-sub-4K is upscaled and padded, 60 fps is decimated, and 29.964 fps — the first
-real source — is conformed to 30 CFR at a cost of ~0.12% duplicated frames. A
-mixed-parameter clip library cannot be concatenated with `-c copy`, and that
-guarantee is worth more than avoiding an upscale.
+sub-4K is upscaled and padded, 60 fps is decimated, 29.964 fps — the first real
+source — is conformed to 30 CFR at a cost of ~0.12% duplicated frames,
+non-square pixels are scaled out and pinned to 1:1, and a source with no audio
+stream gets a synthesized silent one. A mixed-parameter clip library cannot be
+concatenated with `-c copy`, and that guarantee is worth more than avoiding an
+upscale.
 
 ### 4.3 The `clip` job
 
 Registered in `HANDLERS`, idempotent (overwrites its output).
 
 ```
--noautorotate  -ss <start_ms> -i <src> -t <duration_ms>
--vf  <rotation_filter(rotation_deg)>,
+-noautorotate  -ss <start_ms> -i <src>
+               [-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000]
+-t <duration_ms>  [-map 0:v:0 -map 1:a:0]
+-vf  [scale=<display width>:<coded height>,]      # only when SAR != 1
+     <rotation_filter(rotation_deg)>,
      scale=3840:2160:force_original_aspect_ratio=decrease,
-     pad=3840:2160:(ow-iw)/2:(oh-ih)/2
+     pad=3840:2160:(ow-iw)/2:(oh-ih)/2,
+     setsar=1
 -r 30
 -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 20 -preset medium
 -c:a aac -b:a 128k -ar 48000 -ac 2
 -movflags +faststart
 ```
 
-Four things are load-bearing in that argument order:
+The bracketed parts are conditional on what the source turns out to be, which
+is why `make_clip` probes it before building the command.
+
+Six things are load-bearing in that argument order:
 
 - **`-noautorotate` precedes the input**, and the angle is baked by
   `rotation_filter()` — the single validator. A clip that left rotation as a
@@ -185,13 +215,119 @@ Four things are load-bearing in that argument order:
   would put a second of the wrong footage at the head of the clip, and the
   reviewer trimmed those boundaries by hand.
 - **`-preset medium`, software only.** Determinism over speed; see §4.2.
+- **`setsar=1` closes the chain, and a de-anamorphizing scale opens it.**
+  Sample aspect ratio is a property of the source that the locked profile
+  never pinned, and libx264 writes it into the SPS VUI — so a non-square-pixel
+  source produced a clip whose codec parameters differed from every clip
+  already cut. `setsar=1` alone would fix the parameter and wreck the picture,
+  declaring pixels square without making them square; the leading scale to the
+  source's *display* width is what conforms it honestly, and it precedes
+  rotation because SAR describes the coded frame and `transpose` inverts it.
+  `setsar=1` goes last rather than beside it because scale and pad each
+  recompute output SAR to preserve display aspect, and a rounding remainder in
+  either could put a fraction back.
+- **A silent source gets synthesized silence, not a refusal.** Whether there
+  is an audio stream at all is the other unpinned source property: a
+  video-only clip either fails to concat against clips that carry audio or
+  drops the track for the rest of the reel. `anullsrc` at the profile's own
+  rate and layout, bounded by the same `-t` (it is an infinite input), with an
+  explicit `-map` once there are two inputs. A source with no microphone is
+  still good footage; the unconcatenatable clip is the failure worth avoiding.
 
 Source is `original.*` (via `find_original`) when `sources.has_original`, else
-`proxy.mp4`, which the same scale/pad chain upscales to the locked profile. A
-clip cut from the proxy is flagged 1080p-sourced in the UI.
+`proxy.mp4`, which the same scale/pad chain upscales to the locked profile.
+
+**Nothing flags such a clip as 1080p-sourced, and this section used to say it
+did** — as does §7 of `2026-08-19-bootlegvision-design.md`, which it inherited
+the claim from. No badge was ever built: `has_original` reaches the frontend as
+a field on the source type and no component reads it. The claim was repeated in
+`handle_clip` and in that handler's test, so a comment this codebase treats as
+load-bearing said something untrue in three places at once. All three now say
+what is actually the case: the clip is upscaled and indistinguishable from a
+4K-sourced one except by eye. If the badge is worth having, its home is the
+reel builder's per-item row (§6.4), where there is already a per-clip status
+for it to sit beside; there is no clip-listing surface today for it to live on.
 
 Free space is checked before the job starts. A 4K clip that dies at 90% is
 worse than a job that refuses to run.
+
+### 4.4 Orphaned clips
+
+Span-derived naming (§4.1) makes export incremental, and it makes the inverse
+question answerable too: a clip is **orphaned when no rally's current bounds
+resolve to its name**. A threshold sweep that moves a span strands the file cut
+at the old one — nothing enumerated it and nothing removed it — and at roughly
+2 MB per second of clip a few sweeps is real dead weight on the drive.
+
+`find_orphan_clips(library, conn, session_id)` answers it with no bookkeeping
+at all, for the same reason `plan_export` needs none: membership is by name.
+Two rules keep it from claiming more than it should.
+
+- **`parse_clip_name` is the gate, not a `*.mp4` glob.** It admits exactly what
+  `clip_relpath` writes and nothing else, so a file the user dropped into
+  `clips/` is left alone — and so is an encode in flight, whose dot-prefixed
+  `.part` name (§6.4) carries segments the pattern does not admit. A glob would
+  skip the temp files by accident rather than on purpose, and would sweep up
+  the stranger's file.
+- **The review flags play no part.** A clip whose rally was rejected or
+  un-pointed after it was cut is not orphaned: a rally still holds those
+  bounds, and the verdict is one keystroke from changing back.
+
+Two commands, and the destructive one says so:
+
+```
+bootleg clips orphans <session_id>          # list: name, source, span, size
+bootleg clips prune   <session_id>          # dry run — lists, deletes nothing
+bootleg clips prune   <session_id> --yes    # actually deletes
+```
+
+`prune` takes the list `orphans` produced rather than re-deriving it, so what
+a user was shown is what gets deleted. It clears `rallies.clip_path` **before**
+unlinking, and that order is deliberate: the column records what *was* cut
+rather than what the current bounds imply, so a rally whose bounds were dragged
+still names the file being swept — and Reclaim Space is going to read that
+column to decide a 5.6 GB original is safe to delete. Clearing first means a
+failed unlink leaves a column that understates what is on disk, which makes
+Reclaim Space more cautious; the other order would leave it claiming a clip
+that no longer exists.
+
+There is deliberately **no automatic sweep and no HTTP route**. Deleting a clip
+costs a four-to-eight-minute re-encode to get it back and there is no undo, so
+the destructive reading has to be the one the user typed on purpose.
+
+### 4.5 Progress
+
+`jobs.progress` has existed since `001_init.sql`, is served by `/api/jobs`, and
+until now nothing ever wrote it — so the only feedback across a half-hour
+export was the badge's *N jobs running*, equally true at the first second and
+the last. `handle_clip` now reports it.
+
+The mechanics, and the constraints that shaped them:
+
+- **ffmpeg reports its own position.** `-progress pipe:1` writes machine-
+  readable blocks to stdout, which is free because every call writes its real
+  output to a file. stderr goes to a temp file rather than a second pipe —
+  reading one pipe while the other fills is the classic deadlock, and stderr
+  is what lands verbatim in `jobs.error`.
+- **Handlers are handed a reporter, not a job id.** A handler that knew its id
+  would also have to know the queue's schema; all it has to say is what
+  fraction of it is done. The default is a no-op, so the CLI and the tests
+  call handlers directly with no row behind them.
+- **One callback per whole percent.** Each becomes a committed row on the
+  worker's connection — the one the heartbeat thread shares — and ffmpeg emits
+  a block twice a second.
+- **Progress and `timeout` are mutually exclusive in `run_ffmpeg`.** The
+  streaming path blocks on ffmpeg's stdout, so a `timeout` passed alongside
+  would be a guarantee it does not make. Nothing needs both: progress is for
+  background jobs, timeouts are for request handlers.
+
+Only `clip` reports. `build_proxy` and `detect` run longer still but run
+unattended right after ingest, and — more to the point — a job averaged in at
+zero would pin the badge at 0% for fifteen minutes, which reads as stuck.
+`activeJobsLabel` (`web/src/lib/jobs.ts`) therefore shows no percentage at all
+until some active job has one, and averages over every active job, queued ones
+included at zero, because the question during an export is how far through the
+batch it is rather than how far through the clip currently encoding.
 
 ## 5. Reels
 
@@ -355,6 +491,17 @@ element preload the review queue relies on.
   and channels. This is the most important test in the plan — encode-profile
   drift is the one silent failure that breaks `-c copy` against every clip ever
   cut, and it would not surface until a reel rendered wrong.
+- **The two source-derived parameters**, each against a source that has it: an
+  anamorphic source yields SAR 1:1 *and* an unstretched picture (dimensions
+  cannot tell those apart — sample the letterbox), and a silent source yields
+  an aac/48000/stereo track bounded to the clip's own duration.
+- **Orphans**: a moved span strands its clip, an identical span does not, and
+  neither an in-flight `.part` file nor a file this library did not name is
+  ever claimed. Plus `prune` clearing `clip_path` before it unlinks.
+- **Progress**: fractions arrive in order, end at exactly 1.0, and cost at most
+  one callback per percent; a failing streaming run still carries ffmpeg's
+  stderr; the worker turns a handler's reports into committed `jobs.progress`
+  rows visible to another connection *while the job is still running*.
 - **Rotation is baked, not flagged**: cut from a `rotation_deg=180` source and
   assert the output carries no rotation side-data.
 - **Concat**: three clips, concat, assert duration equals the sum. Plus the

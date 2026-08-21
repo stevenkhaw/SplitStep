@@ -25,11 +25,11 @@ from bootleg.detect.features import read_features, write_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
-from bootleg.jobs.worker import Handler
+from bootleg.jobs.worker import Handler, no_progress
 from bootleg.media.clips import clip_relpath
 from bootleg.media.files import find_original
 from bootleg.media.probe import display_size, probe
-from bootleg.media.transcode import make_clip, make_proxy, make_thumbs
+from bootleg.media.transcode import ProgressFn, make_clip, make_proxy, make_thumbs
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +108,8 @@ def _session_should_fail(
     return row is None
 
 
-def handle_ingest(library: Library, payload: dict) -> None:
+def handle_ingest(library: Library, payload: dict,
+           _progress: ProgressFn = no_progress) -> None:
     """Register a dropped file. No transcode, no detection.
 
     Both wait for a human to confirm orientation and play region in the
@@ -197,7 +198,8 @@ def handle_ingest(library: Library, payload: dict) -> None:
         raise
 
 
-def handle_build_proxy(library: Library, payload: dict) -> None:
+def handle_build_proxy(library: Library, payload: dict,
+           _progress: ProgressFn = no_progress) -> None:
     """Transcode a registered source's proxy at its chosen rotation.
 
     Idempotent by overwrite: a proxy half-written by a killed worker is
@@ -272,7 +274,8 @@ def _audio_source(src_dir: Path, proxy: Path, source: sqlite3.Row) -> Path:
     re-encoding degrades exactly the high-frequency transients ball contacts
     produce, and audio impact detection is already marginal on windy public
     courts. Prefer the original while it still exists on disk; fall back to
-    the proxy only once the original has been reclaimed (has_original=0).
+    the proxy only when it is gone (has_original=0), which nothing in the
+    app causes -- the original is kept for the life of the library.
     """
     if source["has_original"]:
         original = find_original(src_dir)
@@ -281,7 +284,8 @@ def _audio_source(src_dir: Path, proxy: Path, source: sqlite3.Row) -> Path:
     return proxy
 
 
-def handle_detect(library: Library, payload: dict) -> None:
+def handle_detect(library: Library, payload: dict,
+           _progress: ProgressFn = no_progress) -> None:
     conn = _open(library)
     source = get_source(conn, payload["source_id"])
     if source is None:
@@ -321,7 +325,8 @@ def _audio_grid(path: Path, duration_ms: int) -> list[tuple[int, float]]:
     return hits_to_grid(detect_hits(pcm, AUDIO_SR), duration_ms, step_ms=STEP_MS)
 
 
-def handle_clip(library: Library, payload: dict) -> None:
+def handle_clip(library: Library, payload: dict,
+                progress: ProgressFn = no_progress) -> None:
     """Cut one rally's span to a clip at the locked profile.
 
     Idempotent by overwrite, like every other handler: a clip half-written by
@@ -338,10 +343,19 @@ def handle_clip(library: Library, payload: dict) -> None:
         if src is None:
             raise ValueError(f"No original on disk for source {source['id']}")
     else:
-        # Reclaimed: cut from the proxy and let make_clip's scale/pad conform
-        # it to the locked frame. The clip is 1080p-sourced, which the UI
-        # flags, but it is still concat-compatible -- which is the property
-        # that cannot be compromised.
+        # No original on disk -- lost outside the app, since nothing here
+        # deletes one. Cut from the proxy and let make_clip's scale/pad
+        # conform it to the locked frame. The clip is upscaled from 1080p and
+        # nothing anywhere records or shows that: the file is
+        # indistinguishable from a 4K-sourced one except by eye. What it does
+        # keep is concat-compatibility, which is the property that cannot be
+        # compromised.
+        #
+        # This comment used to claim the UI flagged such a clip. It never did
+        # -- `has_original` reaches the frontend as a field on the source type
+        # and no component reads it -- and the claim was repeated in the spec
+        # and in this handler's test. The honest home for that badge is the
+        # reel builder's per-item row (spec 6.4), which does not exist yet.
         src = src_dir / "proxy.mp4"
         if not src.exists():
             raise ValueError(f"No proxy on disk for source {source['id']}")
@@ -355,8 +369,12 @@ def handle_clip(library: Library, payload: dict) -> None:
     # dying at 90%, which is the whole point of the check.
     library.require_free(int((end_ms - start_ms) / 1000 * 4_000_000 * 2))
 
+    # The one handler that reports progress, because it is the one whose
+    # duration a human sits through: 4-8x realtime, so a 24-point session is
+    # about half an hour. The others are longer still but run unattended
+    # right after ingest, and nothing is waiting on a number for them.
     make_clip(src, dst, start_ms=start_ms, end_ms=end_ms,
-              rotation_deg=source["rotation_deg"])
+              rotation_deg=source["rotation_deg"], on_progress=progress)
 
     set_clip_path(conn, payload["rally_id"], str(dst.relative_to(library.root)))
 
