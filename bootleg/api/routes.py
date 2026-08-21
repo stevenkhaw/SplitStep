@@ -26,6 +26,7 @@ from bootleg.db.rallies import (
     mark_reviewed,
     replace_rallies,
     set_bounds,
+    set_point,
     set_rejected,
     set_star,
 )
@@ -57,6 +58,10 @@ class StarBody(BaseModel):
 
 class RejectBody(BaseModel):
     rejected: bool
+
+
+class PointBody(BaseModel):
+    point: bool
 
 
 class BoundsBody(BaseModel):
@@ -207,6 +212,17 @@ def api_reject(rally_id: str, body: RejectBody, request: Request):
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)
     set_rejected(conn, rally_id, body.rejected)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/point")
+def api_point(rally_id: str, body: PointBody, request: Request):
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    set_point(conn, rally_id, body.point)
+    # Refreshes review status, unlike the label route: marking a point is a
+    # ruling on the clip in the same family as star and reject, and
+    # reviewed_at records that a human ruled on the rally at all.
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 
