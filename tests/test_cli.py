@@ -8,7 +8,11 @@ from bootleg import cli
 from bootleg.cli import _format_ts, main
 from bootleg.db.rallies import list_rallies
 from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
+from bootleg.db.sessions import (
+    add_source,
+    find_or_create_session_for_date,
+    set_session_status,
+)
 from bootleg.detect.features import FeatureFrame, Player, write_features
 from bootleg.detect.segment import SegmentParams
 
@@ -401,3 +405,33 @@ def test_doctor_lists_source_rotation(library, registered_source, capsys):
     main(["--library", str(library.root), "doctor"])
     out = capsys.readouterr().out
     assert "rotation" in out
+
+
+def test_segment_leaves_the_session_review_status_consistent(
+    library, conn, seeded_source, capsys
+):
+    """Re-segmenting must not leave a session claiming to be 'reviewed'.
+
+    `replace_rallies` inserts every new rally with `reviewed_at` NULL, so a
+    session that read 'reviewed' before the call has nothing seen in it
+    afterwards. The API route already refreshes the status for exactly this
+    reason (see the comment in api/routes.py::api_resegment); the CLI has
+    never done so, which let `bootleg segment` strand a session showing
+    'reviewed' with a full set of never-seen rallies -- invisible in the
+    Library, so the user is never prompted to review them.
+
+    HTTP and terminal must not drift here, the same way `setup.py::queue_setup`
+    keeps them from drifting on validation.
+    """
+    set_session_status(conn, seeded_source["session_id"], "reviewed")
+
+    rc = main(["--library", str(library.root), "segment", seeded_source["source_id"]])
+    assert rc == 0
+
+    row = conn.execute(
+        "SELECT status FROM sessions WHERE id = ?", (seeded_source["session_id"],)
+    ).fetchone()
+    assert row["status"] == "ready", (
+        "segment wrote a fresh set of unreviewed rallies but left the session "
+        "marked 'reviewed'"
+    )
