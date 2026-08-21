@@ -18,9 +18,13 @@
      * session correctly, instead of seeding from `detail.rallies`' stale
      * server-snapshot flags. */
     onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
+    /** Enter label mode. Separate from review: a verdict is a note about the
+     * detector, not a decision about the clip, so it deliberately does not
+     * touch star/reject or the session's review status. */
+    onopen_label: () => void
   }
 
-  let { detail, onopen_timeline }: Props = $props()
+  let { detail, onopen_timeline, onopen_label }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
@@ -176,6 +180,10 @@
       case 'T':
         if (current) onopen_timeline(current.id, queue.liveSnapshot(detail.rallies))
         break
+      case 'l':
+      case 'L':
+        onopen_label()
+        break
     }
   }
 </script>
@@ -255,7 +263,7 @@
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline
+    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
 {/if}
 

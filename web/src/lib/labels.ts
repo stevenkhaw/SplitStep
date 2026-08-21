@@ -225,3 +225,30 @@ export class LabelController {
     this.#flags.set(action.rallyId, [...action.previousFlags])
   }
 }
+
+/** The subset of `api` that persisting a LabelAction needs. */
+export interface LabelApi {
+  label: (id: string, verdict: string, boundaryFlags: string[]) => Promise<unknown>
+}
+
+export type LabelOutcome = { ok: true } | { ok: false }
+
+/**
+ * Sends one LabelAction to the server.
+ *
+ * Every call appends a row -- the corpus is append-only by design, so
+ * toggling a flag three times leaves three rows and `latest_labels` resolves
+ * which is current. That is deliberate: a corrected judgement must never
+ * erase the one it corrected.
+ */
+export async function persistLabel(
+  action: LabelAction,
+  api: LabelApi,
+): Promise<LabelOutcome> {
+  try {
+    await api.label(action.rallyId, action.verdict, action.flags)
+    return { ok: true }
+  } catch {
+    return { ok: false }
+  }
+}

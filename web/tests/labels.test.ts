@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { LabelController } from '../src/lib/labels'
+import { LabelController, persistLabel } from '../src/lib/labels'
 import type { LabelRecord, Rally } from '../src/lib/types'
 
 function rally(idx: number, over: Partial<Rally> = {}): Rally {
@@ -229,5 +229,32 @@ describe('LabelController', () => {
     c.currentFlags.push('end_late')
     c.revert(action)
     expect(c.currentFlags).toEqual(['start_early'])
+  })
+})
+
+describe('persisting a label', () => {
+  it('sends the verdict and flags for the action rally', async () => {
+    const calls: Array<[string, string, string[]]> = []
+    const fakeApi = {
+      label: async (id: string, verdict: string, flags: string[]) => {
+        calls.push([id, verdict, flags])
+        return {}
+      },
+    }
+    const c = new LabelController([rally(1)], [])
+    const action = c.setVerdict('partly')!
+    await persistLabel(action, fakeApi)
+    expect(calls).toEqual([['r1', 'partly', []]])
+  })
+
+  it('reports a failure so the caller can revert', async () => {
+    const fakeApi = {
+      label: async () => {
+        throw new Error('offline')
+      },
+    }
+    const c = new LabelController([rally(1)], [])
+    const action = c.setVerdict('clean')!
+    expect(await persistLabel(action, fakeApi)).toEqual({ ok: false })
   })
 })

@@ -1,5 +1,6 @@
 <script lang="ts">
   import JobsBadge from '../components/JobsBadge.svelte'
+  import LabelMode from '../components/LabelMode.svelte'
   import QueueMode from '../components/QueueMode.svelte'
   import QuadEditor from '../components/QuadEditor.svelte'
   import ResegmentPanel from '../components/ResegmentPanel.svelte'
@@ -15,7 +16,7 @@
 
   let detail = $state<SessionDetail | null>(null)
   let error = $state<string | null>(null)
-  let mode = $state<'queue' | 'timeline'>('queue')
+  let mode = $state<'queue' | 'timeline' | 'label'>('queue')
   let focusedRallyId = $state<string | null>(null)
   // The live-merged rallies QueueMode hands to openTimeline (see
   // QueueController.liveSnapshot) -- threaded through so TimelineMode's
@@ -96,6 +97,14 @@
         mode = 'queue'
       })
   }
+
+  // Unlike closeTimeline, this does NOT refetch. Label mode writes only to
+  // rally_labels; it never changes a rally's bounds, flags or review status,
+  // so `detail` cannot have gone stale and a refetch would only discard
+  // QueueMode's undo stack by bumping rallyRevision.
+  function closeLabel() {
+    mode = 'queue'
+  }
 </script>
 
 <header class="mb-4 flex items-baseline justify-between">
@@ -154,7 +163,9 @@
   -->
   {#key rallyRevision}
     {#if mode === 'queue'}
-      <QueueMode {detail} onopen_timeline={openTimeline} />
+      <QueueMode {detail} onopen_timeline={openTimeline} onopen_label={() => (mode = 'label')} />
+    {:else if mode === 'label'}
+      <LabelMode {detail} onclose={closeLabel} />
     {:else if focusedRallyId}
       <TimelineMode
         {detail}
