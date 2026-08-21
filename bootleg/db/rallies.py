@@ -72,27 +72,43 @@ def _carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str:
     string, and two old rallies can both clear 50% of one merged new span. The
     answer must not depend on the order sqlite returned the rows in.
 
-    Qualification still uses overlap_fraction -- same >50% rule as the flags,
-    normalized so a short old rally and a long one need the same relative
-    coverage to count. But the tie-break among qualifiers compares the raw
-    millisecond overlap, not the fraction: overlap_fraction divides by the
-    *shorter* span, so any old rally fully contained in the new one scores a
-    flat 1.0 regardless of its own length -- two contained old rallies of
-    different sizes are indistinguishable by fraction alone. Raw overlap is
-    the only signal left at that point, and it is also the more natural
-    "longest overlap" a reviewer would name if asked which old rally a merged
-    span best represents.
+    Ranking has two stages, and only the first is a qualifier: overlap_fraction
+    (the same >50% rule the flags use, normalized so a short old rally and a
+    long one need the same relative coverage to count) decides which rows are
+    even in the running. Among those, raw millisecond overlap is not a
+    tie-break -- it is the sole ranking signal, full stop. Two qualifying rows
+    with different fractions are still ranked by milliseconds alone, because
+    overlap_fraction divides by the *shorter* span, so any old rally fully
+    contained in the new one scores a flat 1.0 regardless of its own length --
+    two contained old rallies of different sizes are indistinguishable by
+    fraction alone, and raw overlap is the only signal left at that point. It
+    is also the more natural "longest overlap" a reviewer would name if asked
+    which old rally a merged span best represents.
+
+    A third, genuine tie-break -- smaller start_ms wins -- makes the ranking a
+    total order. Two old rallies of equal duration absorbed into one merged
+    new span produce the identical raw overlap: old (0, 600) and old
+    (400, 1000) both overlap a new (0, 1000) span by exactly 600ms. The
+    read-back SELECT carries no ORDER BY, so without this the winner would be
+    whichever row sqlite happened to list first -- not an answer.
     """
-    best_note, best_overlap_ms = "", 0
+    best_note, best_overlap_ms, best_start_ms = "", 0, None
     for r in rows:
         if not r["note"]:
             continue
         f = overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
         if f < STAR_OVERLAP_MIN:
             continue
+        # Recomputed rather than reused from inside overlap_fraction: that
+        # function's signature is shared with the label scorer and must not
+        # change shape just to also hand back its numerator. The duplication
+        # here is deliberate, not an oversight.
         overlap_ms = min(iv.end_ms, r["end_ms"]) - max(iv.start_ms, r["start_ms"])
-        if overlap_ms > best_overlap_ms:
-            best_note, best_overlap_ms = r["note"], overlap_ms
+        better = overlap_ms > best_overlap_ms or (
+            overlap_ms == best_overlap_ms and r["start_ms"] < best_start_ms
+        )
+        if better:
+            best_note, best_overlap_ms, best_start_ms = r["note"], overlap_ms, r["start_ms"]
     return best_note
 
 

@@ -70,6 +70,26 @@ def test_the_longest_overlap_wins_when_two_old_rallies_qualify(conn, seeded):
     assert _rows(conn, seeded)[0]["note"] == "long one"
 
 
+def test_the_earlier_start_wins_when_raw_overlaps_tie(conn, seeded):
+    # Old (0, 600) and old (400, 1000) are both 600ms rallies, and a new span
+    # merging them -- (0, 1000) -- overlaps each by exactly 600ms: the same
+    # raw overlap, so the longest-overlap ranking alone cannot separate them.
+    # This is the tie the docstring's third tie-break exists for; without it
+    # the winner is whichever row sqlite's un-ordered read-back lists first.
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"],
+                    [Interval(0, 600, 0.8), Interval(400, 1000, 0.8)])
+    rows = _rows(conn, seeded)
+    early_id = next(r["id"] for r in rows if r["start_ms"] == 0)
+    late_id = next(r["id"] for r in rows if r["start_ms"] == 400)
+    conn.execute("UPDATE rallies SET note = ? WHERE id = ?", ("earlier", early_id))
+    conn.execute("UPDATE rallies SET note = ? WHERE id = ?", ("later", late_id))
+    conn.commit()
+
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"],
+                    [Interval(0, 1000, 0.8)])
+    assert _rows(conn, seeded)[0]["note"] == "earlier"
+
+
 def test_a_note_alone_keeps_a_rally_in_the_carry_over_read_back(conn, seeded):
     # The read-back's WHERE clause selects rows worth carrying. A rally with a
     # note but no star, no point, no rejection and no clip is one of them --
