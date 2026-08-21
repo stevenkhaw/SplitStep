@@ -164,6 +164,48 @@ describe('ZoomBand draws handles where the hit test looks for them', () => {
     expect(endMs).toBeCloseTo(106_000, -1)
   })
 
+  it('grabs the end handle from a comfortable distance, not pixel-perfect', () => {
+    render(rally())
+    const el = band()
+
+    // 20px short of the handle: outside the old 12px radius, inside the
+    // current one. A mouse cannot reliably land on an 8px-wide target, and
+    // missing it silently scrubs instead of doing nothing, which is worse
+    // than a miss -- it moves the playhead and looks like the drag "didn't
+    // take".
+    const rightEdgePx = (stylePercent(box(), 'left') + stylePercent(box(), 'width')) * 10
+    el.dispatchEvent(pointerAt('pointerdown', rightEdgePx - 20))
+    flushSync()
+    expect(onscrub).not.toHaveBeenCalled()
+
+    el.dispatchEvent(pointerAt('pointermove', rightEdgePx - 120))
+    flushSync()
+    el.dispatchEvent(pointerAt('pointerup', rightEdgePx - 120))
+    flushSync()
+    expect(oncommit).toHaveBeenCalledTimes(1)
+    // The grab is forgiving about where you press, but the drag still tracks
+    // the pointer absolutely -- it must not carry the 20px offset along.
+    const [, endMs] = oncommit.mock.calls[0]
+    expect(endMs).toBeCloseTo(105_200, -1)
+  })
+
+  it('still leaves a scrub zone between the handles of a short rally', () => {
+    // 2.4s is the shortest rally in the real 2026-08-18 session: 66px wide on
+    // a 1104px band, so two 24px zones still leave a gap in the middle. If
+    // the zones ever do meet, nearestHandle splits at the midpoint rather
+    // than favouring one side, so the degradation is graceful -- but on real
+    // footage it should not come to that.
+    render(rally({ start_ms: 100_000, end_ms: 102_400 }))
+    const el = band()
+    const leftPx = stylePercent(box(), 'left') * 10
+    const widthPx = stylePercent(box(), 'width') * 10
+
+    el.dispatchEvent(pointerAt('pointerdown', leftPx + widthPx / 2))
+    flushSync()
+    expect(onscrub).toHaveBeenCalledTimes(1)
+    expect(oncommit).not.toHaveBeenCalled()
+  })
+
   it('draws neighbours at their true width too', () => {
     render(rally(), [rally({ id: 'r2', start_ms: 112_000, end_ms: 118_000 })])
     const neighbour = target.querySelector('.bg-blue-500\\/30')
