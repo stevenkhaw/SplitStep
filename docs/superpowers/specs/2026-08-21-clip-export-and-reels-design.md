@@ -261,6 +261,14 @@ reserves this exact spot. It gains two buttons with live counts:
 Reel of all points (24)        Reel of starred (0)
 ```
 
+**These are additional buttons, not replacements.** Plan A already put
+*Export point clips (N)* and *Export starred clips (N)* on this panel, which
+cut clips and create no reel. The panel therefore ends up with four actions in
+two rows — cut, and compile — and the reel buttons must not absorb or replace
+the export ones. Creating a reel does not cut anything; §6.4's *Cut missing
+clips* stays the only path that starts an encode, so a button labelled
+"reel" never silently launches half an hour of work.
+
 Each creates a reel named `<session date> <set>` — `2026-08-18 points`,
 `2026-08-18 starred` — with membership in chronological order, and opens the
 builder. The slug is that name lowercased with spaces replaced by hyphens,
@@ -285,7 +293,12 @@ Two new hash routes join Library / Setup / Session:
 ### 6.4 The builder
 
 An ordered list, one row per item: thumbnail, duration, source, and a
-clip-status badge (*ready* / *missing*). Plus:
+clip-status badge (*ready* / *missing*). A clip counts as ready only when a
+file exists at exactly `clip_relpath(...)`. Plan A writes each encode to a
+dot-prefixed `.part` sibling and `os.replace()`s it onto the final name only
+on success, so a partially-written clip never occupies the real name — but
+anything enumerating `clips/` must still skip dot-prefixed files rather than
+globbing `*.mp4` blindly, or it will count a dead temp file as a clip. Plus:
 
 - **Drag to reorder.** Hand-rolled pointer dragging, not a dependency —
   `ZoomBand` and `QuadEditor` already establish that pattern here. All the math
@@ -295,8 +308,12 @@ clip-status badge (*ready* / *missing*). Plus:
 - **Remove** an item. Explicit, because the additive merge never removes.
 - **Add rallies** — a picker over the session's rallies filtered to points /
   starred / all, checkboxes, appended at the end.
-- **Cut missing clips** — enqueues `clip` jobs, progress via the existing jobs
-  badge.
+- **Cut missing clips** — reuses Plan A's `plan_export`/`ExportPlan` rather
+  than reimplementing the decision. Note it reports four separate outcomes —
+  `queued`, `already_cut`, `in_flight`, `unavailable` — and they must stay
+  separate here too: collapsing them is what once made a second press
+  mid-encode report everything as done. Progress goes through the existing
+  jobs badge; do not build a second progress UI.
 - **Render** — enqueues the `reel` job, disabled while clips are missing with
   the count named on the button so the reason is visible.
 
