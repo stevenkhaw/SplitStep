@@ -17,7 +17,7 @@ Python lives in the `bootleg` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate bootleg` first):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q                              # 418 tests
+~/miniconda3/envs/bootleg/bin/pytest -q                              # 471 tests
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
@@ -250,6 +250,13 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
 ## Deferred (not missing by accident)
 
-4K clip export, reel building via `-c copy` concat, the cross-session rally
-browser, and Reclaim Space are Plan 3. The `reels`/`reel_items` tables and
-`clips_dir` exist unused.
+Reel building via `-c copy` concat and the cross-session rally browser are
+Plan 3. The `reels`/`reel_items` tables exist unused. 4K clip export shipped —
+`bootleg clips export`, the `clip` handler, and `clips_dir` are live.
+
+**Reclaim Space is rejected, not deferred.** The library sits on a 2TB external
+drive that holds ~110 hours of play keeping everything, so deleting originals
+frees space nobody needs and forfeits the 4K source for every rally that was
+not flagged before the delete — including spans a later re-segment invents.
+`has_original=0` still routes `handle_clip` to the proxy, but that is now
+recovery from a file lost outside the app, not a feature. Nothing clears it.

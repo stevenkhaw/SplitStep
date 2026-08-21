@@ -135,7 +135,7 @@ Reads `original.*`, not `proxy.mp4` — during setup the proxy does not exist. D
 
 Differences from the existing `frame.jpg` route:
 
-- **Source file.** `original.*` via the same glob `_audio_source` uses. 404 if the original has been reclaimed (`has_original = 0`).
+- **Source file.** `original.*` via the same glob `_audio_source` uses. 404 if the original is no longer on disk (`has_original = 0`).
 - **Cache key includes rotation:** `preview-{rot}-{at_ms}.jpg`, under the same LRU eviction, generalized to take a glob pattern so both routes share one sweep.
 - **Concurrency cap.** A module-level `threading.Semaphore(2)` around the extraction. Nine simultaneous 4K HEVC decodes on an 8 GB M2 Air is the difference between a responsive grid and a swap storm. Waiting on the semaphore happens on Starlette's worker thread, which is why the cap is 2 and the ffmpeg timeout is 20 s: worst case two slots and a queue, not 40 wedged threads.
 - **Clamping** reuses the existing `duration_ms` / `fps` margin logic, extracted into a shared helper rather than duplicated.
@@ -196,7 +196,7 @@ The one existing source (2026-08-19 / 01, the 608x1080 proxy) is corrected by re
 
 | Failure | Behaviour |
 |---|---|
-| Original missing or reclaimed at preview time | 404 with "original not available"; the wizard shows it inline rather than a broken image |
+| Original missing at preview time | 404 with "original not available"; the wizard shows it inline rather than a broken image |
 | ffmpeg fails or times out extracting a preview | 409 "source is still being processed" (matching `frame.jpg`), grid cell shows a retry affordance |
 | `build_proxy` raises | Source status `failed`, error stored on the job row, session page surfaces it. The original stays in place — no quarantine, since the file already left the inbox |
 | Confirm on a source whose status is `building` or `detecting` | 409; the wizard polls `/api/jobs` and shows progress instead |

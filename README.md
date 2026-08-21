@@ -220,15 +220,20 @@ npm run check       # svelte-check: type errors and a11y warnings
 
 ## Current state
 
-**Plan 1 (backend core) and Plan 2 (review UI) are complete.** Ingest,
-transcode, detection (vision + audio), segmentation, the job queue, the
-inbox watcher, the REST API, and the full review UI (queue mode, timeline
-mode, re-segment tuning, play-region editor) all work end to end and are
-served from a single `bootleg serve` process.
+**Plan 1 (backend core), Plan 2 (review UI) and 4K clip export are complete.**
+Ingest, transcode, detection (vision + audio), segmentation, the job queue, the
+inbox watcher, the REST API, the full review UI (queue mode, timeline mode,
+re-segment tuning, play-region editor), and cutting starred/point rallies to 4K
+clips at the locked libx264 profile all work end to end and are served from a
+single `bootleg serve` process.
 
-**Deferred to Plan 3:** 4K clip export with the locked libx264 profile, reel
-building via `-c copy` concat, the cross-session rally browser with filters,
-and Reclaim Space (removing originals once clips are exported).
+**Still deferred:** reel building via `-c copy` concat and the cross-session
+rally browser with filters. The `reels`/`reel_items` tables exist unused.
+
+**Rejected, not deferred:** Reclaim Space (deleting originals once clips are
+cut). The library lives on a 2TB external drive that holds ~110 hours of play
+keeping everything, so the space it frees is not scarce, and the 4K source it
+destroys is the one thing the tree cannot rebuild.
 
 **The most important caveat: the detector does not currently produce
 trustworthy rally boundaries on ground-level footage.** One real 19.5-minute

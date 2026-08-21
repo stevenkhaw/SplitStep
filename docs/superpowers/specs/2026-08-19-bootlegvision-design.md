@@ -85,7 +85,7 @@ The external drive *is* the library — a single self-contained portable folder.
   _inbox/                          drop videos here
   sessions/<id>/                   one calendar date of play
     sources/01/
-      original.mov                 HEVC from phone; deletable
+      original.mov                 HEVC from phone; permanent
       proxy.mp4                    1080p H.264, GOP 30; permanent
       thumbs.jpg                   sprite sheet
       features.jsonl               per-frame visual + audio features
@@ -102,7 +102,7 @@ First-time creation is explicit: `bootleg --library /Volumes/BootlegVision init`
 
 ### Retention
 
-**Keep everything by default. Nothing auto-deletes.** A 2TB drive removes the storage pressure that motivated an automatic prune policy.
+**Keep everything by default. Nothing auto-deletes, and nothing deletes on request either.** A 2TB external drive removes the storage pressure that motivated both an automatic prune policy and a manual one.
 
 Per hour of footage, regardless of how many source files it arrived in:
 
@@ -113,11 +113,11 @@ Per hour of footage, regardless of how many source files it arrived in:
 | starred 4K clips | ~2 GB | ~2 GB |
 | **total** | **~16 GB** | **~32 GB** |
 
-2TB usable (~1900 GB) holds roughly **115 sessions at 4K30** or **59 at 4K60** keeping everything, and **~315** once originals are reclaimed.
+2TB usable (~1900 GB) holds roughly **115 sessions at 4K30** or **59 at 4K60** keeping everything — about 110 hours of play at 4K30. That is more court time than this is ever likely to see, which decides the next question.
 
-**Reclaim Space** is a button, not a policy. It deletes `original.mov` for a source and sets `sources.has_original = 0`. It refuses to run if any starred rally from that source lacks an exported clip — otherwise it would destroy the only 4K source for a rally that was explicitly marked worth keeping. Proxy and clips are never touched, so a reclaimed session stays fully browsable and re-editable at 1080p forever.
+**Reclaim Space — deleting `original.mov` once its clips are cut — was considered and rejected.** It buys capacity that is not scarce, and it pays for that capacity with the one thing the library cannot rebuild. A clip only exists for a rally somebody flagged; a rally judged dull in review and interesting a year later has no 4K source left once the original is gone. Re-segmenting at a new threshold has the same problem — the new spans were never flagged, so they were never cut. The original is the only artifact in the tree that is not derivable from something else still on disk, and it is the one the drive has room to keep.
 
-The 1080p proxy is the insurance copy. Detection already runs on the proxy, so reclaiming an original costs only one thing: the ability to export a 4K clip from a rally that was never starred. Everything else — browsing, re-segmenting, re-cutting, 1080p export — still works.
+`sources.has_original` stays in the schema and `handle_clip` still falls back to the proxy when it is 0, upscaling to the locked profile. That path is now graceful degradation for a file removed by hand or lost to a bad copy, not a supported workflow. Nothing in the app clears the flag.
 
 ---
 
@@ -147,8 +147,8 @@ CREATE TABLE sources (
   width           INTEGER NOT NULL,
   height          INTEGER NOT NULL,
   fps             REAL    NOT NULL,
-  original_name   TEXT,                    -- NULL once space is reclaimed
-  has_original    INTEGER NOT NULL DEFAULT 1,
+  original_name   TEXT,                    -- NULL if the original is no longer on disk
+  has_original    INTEGER NOT NULL DEFAULT 1,  -- 0 = gone; cut clips from the proxy instead
   court_preset_id TEXT REFERENCES court_presets(id),
   status          TEXT NOT NULL,           -- ingesting|ingested|detecting|ready|failed
   UNIQUE(session_id, idx)
@@ -470,7 +470,7 @@ Audio is kept. Ball contact and shoe squeaks carry a highlight reel.
 
 Because the profile is fixed, sources that do not match it are conformed at clip time: 4K60 footage is decimated to 30 fps, and sub-4K footage is upscaled to 3840x2160 with aspect preserved and padded. This is intentional — a mixed-parameter clip library cannot be concatenated with `-c copy`, and that guarantee is worth more than avoiding an upscale.
 
-Clips are cut from `sources/<idx>/original.mov` when the original is present, and from `proxy.mp4` when it has been reclaimed — in which case the clip is upscaled to the locked profile and flagged in the UI as 1080p-sourced.
+Clips are cut from `sources/<idx>/original.mov` when the original is present, and from `proxy.mp4` when it is not — in which case the clip is upscaled to the locked profile and flagged in the UI as 1080p-sourced. Since nothing in the app deletes an original (see Retention), that fallback is for a file lost outside the app, not a state the app produces.
 
 **Safety net:** after concat, probe the output. If duration does not match the sum of the inputs, fall back to a full re-encode and log it. Silent `-c copy` failure is a known ffmpeg trap.
 
@@ -520,9 +520,9 @@ An earlier draft said the file was left in place. Implementation showed that is 
 
 Capture resolution does not affect detection. YOLO downsamples every frame to a fixed inference size regardless of input, so a player occupying 9% of frame height is 9% of frame height at 720p or 4K. Resolution is chosen for how the reels look.
 
-**Record 4K30, HEVC.** 4K provides crop-in headroom — a 2× digital zoom on a rally still exports clean 1080p, which is how a far player becomes watchable in a highlight reel shot wide. At ~10 GB/hr, 2TB holds roughly 190 hours of originals.
+**Record 4K30, HEVC.** 4K provides crop-in headroom — a 2× digital zoom on a rally still exports clean 1080p, which is how a far player becomes watchable in a highlight reel shot wide. At ~16 GB/hr all-in, 2TB holds roughly 110 hours of play with every original kept.
 
-**Not 60 fps.** It doubles storage and upload time and buys nothing for person detection.
+**Not 60 fps.** Not for storage — the drive can absorb it. The clip profile is locked at 30 fps CFR, so 4K60 is decimated back down at export and the extra frames are discarded after costing transcode time; detection samples at 5 fps and never sees them either.
 
 Settings that matter more than resolution:
 

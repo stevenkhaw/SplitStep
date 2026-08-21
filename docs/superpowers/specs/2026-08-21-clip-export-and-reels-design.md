@@ -127,7 +127,8 @@ not stable and must not appear in a filename.
 This makes staleness a pure function. `clip_relpath(source_idx, start_ms,
 end_ms)` computed from the rally's *current* bounds either exists or does not.
 No new columns, no filename parsing, no mtime comparison. `rallies.clip_path`
-is still set on completion — it is what Reclaim Space will check later.
+is still set on completion — it is what the UI reads to show a rally as
+already cut.
 
 Export is therefore incremental by construction: exporting a set enqueues jobs
 only for spans with no clip on disk. Re-exporting after marking three more
@@ -374,9 +375,10 @@ must be on PATH. YOLO is never run in tests and nothing here touches detection.
 
 - **The cross-session rally browser.** It is a filter UI over one session's
   rallies until a second session exists. Worth building then, not now.
-- **Reclaim Space.** It depends on clips existing, which is what this builds,
-  but deleting a 5.6 GB original is a separate decision with its own guard
-  (refuse while any starred rally from that source lacks a clip).
+- **Reclaim Space.** Not deferred — rejected. The external drive holds ~110
+  hours of play with every original kept, so deleting a 5.6 GB original buys
+  capacity that is not scarce and forfeits the 4K source for every rally that
+  was not flagged at the time. See Retention in the core design doc.
 - **Per-reel trim overrides.** Rally bounds are the bounds; fixing a bad cut
   once should improve every reel that uses it.
 - **Music, titles, transitions**, and vertical export — excluded by the

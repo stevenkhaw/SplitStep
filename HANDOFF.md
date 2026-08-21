@@ -213,10 +213,11 @@ Each line: `{"t":ms,"n":players_in_region,"near":{...},"far":{...},"hits":n,"hit
 
 ## State
 
-- Both plans complete and merged to `master`. 233 Python tests, 171 TypeScript tests, ruff clean, svelte-check clean.
+- Both plans plus 4K clip export complete and merged to `master`. 471 Python tests, 319 TypeScript tests, ruff clean, svelte-check clean.
 - Design rationale and decision log: `docs/superpowers/specs/2026-08-19-bootlegvision-design.md`
 - Implementation plans: `docs/superpowers/plans/`
-- **Deferred to a future Plan 3:** 4K clip export, reel building (concat with `-c copy`), cross-session rally browser, Reclaim Space.
+- **Still deferred:** reel building (concat with `-c copy`), cross-session rally browser.
+- **Rejected:** Reclaim Space. The drive holds ~110 hours of play keeping every original, so there is nothing to reclaim, and deleting an original forfeits the 4K source for any rally not flagged at the time.
 
 ## What I want from you
 
