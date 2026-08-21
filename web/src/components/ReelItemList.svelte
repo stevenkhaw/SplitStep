@@ -63,17 +63,34 @@
     dragging = to
   }
 
+  // Shared by a normal release and a cancelled drag -- both end the drag the
+  // same way locally (clear `dragging`, drop back to the `items` prop via
+  // `shown`); only a normal release also commits. Same split ZoomBand draws
+  // between its onPointerUp and onPointerCancel.
   function endDrag(): void {
+    dragging = null
+  }
+
+  function onPointerUp(): void {
     if (dragging === null) return
     const moved = order
     const unchanged =
       moved.length === items.length &&
       moved.every((item, i) => item === items[i])
-    dragging = null
+    endDrag()
     // A click on the handle is not a reorder. Committing anyway would mark
     // the reel dirty and demand a re-render for a gesture that changed
     // nothing.
     if (!unchanged) oncommit(moved)
+  }
+
+  // A pointercancel (app switch, an edge-swipe back gesture, a touch
+  // scroll-vs-drag conflict, a context menu opening mid-touch) aborts the
+  // gesture, not confirms it. Committing here would mark the reel dirty and
+  // demand a re-render for a reorder the user never dropped -- so this only
+  // runs the shared local cleanup and never calls `oncommit`.
+  function onPointerCancel(): void {
+    endDrag()
   }
 
   function onHandleKey(index: number, e: KeyboardEvent): void {
@@ -89,7 +106,7 @@
   }
 </script>
 
-<svelte:window onpointermove={onPointerMove} onpointerup={endDrag} onpointercancel={endDrag} />
+<svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} />
 
 <ul bind:this={list} class="divide-y divide-neutral-800">
   {#each shown as item, i (`${item.source_id}:${item.start_ms}:${item.end_ms}`)}

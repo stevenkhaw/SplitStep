@@ -131,6 +131,48 @@ describe('ReelItemList', () => {
       .toEqual([9000, 20000, 1000])
   })
 
+  it('does not commit on pointercancel, even after a real move', () => {
+    // An aborted gesture (app switch, an edge-swipe back, a touch
+    // scroll-vs-drag conflict) is not a decision -- only a real release
+    // means the user meant the reorder. This is the regression test for the
+    // finding: endDrag used to be wired to both pointerup and
+    // pointercancel, so a cancelled drag committed a reorder nobody
+    // confirmed.
+    const oncommit = vi.fn()
+    const items = [
+      item(1000, { source_idx: 1 }),
+      item(9000, { source_idx: 2 }),
+      item(20000, { source_idx: 3 }),
+    ]
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items, oncommit, onremove: vi.fn() },
+    })
+    flushSync()
+    stubRects()
+
+    const handle = rows()[0].querySelector('[data-drag-handle]') as HTMLElement
+    handle.setPointerCapture = vi.fn()
+    handle.releasePointerCapture = vi.fn()
+    handle.dispatchEvent(new FakePointerEvent('pointerdown', {
+      bubbles: true, pointerId: 1, clientY: 20,
+    }))
+    flushSync()
+    window.dispatchEvent(new FakePointerEvent('pointermove', {
+      bubbles: true, pointerId: 1, clientY: 101, // past row 2's midpoint
+    }))
+    flushSync()
+    window.dispatchEvent(new FakePointerEvent('pointercancel', { bubbles: true, pointerId: 1 }))
+    flushSync()
+
+    expect(oncommit).not.toHaveBeenCalled()
+    // The row must not be left visually mid-drag: the list renders back in
+    // its original order, not the in-progress drag order, and the component
+    // is not left believing a drag is still in progress.
+    const sourceOrder = rows().map((r) => r.textContent?.match(/source (\d+)/)?.[1])
+    expect(sourceOrder).toEqual(['01', '02', '03'])
+  })
+
   it('does not commit when the row lands where it started', () => {
     // A click on the handle is not a reorder. Firing anyway would mark the
     // reel dirty and demand a re-render for nothing.
