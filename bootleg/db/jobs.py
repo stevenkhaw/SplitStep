@@ -61,23 +61,6 @@ def has_pending_clip(
     return row is not None
 
 
-def has_pending_reel(conn: sqlite3.Connection, reel_id: str) -> bool:
-    """True if a render for exactly this reel is already queued or running.
-
-    Its own function rather than a `has_pending_job` call because that one
-    matches on `$.source_id`, which a reel payload does not carry -- a reel
-    is session-agnostic and can span sources. Guards the render route against
-    a double-click queuing two concatenations of the same reel onto the same
-    output path.
-    """
-    row = conn.execute(
-        "SELECT 1 FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
-        " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
-        (reel_id,),
-    ).fetchone()
-    return row is not None
-
-
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
     # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML
@@ -106,6 +89,45 @@ def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     if cur.rowcount == 0:
         return None
     return conn.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
+
+
+def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool]:
+    """Return (job_id, already_running): the in-flight render for `reel_id`
+    if one exists, else a freshly enqueued one.
+
+    Same shape as claim() and for the same reason: a plain "SELECT for an
+    in-flight job, then INSERT if none" is a check-then-act race, since every
+    API route runs on its own thread with its own sqlite connection
+    (ThreadLocalConnections). Two concurrent renders of the same reel could
+    each run the SELECT, each see nothing, and each INSERT -- exactly the gap
+    BEGIN IMMEDIATE closes by taking the write lock before the SELECT runs
+    (a bare `with conn:` would not: legacy sqlite3 isolation defers BEGIN
+    until the first DML statement, so the SELECT would still execute in
+    autocommit mode). The INSERT is written inline rather than via enqueue()
+    so the whole check-and-insert commits exactly once, under the one lock,
+    rather than enqueue() taking a second implicit transaction of its own.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        existing = conn.execute(
+            "SELECT id FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
+            " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
+            (reel_id,),
+        ).fetchone()
+        if existing is not None:
+            conn.commit()
+            return existing["id"], True
+        job_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO jobs (id,type,payload,status,created_at)"
+            " VALUES (?,?,?,'queued',?)",
+            (job_id, "reel", json.dumps({"reel_id": reel_id}), _now()),
+        )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    return job_id, False
 
 
 def heartbeat(conn: sqlite3.Connection, job_id: str) -> None:

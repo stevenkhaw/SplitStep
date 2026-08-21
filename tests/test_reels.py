@@ -1,6 +1,6 @@
 import pytest
 
-from bootleg.db.jobs import enqueue, has_pending_reel
+from bootleg.db.jobs import enqueue
 from bootleg.db.rallies import replace_rallies
 from bootleg.db.reels import add_items, create_reel
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
@@ -201,15 +201,3 @@ def test_plan_reel_export_omits_rally_id_for_an_orphan(library, conn, seeded):
     assert (payload["source_id"], payload["start_ms"], payload["end_ms"]) == (
         seeded["source_id"], 1000, 5000,
     )
-
-
-def test_has_pending_reel(conn):
-    reel = create_reel(conn, "r")
-    other = create_reel(conn, "other")
-    assert has_pending_reel(conn, reel["id"]) is False
-    enqueue(conn, "reel", {"reel_id": reel["id"]})
-    assert has_pending_reel(conn, reel["id"]) is True
-    # Matched via json_extract, so one reel's render can never suppress
-    # another's -- the same reason has_pending_clip exists beside
-    # has_pending_job.
-    assert has_pending_reel(conn, other["id"]) is False

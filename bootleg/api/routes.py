@@ -944,7 +944,11 @@ def api_add_reel_items(slug: str, body: ReelItemsBody, request: Request):
     added = add_items(conn, reel["id"], spans)
     # `existing` is reported separately rather than folded into a single
     # "total added" so a second click can honestly say "1 added, 2 already
-    # there" instead of implying it did nothing.
+    # there" instead of implying it did nothing. Deduped with set() because
+    # these spans come straight from the client and may repeat -- the picker
+    # can hand us the same rally twice (add_items already tolerates that; see
+    # its docstring) -- and an undeduped count would double-report the same
+    # already-there span as two.
     return {
         "added": added,
         "existing": len(set(spans)) - added,
@@ -1016,17 +1020,12 @@ def api_render_reel(slug: str, request: Request):
 
     # A double-click must not queue two concats onto one output path.
     # Returning the job already in flight makes the second press honest
-    # rather than a silent no-op.
-    existing = conn.execute(
-        "SELECT id FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
-        " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
-        (reel["id"],),
-    ).fetchone()
-    if existing is not None:
-        return {"job_id": existing["id"], "already_running": True}
-
-    return {"job_id": jobq.enqueue(conn, "reel", {"reel_id": reel["id"]}),
-            "already_running": False}
+    # rather than a silent no-op. enqueue_reel_once does the check-and-insert
+    # under one write lock (see its docstring) -- this route must not inline
+    # that SELECT itself, or it drifts back into the race the function exists
+    # to close.
+    job_id, already_running = jobq.enqueue_reel_once(conn, reel["id"])
+    return {"job_id": job_id, "already_running": already_running}
 
 
 @router.post("/api/sessions/{session_id}/reels")
@@ -1060,10 +1059,15 @@ def api_session_reel(session_id: str, body: SessionReelBody, request: Request):
     reel = find_reel_by_name(conn, name) or create_reel(conn, name)
     added = add_items(conn, reel["id"], spans)
 
+    # Deduped the same way as api_add_reel_items, though it is a no-op here:
+    # `spans` comes from a `rallies` query keyed one row per rally, so the
+    # (source_id, start_ms, end_ms) triple cannot repeat. Kept for
+    # consistency rather than reasoning about two different formulas for the
+    # same count.
     return {
         "slug": reel["slug"],
         "name": reel["name"],
         "added": added,
-        "existing": len(spans) - added,
+        "existing": len(set(spans)) - added,
         "total": len(resolve_items(_library(request), conn, reel["id"])),
     }
