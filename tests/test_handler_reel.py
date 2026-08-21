@@ -162,5 +162,11 @@ def test_a_reencode_fallback_still_marks_the_reel_rendered(
         handle_reel(library, {"reel_id": reel_of_two["reel"]["id"]})
 
     assert get_reel(conn, reel_of_two["reel"]["id"])["dirty"] == 0
-    assert any("re-encod" in r.message or "re-encod" in r.getMessage()
+    # concat_clips logs its own "re-encoding" message, so a loose substring
+    # match cannot tell the handler's reel-naming line from concat's diagnostic.
+    # This assertion pins the handler's log entry specifically by checking for
+    # the slug combined with the "fell back" phrase unique to handle_reel.
+    slug = reel_of_two["reel"]["slug"]
+    assert any((slug in r.message and "fell back" in r.message) or
+               (slug in r.getMessage() and "fell back" in r.getMessage())
                for r in caplog.records)
