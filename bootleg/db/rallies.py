@@ -55,8 +55,8 @@ def replace_rallies(
     """
     try:
         old = conn.execute(
-            "SELECT start_ms, end_ms, starred, rejected FROM rallies"
-            " WHERE source_id = ? AND (starred = 1 OR rejected = 1)",
+            "SELECT start_ms, end_ms, starred, rejected, point FROM rallies"
+            " WHERE source_id = ? AND (starred = 1 OR rejected = 1 OR point = 1)",
             (source_id,),
         ).fetchall()
 
@@ -69,16 +69,23 @@ def replace_rallies(
             # starred takes priority when a new segment plausibly matches
             # both carry-over candidates.
             rejected = False if starred else _overlaps_any(iv, old, "rejected")
+            # Carried independently of starred/rejected: `point` answers "was a
+            # point played out here", which is orthogonal to whether the clip
+            # is a highlight or a bad detection. Without this line the first
+            # threshold sweep silently discards the reviewer's whole
+            # tiebreaker -- the same class of loss the star carry-over exists
+            # to prevent.
+            point = _overlaps_any(iv, old, "point")
             # idx is a temporary, per-row-unique negative placeholder so a batch of
             # several new rows never collides with itself under UNIQUE(session_id,
             # idx) before _renumber() assigns the real sequential values below.
             conn.execute(
                 "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-                "det_start_ms,det_end_ms,confidence,starred,rejected)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "det_start_ms,det_end_ms,confidence,starred,rejected,point)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, session_id, source_id, -placeholder_idx, iv.start_ms,
                  iv.end_ms, iv.start_ms, iv.end_ms, iv.confidence,
-                 int(starred), int(rejected)),
+                 int(starred), int(rejected), int(point)),
             )
 
         _renumber(conn, session_id)
@@ -124,6 +131,22 @@ def set_star(conn: sqlite3.Connection, rally_id: str, starred: bool) -> None:
         "UPDATE rallies SET starred = ?, reviewed_at = COALESCE(reviewed_at, ?)"
         " WHERE id = ?",
         (int(starred), _now(), rally_id),
+    )
+    conn.commit()
+
+
+def set_point(conn: sqlite3.Connection, rally_id: str, point: bool) -> None:
+    """Mark (or unmark) a rally as a point that was played out.
+
+    Stamps reviewed_at through the same COALESCE set_star/set_rejected use.
+    All three flags are rulings on the clip, and reviewed_at records that a
+    human has ruled on a rally at all -- so a reviewer who marks every point
+    of a tiebreaker and stars none must still end with a reviewed session.
+    """
+    conn.execute(
+        "UPDATE rallies SET point = ?, reviewed_at = COALESCE(reviewed_at, ?)"
+        " WHERE id = ?",
+        (int(point), _now(), rally_id),
     )
     conn.commit()
 

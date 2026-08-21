@@ -45,8 +45,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 4
-    assert migrate(conn) == 4
+    assert migrate(conn) == 5
+    assert migrate(conn) == 5
 
 
 def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
@@ -79,7 +79,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 4
+    assert migrate(conn) == 5
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
