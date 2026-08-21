@@ -133,6 +133,33 @@ def test_bounds_404s_on_an_unknown_rally(client, seeded):
     assert r.status_code == 404
 
 
+def test_a_boundary_drags_label_survives_a_failed_bounds_write(client, conn, seeded, monkeypatch):
+    # api_bounds records the label before calling set_bounds specifically so
+    # that a failure in the second write can never take the correction down
+    # with it. Force that failure here and check the label landed anyway,
+    # even though the request itself fails and the bounds are left untouched.
+    rally = _first_rally(conn)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated failure between the two commits")
+
+    monkeypatch.setattr("bootleg.api.routes.set_bounds", _boom)
+
+    with pytest.raises(RuntimeError):
+        client.post(f"/api/rallies/{rally['id']}/bounds",
+                    json={"start_ms": 1400, "end_ms": 4600})
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["true_start_ms"] == 1400
+    assert rows[0]["true_end_ms"] == 4600
+
+    row = conn.execute(
+        "SELECT start_ms, end_ms FROM rallies WHERE id = ?", (rally["id"],)
+    ).fetchone()
+    assert (row["start_ms"], row["end_ms"]) == (1000, 5000)
+
+
 def test_a_boundary_drag_does_not_overwrite_an_existing_verdict(client, conn, seeded):
     # Two rows for one span: the verdict from label mode and the correction
     # from the drag. latest_labels returns the drag (it is later), and the

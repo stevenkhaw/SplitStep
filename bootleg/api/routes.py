@@ -223,7 +223,16 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
     # nothing and report success) and because det_* is what the label
     # anchors to.
     span = _rally_det_span(conn, rally_id)
-    set_bounds(conn, rally_id, body.start_ms, body.end_ms)
+    # Label before bounds, not after: set_bounds and record_boundary_correction
+    # each commit independently, so whichever runs second is the one a crash
+    # between the two can lose. Losing the bounds write just means the drag
+    # didn't visibly save and the reviewer retries. Losing the label after
+    # the bounds already landed is worse and silent -- the UI reports success
+    # while the correction that was the whole point never reaches the corpus.
+    # Ordering the label first turns that failure mode into a loud one: the
+    # request fails and the reviewer retries, and a retried label is harmless
+    # since it only reads immutable det_* (captured above) and appends a row
+    # that `latest_labels` will supersede if needed.
     # Every drag is ground truth: det_start_ms sits immutable beside the
     # edited start_ms, so the difference is a signed detector error in
     # milliseconds. It used to be destroyed by the next replace_rallies;
@@ -238,6 +247,7 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
         true_start_ms=body.start_ms,
         true_end_ms=body.end_ms,
     )
+    set_bounds(conn, rally_id, body.start_ms, body.end_ms)
     return {"ok": True}
 
 
