@@ -6,11 +6,16 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from bootleg.media.probe import ffprobe_json, probe
+
+# Tests monkeypatch bootleg.media.concat.run_ffmpeg -- the name concat_clips
+# actually calls -- so it has to live in this module's namespace, not just
+# transcode's. TranscodeError rides along on the same import for tests that
+# want concat_mod.TranscodeError rather than reaching back into transcode.
 from bootleg.media.transcode import (
     CLIP_CRF,
     CLIP_FPS,
     ProgressFn,
-    TranscodeError,
+    TranscodeError,  # noqa: F401 -- re-exported for tests, see comment above
     run_ffmpeg,
 )
 
@@ -21,24 +26,35 @@ class ConcatError(Exception):
     """A reel could not be concatenated."""
 
 
-# A concat that succeeds still shifts the total by a frame or so per input:
-# each clip's duration is a whole number of frames at 30 fps, and the muxer
-# rounds edit lists and the final sample's duration independently. 40ms is a
-# little over one frame at the locked rate.
+# Measured drift on well-formed -c copy output is a constant +21ms,
+# independent of input count and of clip-duration variation (verified at
+# n=3, 8, 16, 24, both with uniform 1.0s clips and with clips varied
+# 1.5-4.0s). A per-input term is kept anyway: that 21ms is measured on one
+# ffmpeg build (9.0.1), and a build that genuinely does drift per input
+# would need it, not just a flat pad. The cap exists because the per-input
+# term alone made tolerance_ms(n) >= 1500ms from n=35, and 1.5s
+# (min_duration_s in bootleg/detect/segment.py) is the shortest clip the
+# segmenter can produce -- past n=35 a reel silently missing exactly its
+# shortest clip would land inside that window and pass. 750ms keeps the cap
+# well under that floor at any n.
 _TOLERANCE_BASE_MS = 100
 _TOLERANCE_PER_INPUT_MS = 40
+_TOLERANCE_CAP_MS = 750
 
 
 def tolerance_ms(n_inputs: int) -> int:
     """How far the concatenated duration may sit from the sum of its inputs.
 
-    Deliberately generous. The failure this catches is a reel quietly
-    missing its last four points -- tens of seconds -- not a rounding
-    remainder, so a tight bound would only buy false re-encodes on
+    Deliberately generous, and capped: the failure this catches is a reel
+    quietly missing its last four points -- tens of seconds -- not a
+    rounding remainder, so a tight bound would only buy false re-encodes on
     well-formed output. Being wrong the other way is cheap: the fallback
     costs a re-encode, and it is logged.
     """
-    return _TOLERANCE_BASE_MS + _TOLERANCE_PER_INPUT_MS * max(0, n_inputs)
+    return min(
+        _TOLERANCE_BASE_MS + _TOLERANCE_PER_INPUT_MS * max(0, n_inputs),
+        _TOLERANCE_CAP_MS,
+    )
 
 
 @dataclass(frozen=True)
@@ -50,8 +66,10 @@ class ClipParams:
     differ; measured on ffmpeg 9.0.1 it does not. It exits 0 with empty
     stderr and reads every input through the FIRST clip's parameters, so a
     mismatched sample aspect plays that clip at the wrong shape for its
-    whole duration, and an input carrying no audio stream contributes no
-    audio -- the reel's track stops early while the picture runs on.
+    whole duration, a clip tagged with a different colour matrix decodes
+    through the first clip's matrix instead for its whole duration, and an
+    input carrying no audio stream contributes no audio -- the reel's track
+    stops early while the picture runs on.
 
     Neither of those changes the output's DURATION, so neither is visible to
     the duration check in concat_clips. Comparing the inputs up front is the
@@ -66,14 +84,33 @@ class ClipParams:
     sample_aspect_ratio: str
     pix_fmt: str
     frame_rate: str
+    # Absent tag preserved as None rather than guessed at -- deliberately
+    # UNLIKE sample_aspect_ratio's "1:1" default below. An untagged clip
+    # therefore diverges from a bt709-tagged one and takes the re-encode
+    # path even though it might really match. That is the intended trade:
+    # a spurious re-encode is a slower CORRECT reel, a missed mismatch is a
+    # fast WRONG one, and the wrongness stays invisible until someone
+    # watches the reel. The real library's clips are HLG HDR
+    # (color_range=tv, color_space=bt2020nc, color_primaries=bt2020,
+    # color_transfer=arib-std-b67), inherited from source with nothing
+    # pinned by make_clip, so an SDR source mixed into the same reel is the
+    # likeliest mismatch to actually occur.
+    color_range: str | None
+    color_space: str | None
+    color_primaries: str | None
+    color_transfer: str | None
     audio_codec: str | None
     audio_sample_rate: str | None
     audio_channels: int | None
 
 
-def clip_params(path: Path) -> ClipParams:
-    """Read the parameters `-c copy` cares about out of one clip."""
-    data = ffprobe_json(path)
+def _parse_clip_params(data: dict, path: Path) -> ClipParams:
+    """Build a `ClipParams` from an ffprobe document already in hand.
+
+    Split out of `clip_params` so `_probe_clip` can parse both the
+    comparison fields and the duration out of one ffprobe call instead of
+    two -- see `_probe_clip`'s docstring for the measurement.
+    """
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if video is None:
@@ -84,11 +121,13 @@ def clip_params(path: Path) -> ClipParams:
         profile=video.get("profile", ""),
         width=int(video["width"]),
         height=int(video["height"]),
-        # ffprobe omits the field entirely for square pixels. Defaulting to
-        # "1:1" rather than leaving it None is what makes a clip cut before
-        # make_clip pinned SAR compare EQUAL to one cut after -- they really
-        # are the same shape, and diverging over an absent tag would send
-        # every pre-existing library down the re-encode path for nothing.
+        # Measured: ffprobe reports "1:1" explicitly for square-pixel clips,
+        # both before and after make_clip pinned SAR -- it omits the field
+        # only for UNDEFINED SAR (setsar=0/1). So this default conflates
+        # "undefined" with "square", which is benign: every player already
+        # treats undefined SAR as square, so the concat is correct either
+        # way, and diverging over an absent tag would send an untouched
+        # library down the re-encode path for nothing.
         sample_aspect_ratio=video.get("sample_aspect_ratio", "1:1"),
         pix_fmt=video.get("pix_fmt", ""),
         # r_frame_rate as ffprobe's raw string ("30/1"). Kept exact rather
@@ -96,13 +135,57 @@ def clip_params(path: Path) -> ClipParams:
         # 30000/1001 is precisely the difference a float comparison at any
         # tolerance would blur away.
         frame_rate=video.get("r_frame_rate", ""),
+        # None means "ffprobe didn't tag it" and stays None -- see the field
+        # comment on ClipParams for why guessing here would be the wrong
+        # direction to be wrong.
+        color_range=video.get("color_range"),
+        color_space=video.get("color_space"),
+        color_primaries=video.get("color_primaries"),
+        color_transfer=video.get("color_transfer"),
         audio_codec=None if audio is None else audio.get("codec_name"),
         audio_sample_rate=None if audio is None else audio.get("sample_rate"),
         audio_channels=None if audio is None else int(audio["channels"]),
     )
 
 
-def divergences(paths: list[Path]) -> list[str]:
+def clip_params(path: Path) -> ClipParams:
+    """Read the parameters `-c copy` cares about out of one clip."""
+    return _parse_clip_params(ffprobe_json(path), path)
+
+
+def _duration_ms(data: dict, path: Path) -> int:
+    """Duration in ms from an ffprobe document already in hand.
+
+    Mirrors probe.py's own MediaInfo.duration_ms derivation (format
+    duration, falling back to the video stream's) so this stays identical
+    to what a second `probe()` call on the same file would have produced --
+    `_probe_clip` calls this instead of `probe()` precisely to avoid that
+    second call.
+    """
+    fmt = data.get("format", {})
+    video = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), None)
+    duration_s = float(fmt.get("duration") or (video or {}).get("duration") or 0.0)
+    if duration_s <= 0:
+        raise ConcatError(f"Could not determine duration for {path}")
+    return round(duration_s * 1000)
+
+
+def _probe_clip(path: Path) -> tuple[ClipParams, int]:
+    """One ffprobe call, parsed for both the pre-flight check and the duration sum.
+
+    concat_clips used to probe every clip twice -- once via `probe()` for
+    `expected_ms`, once via `clip_params()` for the divergence check --
+    reading the same `-show_format -show_streams` document both times.
+    Measured at n=24: 610ms + 606ms of a 1.29s total, next to an ~80ms
+    `-c copy` itself. Harmless on an SSD, but this library lives on an
+    external drive, where it is doubled spin-up wait rather than free
+    latency.
+    """
+    data = ffprobe_json(path)
+    return _parse_clip_params(data, path), _duration_ms(data, path)
+
+
+def divergences(paths: list[Path], params: list[ClipParams] | None = None) -> list[str]:
     """Every way a later clip's parameters differ from the first clip's.
 
     Compared against the FIRST clip rather than against the locked profile's
@@ -115,17 +198,24 @@ def divergences(paths: list[Path]) -> list[str]:
     Returns human-readable strings rather than a bool because the caller
     logs them: "b.mp4: sample_aspect_ratio is '2:1', expected '1:1'" is
     something a human can act on, and "inputs differ" is not.
+
+    `params`, when given, must already be `clip_params(p)` for each `p` in
+    `paths`, in the same order. `concat_clips` passes its own
+    already-probed results through here so this does not re-probe every
+    clip a second time (see `_probe_clip`); every other caller -- and every
+    existing test -- leaves it None and gets the original one-probe-per-path
+    behaviour.
     """
     if len(paths) < 2:
         return []
-    first = clip_params(paths[0])
+    parsed = params if params is not None else [clip_params(p) for p in paths]
+    first = parsed[0]
     reported: list[str] = []
-    for path in paths[1:]:
-        params = clip_params(path)
-        if params == first:
+    for path, current in zip(paths[1:], parsed[1:]):
+        if current == first:
             continue
         for field in fields(ClipParams):
-            mine = getattr(params, field.name)
+            mine = getattr(current, field.name)
             theirs = getattr(first, field.name)
             if mine != theirs:
                 reported.append(
@@ -140,7 +230,11 @@ def _escape(path: Path) -> str:
     The directive ends at the first unescaped quote, and its escape is the
     shell's: close, backslash-quote, reopen. Clip names are always
     NN-START-END.mp4 and carry none, but the library root is a user-chosen
-    path on an external drive and may contain anything at all.
+    path on an external drive. Measured: this handles a literal quote and a
+    literal backslash. It does NOT handle a newline in a directory name --
+    that breaks the line-oriented concat listing and ffmpeg refuses the
+    whole file (TranscodeError, exit 183). That is the acceptable failure
+    direction: loud, not silent.
     """
     return str(path).replace("'", "'\\''")
 
@@ -181,8 +275,8 @@ def concat_clips(
 
     1. BEFORE: the inputs are compared to each other (see ClipParams). A
        divergence skips the copy entirely -- on ffmpeg 9.0.1 the copy would
-       SUCCEED and yield a wrong-shaped or audio-truncated reel with a
-       perfectly correct duration.
+       SUCCEED and yield a wrong-shaped, wrong-matrix, or audio-truncated
+       reel with a perfectly correct duration.
     2. AFTER: the output's duration is measured against the sum of the
        inputs, because a copy can also drop later inputs outright. That one
        IS visible in the duration, and this is the check that sees it.
@@ -198,7 +292,10 @@ def concat_clips(
         raise ConcatError(f"{len(missing)} clip(s) missing, first: {missing[0]}")
 
     dst.parent.mkdir(parents=True, exist_ok=True)
-    expected_ms = sum(probe(p).duration_ms for p in paths)
+    # One ffprobe pass per input, reused for both the duration sum below and
+    # the divergence check further down -- see _probe_clip.
+    probed = [_probe_clip(p) for p in paths]
+    expected_ms = sum(duration for _, duration in probed)
 
     # Both temps are dot-prefixed siblings of dst: same directory, hence same
     # filesystem, so the os.replace() below is atomic and can never straddle
@@ -214,7 +311,7 @@ def concat_clips(
         # demuxer refuses by default.
         base = ["-f", "concat", "-safe", "0", "-i", str(listing)]
 
-        differences = divergences(paths)
+        differences = divergences(paths, [params for params, _ in probed])
         if differences:
             for difference in differences:
                 log.warning("reel input mismatch -- %s", difference)
@@ -253,18 +350,3 @@ def concat_clips(
     finally:
         with contextlib.suppress(OSError):
             listing.unlink(missing_ok=True)
-
-
-# run_ffmpeg and TranscodeError are re-exported deliberately: tests
-# monkeypatch `concat.run_ffmpeg`, which must be the name this module
-# actually calls rather than the one in transcode.
-__all__ = [
-    "ClipParams",
-    "ConcatError",
-    "TranscodeError",
-    "clip_params",
-    "concat_clips",
-    "divergences",
-    "run_ffmpeg",
-    "tolerance_ms",
-]

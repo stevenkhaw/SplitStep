@@ -12,13 +12,20 @@ from bootleg.media.concat import (
 from bootleg.media.probe import probe
 
 
-def _clip(path, seconds=1.0, size="320x240", sar=None, silent=False, crf=23):
+def _clip(path, seconds=1.0, size="320x240", sar=None, silent=False, crf=23, colorspace=None):
     """A clip that shares one profile with its siblings unless told otherwise.
 
     Not the locked 4K profile: these tests are about the concat mechanism,
     and encoding 3840x2160 repeatedly would make the suite unusable. What
     matters is that the inputs match EACH OTHER, which is exactly the
     precondition -c copy has in production.
+
+    `colorspace`, given, is passed to all three of ffmpeg's colour-tagging
+    output flags at once. Measured: on a small synthetic clip like these,
+    libx264 does not always round-trip -color_primaries/-color_trc into
+    something ffprobe reports back, but -colorspace reliably lands as
+    color_space -- which is exactly the finding's own repro (a bt709 clip
+    and an smpte170m clip disagree on color_space and nothing else).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     args = ["ffmpeg", "-y", "-v", "error",
@@ -26,8 +33,11 @@ def _clip(path, seconds=1.0, size="320x240", sar=None, silent=False, crf=23):
     if not silent:
         args += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}"]
     vf = f"setsar={sar}" if sar else "setsar=1"
-    args += ["-vf", vf, "-c:v", "libx264", "-profile:v", "high",
-             "-pix_fmt", "yuv420p", "-crf", str(crf), "-r", "30"]
+    args += ["-vf", vf, "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p"]
+    if colorspace:
+        args += ["-color_primaries", colorspace, "-color_trc", colorspace,
+                 "-colorspace", colorspace]
+    args += ["-crf", str(crf), "-r", "30"]
     if not silent:
         args += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
     args += ["-shortest", str(path)]
@@ -69,6 +79,26 @@ def test_divergences_names_a_mismatched_sample_aspect(tmp_path):
     assert len(reported) == 1
     assert "b.mp4" in reported[0]
     assert "sample_aspect_ratio" in reported[0]
+
+
+def test_divergences_names_a_mismatched_colour_tag(tmp_path):
+    # Same silent-and-wrong class as the SAR case above, and the one Finding
+    # 2 exists for: color_space wasn't compared at all before. Measured, a
+    # bt709 clip concatenated with an smpte170m clip exits 0 with a correct
+    # duration and the second half decoded through the wrong matrix -- the
+    # real library's 24 clips are all HLG (bt2020nc/bt2020/arib-std-b67), so
+    # an SDR source mixed into the same reel is the likeliest way this
+    # actually happens.
+    parts = [_clip(tmp_path / "a.mp4", colorspace="bt709"),
+             _clip(tmp_path / "b.mp4", colorspace="smpte170m")]
+    reported = divergences(parts)
+    assert any("color_space" in r for r in reported)
+
+    # And the pre-flight check drives concat_clips to the re-encode path,
+    # exactly as the SAR mismatch does.
+    dst = tmp_path / "reel.mp4"
+    assert concat_clips(parts, dst) == "reencode"
+    assert dst.exists()
 
 
 def test_divergences_names_a_missing_audio_stream(tmp_path):
@@ -124,19 +154,42 @@ def test_a_missing_input_is_refused(tmp_path):
         concat_clips([tmp_path / "nope.mp4"], tmp_path / "reel.mp4")
 
 
-def test_a_nonconforming_input_skips_the_copy_entirely(tmp_path, caplog):
+def test_a_nonconforming_input_skips_the_copy_entirely(tmp_path, caplog, monkeypatch):
     """The pre-flight, end to end.
 
     -c copy is never attempted, because on ffmpeg 9.0.1 it would SUCCEED
     and produce a reel whose second clip plays at the wrong shape -- exit 0,
     empty stderr, correct duration. Going straight to a re-encode is the
     only outcome that yields a correct file.
+
+    The three assertions this test had before all pass unchanged against an
+    implementation that runs -c copy and THEN re-encodes over it: the copy
+    inherits the first input's parameters, and the first input here is
+    already 1:1, so the vacuous third assertion below is checking the copy
+    passed through, not that it was skipped. The call-count assertion is
+    what actually pins the skip -- mirroring
+    test_a_short_copy_falls_back_to_a_reencode's technique below.
     """
+    import bootleg.media.concat as concat_mod
+
     parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", sar="2/1")]
     dst = tmp_path / "reel.mp4"
+    real_run = concat_mod.run_ffmpeg
+    calls = []
+
+    def fake_run(args, timeout=None, on_progress=None, total_ms=None):
+        calls.append(args)
+        real_run(args, on_progress=on_progress, total_ms=total_ms)
+
+    monkeypatch.setattr(concat_mod, "run_ffmpeg", fake_run)
 
     with caplog.at_level("WARNING"):
         assert concat_clips(parts, dst) == "reencode"
+
+    # Exactly one ffmpeg invocation, and it is not the copy: -c copy is
+    # never attempted, not attempted-then-overwritten.
+    assert len(calls) == 1
+    assert "copy" not in calls[0]
 
     assert dst.exists()
     assert any("sample_aspect_ratio" in r.getMessage() for r in caplog.records)
@@ -228,3 +281,9 @@ def test_tolerance_grows_with_the_input_count():
     # Still far below the failure being caught: a reel silently missing even
     # its shortest point is seconds short, not milliseconds.
     assert tolerance_ms(24) < 2000
+    # But growth must stop well short of that: min_duration_s in
+    # bootleg/detect/segment.py is 1.5s, the shortest clip the segmenter can
+    # produce, so at ANY reel size the bound has to stay under that or a
+    # reel silently missing exactly its shortest clip would pass unnoticed.
+    assert tolerance_ms(10_000) < 1500
+    assert tolerance_ms(10_000) == tolerance_ms(35)
