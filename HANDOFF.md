@@ -46,9 +46,10 @@ three original unknowns now have answers, and they are not the answers I wanted:
    `subject` profile then failed its own validation: camera setup and teardown score as
    rallies, and confidence is *inverted*, so no threshold separates true from false.
 2. **Does audio impact detection survive the environment?** The problem is not wind, it is
-   neighbours. Impacts fire at 0.62/sec when nobody is playing on my court against
-   0.65/sec mid-rally — the detector measures the venue. Stereo does not separate them
-   either; the phone's mics are too close together.
+   neighbours. Impacts fire at 0.56/sec across windows verified swing-free, against
+   0.67/sec while actually playing — the detector measures the venue. Stereo direction
+   and spectral timbre fail too: the mics are too close together, and a few dB of air
+   absorption over an open court is not enough to dull the next court's hits.
 3. **Does a 4K-derived proxy play and scrub acceptably in the browser?** Still open.
 
 **So the useful task now is not tuning.** It is either (a) shooting a fence-mounted
@@ -156,19 +157,24 @@ dropouts: at a camera a foot off the ground the "far player" was **people on adj
 courts**, and `split_near_far` was electing whichever stranger happened to be
 second-largest.
 
-Six detected intervals from the one real source were inspected frame by frame. Two are
-unambiguous false positives — the operator setting the camera down, and walking back to
-stop recording. Two are real. Two could not be settled from stills. Worse, **confidence is
-inverted**: the known-false clips score 0.40 and 0.46, the known-true ones 0.36 and 0.39,
-so no threshold separates them.
+Six detected intervals from the one real source were inspected frame by frame. One is an
+unambiguous false positive — the operator walking back to stop recording. Two are real.
+One (the opening clip) turned out to be *mixed*: camera setup for its first 8 seconds,
+then genuine play. Two could not be settled from stills.
+
+That mixed clip is worth knowing about, because the person writing this hand-labelled it
+"camera setup, no play" and a pose track later proved otherwise. Hand labels are the thing
+this project is shortest of, and they are not automatically right.
 
 The cause is that neither of `subject` mode's two inputs carries signal on this footage:
 
-- **Audio measures the venue, not the player.** Impacts fire at 0.62/s during a window
-  where nobody is playing on our court, against 0.65/s during a confirmed rally — the same
-  to within noise, at every prominence floor tested. Stereo does not help either; both
-  windows localise to a median GCC-PHAT lag of 1 sample, because the phone's mics are far
-  too close together to resolve sources at court distances.
+- **Audio measures the venue, not the player.** Impacts fire at 0.56/s across windows a
+  pose track confirms are swing-free, against 0.67/s while playing — and two of those idle
+  windows individually run at 0.67/s and 0.80/s, above a confirmed rally's 0.65/s. Same at
+  every prominence floor. Stereo does not help: both windows localise to a median GCC-PHAT
+  lag of 1 sample, the mics being far too close together to resolve court distances.
+  Neither does timbre: measured against the background immediately before each onset,
+  brightness does not separate near hits from far ones.
 - **Near-player motion barely separates.** In-rally vs between-point median lateral
   displacement is 0.0048 against 0.0032 per 200 ms. The player walks, retrieves balls and
   repositions between points, and that looks like playing.
