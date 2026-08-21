@@ -104,3 +104,44 @@ def test_source_labels_reports_a_boundary_only_row_with_a_null_verdict(client, c
 def test_source_labels_404s_on_an_unknown_source(client, seeded):
     r = client.get("/api/sources/nope/labels")
     assert r.status_code == 404
+
+
+def test_a_boundary_drag_records_a_signed_correction(client, conn, seeded):
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] is None
+    assert rows[0]["span_start_ms"] == 1000
+    assert rows[0]["span_end_ms"] == 5000
+    assert rows[0]["true_start_ms"] == 1400
+    assert rows[0]["true_end_ms"] == 4600
+    assert rows[0]["boundary_flags"] == ["start_early", "end_late"]
+
+
+def test_a_drag_back_to_the_detector_span_records_nothing(client, conn, seeded):
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1000, "end_ms": 5000})
+    assert client.get(f"/api/sources/{seeded['source_id']}/labels").json() == []
+
+
+def test_bounds_404s_on_an_unknown_rally(client, seeded):
+    r = client.post("/api/rallies/nope/bounds", json={"start_ms": 1, "end_ms": 2})
+    assert r.status_code == 404
+
+
+def test_a_boundary_drag_does_not_overwrite_an_existing_verdict(client, conn, seeded):
+    # Two rows for one span: the verdict from label mode and the correction
+    # from the drag. latest_labels returns the drag (it is later), and the
+    # verdict row is still in the table for the exporter to find.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": []})
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+
+    total = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+    assert total == 2

@@ -9,7 +9,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from bootleg.accel import detect_accel
-from bootleg.db.labels import FLAG_ORDER, VERDICTS, add_label, latest_labels, parse_flags
+from bootleg.db.labels import (
+    FLAG_ORDER,
+    VERDICTS,
+    add_label,
+    latest_labels,
+    parse_flags,
+    record_boundary_correction,
+)
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     list_rallies,
@@ -210,7 +217,27 @@ def api_reviewed(rally_id: str, request: Request):
 
 @router.post("/api/rallies/{rally_id}/bounds")
 def api_bounds(rally_id: str, body: BoundsBody, request: Request):
-    set_bounds(_conn(request), rally_id, body.start_ms, body.end_ms)
+    conn = _conn(request)
+    # Resolved before the write, both to 404 on a rally a re-segment in
+    # another tab already deleted (set_bounds alone would silently update
+    # nothing and report success) and because det_* is what the label
+    # anchors to.
+    span = _rally_det_span(conn, rally_id)
+    set_bounds(conn, rally_id, body.start_ms, body.end_ms)
+    # Every drag is ground truth: det_start_ms sits immutable beside the
+    # edited start_ms, so the difference is a signed detector error in
+    # milliseconds. It used to be destroyed by the next replace_rallies;
+    # recording it here is the cheaper half of the whole corpus, and costs
+    # the reviewer no extra keystrokes.
+    record_boundary_correction(
+        conn,
+        rally_id=rally_id,
+        source_id=span["source_id"],
+        det_start_ms=span["det_start_ms"],
+        det_end_ms=span["det_end_ms"],
+        true_start_ms=body.start_ms,
+        true_end_ms=body.end_ms,
+    )
     return {"ok": True}
 
 
