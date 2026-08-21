@@ -149,3 +149,12 @@ def test_handle_clip_still_runs_without_a_progress_callback(library, conn, a_ral
     # them and nothing to report to.
     handle_clip(library, a_rally["payload"])
     assert _clip_path(library, a_rally["source"], 200, 1200).exists()
+
+
+def test_handle_clip_without_a_rally_id_still_cuts(library, conn, a_rally):
+    # A reel item whose rally vanished under a re-segment has no rally_id to
+    # offer, and it must still be cuttable -- see plan_reel_export. The clip
+    # is written; there is simply no row to record clip_path on.
+    payload = {k: v for k, v in a_rally["payload"].items() if k != "rally_id"}
+    handle_clip(library, payload)
+    assert _clip_path(library, a_rally["source"], 200, 1200).exists()

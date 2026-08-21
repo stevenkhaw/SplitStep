@@ -61,6 +61,23 @@ def has_pending_clip(
     return row is not None
 
 
+def has_pending_reel(conn: sqlite3.Connection, reel_id: str) -> bool:
+    """True if a render for exactly this reel is already queued or running.
+
+    Its own function rather than a `has_pending_job` call because that one
+    matches on `$.source_id`, which a reel payload does not carry -- a reel
+    is session-agnostic and can span sources. Guards the render route against
+    a double-click queuing two concatenations of the same reel onto the same
+    output path.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
+        " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
+        (reel_id,),
+    ).fetchone()
+    return row is not None
+
+
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
     # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML

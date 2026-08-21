@@ -376,7 +376,14 @@ def handle_clip(library: Library, payload: dict,
     make_clip(src, dst, start_ms=start_ms, end_ms=end_ms,
               rotation_deg=source["rotation_deg"], on_progress=progress)
 
-    set_clip_path(conn, payload["rally_id"], str(dst.relative_to(library.root)))
+    # A reel item whose rally vanished under a re-segment carries no
+    # rally_id (see plan_reel_export), and it must still be cuttable: the
+    # cut needs a source and a span and nothing else. clip_path is a
+    # convenience recorded on a rally when there is one -- the clip on disk
+    # is the real artifact, and it is named for its span either way.
+    rally_id = payload.get("rally_id")
+    if rally_id is not None:
+        set_clip_path(conn, rally_id, str(dst.relative_to(library.root)))
 
 
 HANDLERS: dict[str, Handler] = {
