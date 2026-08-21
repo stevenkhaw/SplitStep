@@ -35,6 +35,7 @@ export interface Rally {
   confidence: number
   starred: number
   rejected: number
+  point: number
   reviewed_at: string | null
 }
 

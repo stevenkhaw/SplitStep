@@ -4,6 +4,7 @@ import type { PersistableAction, QueueAction } from './queue'
 export interface PersistApi {
   star: (id: string, starred: boolean) => Promise<unknown>
   reject: (id: string, rejected: boolean) => Promise<unknown>
+  point: (id: string, point: boolean) => Promise<unknown>
   reviewed: (id: string) => Promise<unknown>
 }
 
@@ -32,6 +33,9 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
       case 'reject':
         await api.reject(action.rallyId, action.rejected)
         break
+      case 'point':
+        await api.point(action.rallyId, action.point)
+        break
       case 'skip':
         // Persists nothing. The right arrow is now pressed on every clip just
         // to move through the pass, so marking each one reviewed would flip a
@@ -41,13 +45,14 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         // one wins), which is why dropping this call loses nothing.
         break
       case 'undo':
-        // Undo can restore either flag (or both back to their prior
-        // values), so both are re-synced to the server. Sequential, not
-        // Promise.all: if the first fails there is no reason to race the
-        // second against it, and the ordering stays predictable to reason
-        // about from a server log.
+        // Undo can restore any of the three flags (or all of them back to
+        // their prior values), so all three are re-synced to the server.
+        // Sequential, not Promise.all: if an earlier one fails there is no
+        // reason to race the rest against it, and the ordering stays
+        // predictable to reason about from a server log.
         await api.star(action.rallyId, action.starred)
         await api.reject(action.rallyId, action.rejected)
+        await api.point(action.rallyId, action.point)
         break
     }
     return { ok: true }

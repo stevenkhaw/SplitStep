@@ -65,6 +65,7 @@ function rally(id: string, idx: number, sourceId: string): Rally {
     confidence: 0.9,
     starred: 0,
     rejected: 0,
+    point: 0,
     reviewed_at: null,
   }
 }

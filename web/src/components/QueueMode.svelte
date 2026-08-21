@@ -96,6 +96,10 @@
     version
     return queue.currentIsRejected
   })
+  const currentPoint = $derived.by(() => {
+    version
+    return queue.currentIsPoint
+  })
   const stats = $derived.by(() => {
     version
     return {
@@ -103,6 +107,7 @@
       total: queue.total,
       starredCount: queue.starredCount,
       rejectedCount: queue.rejectedCount,
+      pointCount: queue.pointCount,
       remainingMs: queue.remainingMs(speed),
     }
   })
@@ -171,6 +176,10 @@
       case 'x':
       case 'X':
         apply(queue.reject())
+        break
+      case 'p':
+      case 'P':
+        apply(queue.point())
         break
       case 'r':
       case 'R':
@@ -285,18 +294,22 @@
         class="text-base leading-none {currentStarred ? 'text-yellow-400' : 'text-neutral-700'}"
         title={currentStarred ? 'starred' : 'not starred'}
       >★</span>
+      <span
+        class="text-base leading-none {currentPoint ? 'text-green-400' : 'text-neutral-700'}"
+        title={currentPoint ? 'point' : 'not a point'}
+      >●</span>
       rally {stats.index + 1} / {stats.total} ·
       {formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}
       {#if currentRejected}<span class="text-red-400">· rejected</span>{/if}
     </span>
     <span>
-      ★{stats.starredCount} ✕{stats.rejectedCount} ·
+      ★{stats.starredCount} ✕{stats.rejectedCount} ●{stats.pointCount} ·
       ~{formatDuration(stats.remainingMs)} left at {speed}×
     </span>
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
+    S star · P point · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
 {/if}
 
