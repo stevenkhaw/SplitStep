@@ -5,6 +5,13 @@
 **Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` §7
 **Corrects that document in three places** — see §2.
 
+**Implemented in two plans.** The first covers §3 (the point flag) and §4
+(clip export): the half where every irreversible decision lives — the locked
+profile, span-derived naming, baked rotation — and the half that is useful on
+its own, since clips play in any player. The second covers §5–§6 (reels, the
+builder, preview) and is written after the first lands, so it benefits from
+what real footage teaches about the first.
+
 ---
 
 ## 1. Problem
@@ -65,10 +72,17 @@ The three are independent booleans. `starred` is expected to be a subset of
 watching without being a point, and enforcing the containment would make the
 reviewer argue with the tool.
 
-`P` toggles, does not advance, and does not touch review status — the same
-reasoning that removed auto-advance from star and reject, and that keeps labels
-out of `refresh_session_review_status`. Marking a point is curation, not a
-review decision.
+`P` toggles and does not advance, the same reasoning that removed auto-advance
+from star and reject.
+
+It **does** stamp `reviewed_at`, via the same `COALESCE` those two use. All
+three flags are rulings on the clip, and `reviewed_at` records that a human has
+ruled on a rally at all — so a reviewer who marks every point of a tiebreaker
+and stars none must still end with a reviewed session. This is where the
+analogy to labels breaks: a label answers "what did the detector get wrong",
+lives in its own table, and deliberately stays out of
+`refresh_session_review_status`; `point` is a review flag in the same family as
+`starred` and `rejected` and belongs inside it.
 
 ```sql
 -- 004_point_flag.sql
