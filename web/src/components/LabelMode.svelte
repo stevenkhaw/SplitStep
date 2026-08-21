@@ -3,6 +3,7 @@
   import { api } from '../lib/api'
   import { isEditableTarget } from '../lib/keyboard'
   import { FLAG_ORDER, LabelController, persistLabel } from '../lib/labels'
+  import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { BoundaryFlag, LabelAction, Verdict } from '../lib/labels'
@@ -50,6 +51,13 @@
   let loadError = $state<string | null>(null)
   let version = $state(0)
   let deck = $state<VideoDeck>()
+  let scrubTrack = $state<HTMLDivElement>()
+  let scrubFill = $state<HTMLDivElement>()
+  let elapsedEl = $state<HTMLSpanElement>()
+  // Not $state: read only from the pointer handlers below, never from the
+  // template, so making it reactive would just be a signal nothing ever
+  // subscribes to.
+  let scrubbing = false
 
   // One fetch per source, merged. Labels are per-source and a session can
   // hold several; the controller matches them to rallies by exact detector
@@ -100,6 +108,61 @@
   function srcFor(sourceId: string): string {
     const s: Source | undefined = detail.sources.find((x) => x.id === sourceId)
     return s ? api.proxyUrl(detail.session.id, s.idx) : ''
+  }
+
+  // Paints the fill and the elapsed readout for an absolute timestamp.
+  // Written straight to the DOM, same rule QueueMode's progress bar and
+  // ZoomBand's playhead follow: `onprogress` fires up to ~60Hz, and routing
+  // that through Svelte state would re-render this whole panel every frame.
+  function renderScrubAt(ms: number): void {
+    if (!current) return
+    const fraction = scrubMsToFraction(ms, current.det_start_ms, current.det_end_ms)
+    if (scrubFill) scrubFill.style.transform = `scaleX(${fraction})`
+    if (elapsedEl) elapsedEl.textContent = formatTs(ms - current.det_start_ms)
+  }
+
+  // VideoDeck's onprogress already reports a 0..1 fraction computed against
+  // exactly this rally's span (startMs/endMs below are det_start_ms/
+  // det_end_ms), so this is the play-tracking half of the scrub bar --
+  // pointer drags go through seekToFraction instead, which is the same
+  // round trip in the other direction.
+  function onProgress(fraction: number): void {
+    if (!current) return
+    renderScrubAt(fractionToScrubMs(fraction, current.det_start_ms, current.det_end_ms))
+  }
+
+  function scrubFraction(e: PointerEvent): number {
+    if (!scrubTrack) return 0
+    const rect = scrubTrack.getBoundingClientRect()
+    return (e.clientX - rect.left) / rect.width
+  }
+
+  // Shared by click-to-seek and every pointermove of a drag: seek the deck,
+  // then paint immediately rather than waiting for the next onprogress tick
+  // (~16ms away but a visible stutter on a drag, which fires far faster than
+  // that).
+  function seekToFraction(fraction: number): void {
+    if (!current) return
+    const ms = fractionToScrubMs(fraction, current.det_start_ms, current.det_end_ms)
+    deck?.seekTo(ms)
+    renderScrubAt(ms)
+  }
+
+  function onScrubDown(e: PointerEvent): void {
+    if (!scrubTrack) return
+    scrubbing = true
+    scrubTrack.setPointerCapture(e.pointerId)
+    seekToFraction(scrubFraction(e))
+  }
+
+  function onScrubMove(e: PointerEvent): void {
+    if (!scrubbing) return
+    seekToFraction(scrubFraction(e))
+  }
+
+  function endScrub(e: PointerEvent): void {
+    scrubbing = false
+    scrubTrack?.releasePointerCapture(e.pointerId)
   }
 
   async function apply(action: LabelAction | null): Promise<void> {
@@ -196,6 +259,7 @@
       startMs={current.det_start_ms}
       endMs={current.det_end_ms}
       onended={() => deck?.replay()}
+      onprogress={onProgress}
     />
     <div
       class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
@@ -203,6 +267,41 @@
     >
       {stats.index + 1} / {stats.total} · {stats.labelled} labelled
     </div>
+  </div>
+
+  <!--
+    Taller and more saturated than QueueMode's progress strip on purpose
+    (that one is a passive indicator; this one has to read as draggable at a
+    glance). pointerdown/pointermove drive both the click-to-seek and the
+    drag, not onclick -- matching ZoomBand's onscrub, and it's what lets a
+    plain tabindex="0" + role="slider" satisfy svelte-check's a11y checks
+    with no keyboard handler: the click-events-have-key-events rule only
+    fires for onclick.
+
+    Deliberately no arrow-key seeking on this control -- ArrowLeft/Right are
+    prev/next rally in this mode (see onKey above), and giving them a second
+    meaning here would make them do different things depending on which
+    element happens to have focus.
+  -->
+  <div
+    bind:this={scrubTrack}
+    class="relative mt-3 h-3 cursor-ew-resize rounded bg-neutral-800"
+    onpointerdown={onScrubDown}
+    onpointermove={onScrubMove}
+    onpointerup={endScrub}
+    onpointercancel={endScrub}
+    role="slider"
+    tabindex="0"
+    aria-label="scrub within rally"
+    aria-valuemin={current.det_start_ms}
+    aria-valuemax={current.det_end_ms}
+    aria-valuenow={current.det_start_ms}
+  >
+    <div
+      bind:this={scrubFill}
+      class="h-full origin-left rounded bg-blue-500"
+      style="transform: scaleX(0)"
+    ></div>
   </div>
 
   <!--
@@ -214,7 +313,8 @@
   -->
   <div class="mt-2 font-mono text-xs text-neutral-400">
     {formatTs(current.det_start_ms)} ·
-    {formatDuration(current.det_end_ms - current.det_start_ms)}
+    {formatDuration(current.det_end_ms - current.det_start_ms)} ·
+    <span bind:this={elapsedEl}>{formatTs(0)}</span> / {formatTs(current.det_end_ms - current.det_start_ms)}
   </div>
 
   <div class="mt-3 flex flex-wrap gap-2">
