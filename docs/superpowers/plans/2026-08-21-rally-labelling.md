@@ -2358,13 +2358,18 @@ Expected: PASS, 20 passed
 In `web/src/components/QueueMode.svelte`, add to `Props`:
 
 ```ts
-    /** Enter label mode, on this rally -- Session threads it through as
-     * startAtRallyId the same way onopen_timeline's rallyId is, so a fresh
-     * QueueController on return jumps back here instead of opening on
-     * whichever rally is first-unreviewed. Separate from review: a verdict
-     * is a note about the detector, not a decision about the clip, so it
-     * deliberately does not touch star/reject or the session's review status. */
-    onopen_label: (rallyId: string) => void
+    /** Enter label mode, optionally on this rally -- Session threads it
+     * through as startAtRallyId the same way onopen_timeline's rallyId is,
+     * so a fresh QueueController on return jumps back here instead of
+     * opening on whichever rally is first-unreviewed. `null` when `current`
+     * is undefined (the pass is finished): unlike `t`/timeline, label mode
+     * needs no specific rally to open on, since LabelController iterates the
+     * full unfiltered rally list rather than following the queue's cursor --
+     * and "just finished reviewing" is exactly when a reviewer is most
+     * likely to want it. Separate from review: a verdict is a note about the
+     * detector, not a decision about the clip, so it deliberately does not
+     * touch star/reject or the session's review status. */
+    onopen_label: (rallyId: string | null) => void
 ```
 
 destructure it:
@@ -2373,21 +2378,27 @@ destructure it:
   let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
 ```
 
-add to the `switch` in `onKey`, after the `'t'` case, guarded the same way as `'t'`/`'T'` (no `current` means the queue is finished, and there is nothing to open a label view on):
+add to the `switch` in `onKey`, after the `'t'` case. Unlike `'t'`/`'T'`, this has **no** `if (current)` guard -- `current` is undefined once the pass is finished, and that is exactly the moment a reviewer is most likely to want to open label mode, since LabelController's own list is unfiltered and needs no current rally to iterate:
 
 ```ts
       case 'l':
       case 'L':
-        if (current) onopen_label(current.id)
+        onopen_label(current ? current.id : null)
         break
 ```
 
-and extend the help line to:
+extend the help line to:
 
 ```svelte
   <p class="mt-4 font-mono text-xs text-neutral-500">
     S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
+```
+
+and give the "Session reviewed" panel (rendered when `current` is undefined) a help line of its own -- it previously rendered none at all, leaving the only entry point into label mode from that screen undiscoverable:
+
+```svelte
+    <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
 ```
 
 - [ ] **Step 8: Wire the third mode into Session**
@@ -2415,8 +2426,11 @@ Add next to `closeTimeline`:
   // `{#if mode === 'queue'} ... {:else if mode === 'label'} ... {:else if
   // focusedRallyId}` chain below tests `mode === 'label'` before it ever
   // reaches the TimelineMode branch, so setting focusedRallyId here cannot
-  // mis-route into the timeline.
-  function openLabel(rallyId: string) {
+  // mis-route into the timeline -- including when rallyId is null (the queue
+  // passes null once the pass is finished), since that branch's guard is
+  // `focusedRallyId` truthiness only reached in the TimelineMode `{:else
+  // if}`, never in the `mode === 'label'` check above it.
+  function openLabel(rallyId: string | null) {
     focusedRallyId = rallyId
     mode = 'label'
   }

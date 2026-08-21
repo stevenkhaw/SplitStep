@@ -18,13 +18,18 @@
      * session correctly, instead of seeding from `detail.rallies`' stale
      * server-snapshot flags. */
     onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
-    /** Enter label mode, on this rally -- Session threads it through as
-     * startAtRallyId the same way onopen_timeline's rallyId is, so a fresh
-     * QueueController on return jumps back here instead of opening on
-     * whichever rally is first-unreviewed. Separate from review: a verdict
-     * is a note about the detector, not a decision about the clip, so it
-     * deliberately does not touch star/reject or the session's review status. */
-    onopen_label: (rallyId: string) => void
+    /** Enter label mode, optionally on this rally -- Session threads it
+     * through as startAtRallyId the same way onopen_timeline's rallyId is,
+     * so a fresh QueueController on return jumps back here instead of
+     * opening on whichever rally is first-unreviewed. `null` when `current`
+     * is undefined (the pass is finished): unlike `t`/timeline, label mode
+     * needs no specific rally to open on, since LabelController iterates the
+     * full unfiltered rally list rather than following the queue's cursor --
+     * and "just finished reviewing" is exactly when a reviewer is most
+     * likely to want it. Separate from review: a verdict is a note about the
+     * detector, not a decision about the clip, so it deliberately does not
+     * touch star/reject or the session's review status. */
+    onopen_label: (rallyId: string | null) => void
     /** Open on this rally instead of the first unreviewed one, when it is
      * still in the queue. Session passes the rally the user just left the
      * timeline from -- see the constructor call below for why a remount
@@ -204,7 +209,9 @@
         break
       case 'l':
       case 'L':
-        if (current) onopen_label(current.id)
+        // No `if (current)` guard here, unlike 't' -- see the onopen_label
+        // doc comment above for why label mode has no need of one.
+        onopen_label(current ? current.id : null)
         break
     }
   }
@@ -231,6 +238,10 @@
     <p class="mt-2 font-mono text-sm text-neutral-400">
       {stats.total} seen · ★{stats.starredCount} starred · ✕{stats.rejectedCount} rejected
     </p>
+    <!-- M3: this screen used to render no help line at all, so the only way
+         into label mode -- pressing L -- was undiscoverable exactly when a
+         reviewer who just finished a pass is most likely to want it. -->
+    <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
     <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
          reel" here. Both need clip export, which is Plan 3. -->
   </section>

@@ -167,6 +167,32 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     expect(target.textContent).toMatch(/rally 3 \/ 3/)
   })
 
+  it('opens label mode from the "Session reviewed" screen, with no current rally', async () => {
+    // M3 regression: QueueMode's `l` handler used to require `current`,
+    // copied from the `t`/timeline case where a specific rally is needed --
+    // but LabelController iterates the full unfiltered rally list and needs
+    // no current rally, so the copied guard closed off the only entry point
+    // into label mode exactly when a reviewer finishing a pass would most
+    // want to open it.
+    mockApi.getSession.mockResolvedValue(
+      detailWith([
+        rally('r1', 1, { reviewed_at: '2026-08-19T11:00:00Z' }),
+        rally('r2', 2, { reviewed_at: '2026-08-19T11:01:00Z' }),
+        rally('r3', 3, { reviewed_at: '2026-08-19T11:02:00Z' }),
+      ]),
+    )
+
+    instance = mount(SessionHarness, { target })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Session reviewed/))
+
+    press('l')
+    // LabelMode's own help line -- only rendered once it has actually
+    // mounted, so this proves label mode opened rather than the key doing
+    // nothing.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/back to queue/))
+  })
+
   it('still opens on the first unreviewed rally when the timeline was never used', async () => {
     // The restore must not defeat the normal resume behaviour: with rallies
     // 1 and 2 already judged, a fresh session opens on rally 3.

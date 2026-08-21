@@ -104,8 +104,11 @@
   // `{#if mode === 'queue'} ... {:else if mode === 'label'} ... {:else if
   // focusedRallyId}` chain below tests `mode === 'label'` before it ever
   // reaches the TimelineMode branch, so setting focusedRallyId here cannot
-  // mis-route into the timeline.
-  function openLabel(rallyId: string) {
+  // mis-route into the timeline -- including when rallyId is null (M3: the
+  // queue passes null once the pass is finished), since that branch's guard
+  // is `focusedRallyId` truthiness only reached in the TimelineMode `{:else
+  // if}`, never in the `mode === 'label'` check above it.
+  function openLabel(rallyId: string | null) {
     focusedRallyId = rallyId
     mode = 'label'
   }
