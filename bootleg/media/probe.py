@@ -132,15 +132,16 @@ def _recorded_at(tags: dict) -> str | None:
     return None
 
 
-def probe(path: Path, timeout: float | None = None) -> MediaInfo:
-    """Read a media file's format/stream info via ffprobe.
+def ffprobe_json(path: Path, timeout: float | None = None) -> dict:
+    """ffprobe's `-show_format -show_streams` document for `path`.
 
-    `timeout` is None by default so today's background-job call sites
-    (`make_thumbs`) are unaffected. A caller inside a request handler should
-    pass a short timeout instead -- every route runs on Starlette's shared
-    anyio worker-thread pool, so a wedged ffprobe there (e.g. against a
-    spun-down external drive) would otherwise tie up a request-handling
-    thread indefinitely. Mirrors `run_ffmpeg`'s handling in transcode.py.
+    Public and separate from `probe()` because two callers ask different
+    questions of the same document. `probe()` answers media-level facts
+    (duration, display size, rotation) and normalises them into MediaInfo;
+    `concat.clip_params` needs raw stream-level codec parameters that
+    MediaInfo deliberately does not carry, because only the concat demuxer
+    cares about them. One subprocess implementation, one place where a
+    missing ffprobe or a spun-down drive is turned into a ProbeError.
     """
     try:
         proc = subprocess.run(
@@ -156,8 +157,20 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
         raise ProbeError(f"ffprobe timed out after {timeout}s for {path}") from exc
     if proc.returncode != 0:
         raise ProbeError(f"ffprobe failed for {path}: {proc.stderr.strip()}")
+    return json.loads(proc.stdout or "{}")
 
-    data = json.loads(proc.stdout or "{}")
+
+def probe(path: Path, timeout: float | None = None) -> MediaInfo:
+    """Read a media file's format/stream info via ffprobe.
+
+    `timeout` is None by default so today's background-job call sites
+    (`make_thumbs`) are unaffected. A caller inside a request handler should
+    pass a short timeout instead -- every route runs on Starlette's shared
+    anyio worker-thread pool, so a wedged ffprobe there (e.g. against a
+    spun-down external drive) would otherwise tie up a request-handling
+    thread indefinitely. Mirrors `run_ffmpeg`'s handling in transcode.py.
+    """
+    data = ffprobe_json(path, timeout)
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if video is None:
