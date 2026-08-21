@@ -4,7 +4,7 @@
   import { isEditableTarget } from '../lib/keyboard'
   import { FLAG_ORDER, LabelController, LabelWriter } from '../lib/labels'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
-  import { createToaster } from '../lib/toaster.svelte'
+  import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { BoundaryFlag, LabelAction, Verdict } from '../lib/labels'
   import type { LabelRecord, SessionDetail, Source } from '../lib/types'
@@ -368,7 +368,7 @@
 {#if toaster.toasts.length > 0}
   <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
     {#each toaster.toasts as t (t.id)}
-      <div class="rounded bg-red-500/90 px-3 py-2 text-sm text-white shadow-lg">
+      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-sm shadow-lg">
         {t.message}
       </div>
     {/each}

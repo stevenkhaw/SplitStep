@@ -15,6 +15,7 @@ function rally(idx: number, over: Partial<Rally> = {}): Rally {
     confidence: 0.7,
     starred: 0,
     rejected: 0,
+    point: 0,
     reviewed_at: null,
     ...over,
   }
@@ -52,8 +53,10 @@ describe('QueueController', () => {
       rallyId: 'r1',
       starred: true,
       rejected: false,
+      point: false,
       previousStarred: false,
       previousRejected: false,
+      previousPoint: false,
     })
     expect(q.current?.id).toBe('r1') // stays put: only skip() advances
     expect(q.starredCount).toBe(1)
@@ -103,7 +106,13 @@ describe('QueueController', () => {
   it('undoes a star, restoring both position and count', () => {
     q.star()
     const undone = q.undo()
-    expect(undone).toEqual({ kind: 'undo', rallyId: 'r1', starred: false, rejected: false })
+    expect(undone).toEqual({
+      kind: 'undo',
+      rallyId: 'r1',
+      starred: false,
+      rejected: false,
+      point: false,
+    })
     expect(q.current?.id).toBe('r1')
     expect(q.starredCount).toBe(0)
   })
@@ -461,5 +470,62 @@ describe('QueueController — non-advancing review (2026-08-20 review UX spec)',
     q.undo()
     expect(q.index).toBe(0)
     expect(q.isRejected('r1')).toBe(false)
+  })
+})
+
+describe('QueueController.point', () => {
+  let q: QueueController
+
+  beforeEach(() => {
+    q = new QueueController([rally(1), rally(2), rally(3)])
+  })
+
+  it('point() toggles and does not advance', () => {
+    const action = q.point()
+    expect(action?.kind).toBe('point')
+    expect(action?.point).toBe(true)
+    expect(q.index).toBe(0)
+    expect(q.currentIsPoint).toBe(true)
+
+    expect(q.point()?.point).toBe(false)
+    expect(q.currentIsPoint).toBe(false)
+  })
+
+  it('point is independent of star', () => {
+    // A highlight is a subset of points in practice but not by construction:
+    // a warm-up rally can be worth watching without being a point.
+    q.point()
+    q.star()
+    expect(q.currentIsPoint).toBe(true)
+    expect(q.currentIsStarred).toBe(true)
+  })
+
+  it('seeds pointCount from the server snapshot', () => {
+    const seeded = new QueueController([rally(1, { point: 1 }), rally(2)])
+    expect(seeded.pointCount).toBe(1)
+  })
+
+  it('undo restores the previous point state', () => {
+    q.point()
+    q.undo()
+    expect(q.currentIsPoint).toBe(false)
+  })
+
+  it('revert restores the failed action rallys point without moving the cursor', () => {
+    const action = q.point()!
+    q.skip()
+    q.revert(action)
+    expect(q.index).toBe(1)
+    q.back()
+    expect(q.currentIsPoint).toBe(false)
+  })
+
+  it('skip carries point through untouched', () => {
+    // Same reasoning as starred/rejected: the right arrow is the only way
+    // forward, so it lands on rallies the user has just flagged and must not
+    // silently clear one.
+    q.point()
+    const action = q.skip()
+    expect(action?.point).toBe(true)
   })
 })

@@ -77,6 +77,7 @@ function detail(): SessionDetail {
     confidence: 0.9,
     starred: 0,
     rejected: 0,
+    point: 0,
     reviewed_at: null,
   }
   return {

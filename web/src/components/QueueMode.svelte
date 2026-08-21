@@ -1,10 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { describeExportResult, exportSetLabel } from '../lib/export'
   import { isEditableTarget } from '../lib/keyboard'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
-  import { createToaster } from '../lib/toaster.svelte'
+  import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { QueueAction } from '../lib/queue'
   import type { Rally, SessionDetail, Source } from '../lib/types'
@@ -96,6 +97,10 @@
     version
     return queue.currentIsRejected
   })
+  const currentPoint = $derived.by(() => {
+    version
+    return queue.currentIsPoint
+  })
   const stats = $derived.by(() => {
     version
     return {
@@ -103,6 +108,7 @@
       total: queue.total,
       starredCount: queue.starredCount,
       rejectedCount: queue.rejectedCount,
+      pointCount: queue.pointCount,
       remainingMs: queue.remainingMs(speed),
     }
   })
@@ -148,6 +154,24 @@
     }
   }
 
+  // Cutting is fire-and-forget from here: the jobs badge already shows
+  // encode progress, so this only needs to report what plan_export decided
+  // -- queued vs. the three reasons the rest were not -- through the same
+  // toaster star/reject failures use, so a second press mid-encode reads as
+  // honest progress rather than a dead button.
+  async function exportSet(which: 'points' | 'starred'): Promise<void> {
+    try {
+      const result = await api.exportClips(detail.session.id, which)
+      // 'info': this is the plan's outcome, not a failure -- a queued/
+      // already-cut/in-flight/unavailable breakdown is the primary success
+      // feedback for the export feature, and rendering it red would read as
+      // the request having failed when it did exactly what was asked.
+      toaster.push(describeExportResult(which, result), 'info')
+    } catch (e) {
+      toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
+    }
+  }
+
   function onProgress(fraction: number) {
     // Written straight to the DOM. Routing a 60Hz update through Svelte state
     // would re-render the whole panel on every frame.
@@ -171,6 +195,10 @@
       case 'x':
       case 'X':
         apply(queue.reject())
+        break
+      case 'p':
+      case 'P':
+        apply(queue.point())
         break
       case 'r':
       case 'R':
@@ -242,8 +270,27 @@
          into label mode -- pressing L -- was undiscoverable exactly when a
          reviewer who just finished a pass is most likely to want it. -->
     <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
-    <!-- Spec 6 also puts "Export starred clips (4K)" and "Add all starred to a
-         reel" here. Both need clip export, which is Plan 3. -->
+    <!-- Cutting only -- reel creation is a separate plan (Plan B). Encoding
+         progress is the jobs badge's job; this fires the request and reports
+         the plan's outcome, nothing more. -->
+    <div class="mt-4 flex items-center justify-center gap-3">
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.pointCount === 0}
+        onclick={() => exportSet('points')}
+      >
+        Export point clips ({stats.pointCount})
+      </button>
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.starredCount === 0}
+        onclick={() => exportSet('starred')}
+      >
+        Export starred clips ({stats.starredCount})
+      </button>
+    </div>
   </section>
 {:else}
   <!-- `relative` so the position counter can sit over the video. The counter
@@ -285,25 +332,29 @@
         class="text-base leading-none {currentStarred ? 'text-yellow-400' : 'text-neutral-700'}"
         title={currentStarred ? 'starred' : 'not starred'}
       >★</span>
+      <span
+        class="text-base leading-none {currentPoint ? 'text-green-400' : 'text-neutral-700'}"
+        title={currentPoint ? 'point' : 'not a point'}
+      >●</span>
       rally {stats.index + 1} / {stats.total} ·
       {formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}
       {#if currentRejected}<span class="text-red-400">· rejected</span>{/if}
     </span>
     <span>
-      ★{stats.starredCount} ✕{stats.rejectedCount} ·
+      ★{stats.starredCount} ✕{stats.rejectedCount} ●{stats.pointCount} ·
       ~{formatDuration(stats.remainingMs)} left at {speed}×
     </span>
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
+    S star · P point · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
   </p>
 {/if}
 
 {#if toaster.toasts.length > 0}
   <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
     {#each toaster.toasts as t (t.id)}
-      <div class="rounded bg-red-500/90 px-3 py-2 text-sm text-white shadow-lg">
+      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-sm shadow-lg">
         {t.message}
       </div>
     {/each}

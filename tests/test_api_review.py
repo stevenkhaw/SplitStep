@@ -748,3 +748,33 @@ def test_create_app_wires_the_spa_mount_after_the_api_routes(library, seeded):
         r = c.get(f"/media/{seeded['session_id']}/{seeded['idx']}/proxy.mp4")
         assert r.status_code == 404
         assert r.json()["detail"] == "Not found: proxy.mp4"
+
+
+def test_point_route_sets_the_flag(client, conn, seeded):
+    rally_id = conn.execute("SELECT id FROM rallies ORDER BY idx").fetchone()["id"]
+    r = client.post(f"/api/rallies/{rally_id}/point", json={"point": True})
+    assert r.status_code == 200
+    assert conn.execute(
+        "SELECT point FROM rallies WHERE id = ?", (rally_id,)
+    ).fetchone()["point"] == 1
+
+
+def test_point_route_reports_session_status(client, conn, seeded):
+    rally_id = conn.execute("SELECT id FROM rallies ORDER BY idx").fetchone()["id"]
+    r = client.post(f"/api/rallies/{rally_id}/point", json={"point": True})
+    assert "session_status" in r.json()
+
+
+def test_point_route_404s_on_an_unknown_rally(client, seeded):
+    r = client.post("/api/rallies/nope/point", json={"point": True})
+    assert r.status_code == 404
+
+
+def test_point_does_not_touch_starred(client, conn, seeded):
+    rally_id = conn.execute("SELECT id FROM rallies ORDER BY idx").fetchone()["id"]
+    client.post(f"/api/rallies/{rally_id}/star", json={"starred": True})
+    client.post(f"/api/rallies/{rally_id}/point", json={"point": True})
+    row = conn.execute(
+        "SELECT starred, point FROM rallies WHERE id = ?", (rally_id,)
+    ).fetchone()
+    assert (row["starred"], row["point"]) == (1, 1)

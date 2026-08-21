@@ -52,6 +52,7 @@ function rally(overrides: Partial<Rally> = {}): Rally {
     confidence: 0.9,
     starred: 0,
     rejected: 0,
+    point: 0,
     reviewed_at: null,
     ...overrides,
   }

@@ -1,4 +1,13 @@
-import type { Job, LabelRecord, Preset, ScoreSeries, Session, SessionDetail, Source } from './types'
+import type {
+  ExportResult,
+  Job,
+  LabelRecord,
+  Preset,
+  ScoreSeries,
+  Session,
+  SessionDetail,
+  Source,
+} from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -21,9 +30,18 @@ const post = (path: string, body?: unknown) =>
 export const api = {
   listSessions: () => req<Session[]>('/api/sessions'),
   getSession: (id: string) => req<SessionDetail>(`/api/sessions/${id}`),
+  // Not routed through post() -- its hardcoded return type covers only the
+  // ok/session_status/count/id shape other routes use, not the four counts
+  // plan_export reports. `setup` below hits the same mismatch the same way.
+  exportClips: (sessionId: string, which: 'points' | 'starred') =>
+    req<ExportResult>(`/api/sessions/${sessionId}/export`, {
+      method: 'POST',
+      body: JSON.stringify({ which }),
+    }),
 
   star: (id: string, starred: boolean) => post(`/api/rallies/${id}/star`, { starred }),
   reject: (id: string, rejected: boolean) => post(`/api/rallies/${id}/reject`, { rejected }),
+  point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
   reviewed: (id: string) => post(`/api/rallies/${id}/reviewed`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),

@@ -5,6 +5,7 @@ export interface Session {
   status: string
   rally_count: number
   starred_count: number
+  point_count: number
 }
 
 export interface Source {
@@ -35,11 +36,12 @@ export interface Rally {
   confidence: number
   starred: number
   rejected: number
+  point: number
   reviewed_at: string | null
 }
 
 export interface SessionDetail {
-  session: Omit<Session, 'rally_count' | 'starred_count'>
+  session: Omit<Session, 'rally_count' | 'starred_count' | 'point_count'>
   sources: Source[]
   rallies: Rally[]
 }
@@ -63,6 +65,18 @@ export interface Job {
   status: string
   progress: number
   error: string | null
+}
+
+// The four outcomes plan_export sorts a set's rallies into (bootleg/export.py
+// ExportPlan): a clip on disk, a job already working the same span, and a
+// rally whose source vanished are distinct reasons nothing new was queued,
+// not one "already done" bucket -- see lib/export.ts's describeExportResult.
+export interface ExportResult {
+  queued: number
+  already_cut: number
+  in_flight: number
+  unavailable: number
+  total: number
 }
 
 export interface LabelRecord {

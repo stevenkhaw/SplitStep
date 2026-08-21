@@ -1,4 +1,7 @@
+import contextlib
+import os
 import subprocess
+import uuid
 from pathlib import Path
 
 from bootleg.accel import Accel, detect_accel
@@ -89,6 +92,119 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: i
     args.append(str(dst))
 
     run_ffmpeg(args)
+
+
+# The locked clip profile. CHANGING ANY OF THESE BREAKS `-c copy` AGAINST
+# EVERY CLIP EVER CUT: the concat demuxer refuses streams whose codec
+# parameters differ, so a reel mixing an old clip and a new one either fails
+# or produces artifacts. Sources that do not match are conformed at cut time
+# rather than at concat time -- an upscale is a smaller price than a clip
+# library that cannot be concatenated.
+CLIP_WIDTH = 3840
+CLIP_HEIGHT = 2160
+CLIP_FPS = 30
+CLIP_CRF = 20
+
+
+def make_clip(
+    src: Path,
+    dst: Path,
+    *,
+    start_ms: int,
+    end_ms: int,
+    rotation_deg: int = 0,
+) -> None:
+    """Cut one span to the locked clip profile.
+
+    Software libx264 on purpose, never a hardware encoder: those emit
+    vendor-specific SPS/PPS headers, so a clip cut on the Mac and one cut on
+    the 4070Ti would fail to concat cleanly or concat with artifacts. libx264
+    produces identical headers on every machine, permanently. Roughly 30
+    seconds per 20-second 4K clip, which is the right trade for an artifact
+    that must stay byte-compatible for years.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    duration_ms = end_ms - start_ms
+    if duration_ms <= 0:
+        raise ValueError(f"clip needs a positive duration, got {duration_ms}ms")
+
+    # Rotation FIRST, then scale, then pad. At 90 and 270 the rotation swaps
+    # the frame's axes, so scaling before rotating pads against the wrong one.
+    # Irrelevant at 0 and 180, wrong the moment the camera is mounted sideways.
+    vf = ",".join(
+        f
+        for f in (
+            rotation_filter(rotation_deg),
+            f"scale={CLIP_WIDTH}:{CLIP_HEIGHT}:force_original_aspect_ratio=decrease",
+            f"pad={CLIP_WIDTH}:{CLIP_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+        )
+        if f
+    )
+
+    # Encode to a sibling temp path and os.replace() onto the final name only
+    # once ffmpeg exits 0 -- never write `dst` directly. plan_export's
+    # incrementality (clip_relpath's docstring: "a clip either exists at the
+    # path its bounds imply, or it does not") silently assumed exists() means
+    # complete; with -y ffmpeg writing straight to dst, a *running* encode's
+    # partial output already satisfies exists(), so a second export mid-encode
+    # reported it as already cut, and a job killed mid-write (disk full,
+    # server restart) left a permanently truncated file at exactly the
+    # span-derived path -- not queued, not running, so never re-cut, and a
+    # future -c copy concat would splice in a broken clip. os.replace() is
+    # atomic within a filesystem, and the temp path is a sibling of dst (same
+    # dir, hence same filesystem) so the replace can never straddle a mount.
+    #
+    # The temp name keeps dst's .mp4 suffix -- ffmpeg picks its output muxer
+    # from the extension, and a suffix-less name (tried first here) fails
+    # with "Unable to choose an output format" before it ever gets to encode
+    # a frame. Hidden (dot-prefixed) so a plain directory listing or a future
+    # glob("*.mp4") over clips_dir does not turn it up -- pathlib/glob, like
+    # the shell, does not match a leading dot against a bare "*". The uuid4
+    # plus ".part" infix before that suffix is what keeps it from colliding
+    # with or being mistaken for a real clip_relpath name, which is always
+    # exactly "NN-START-END.mp4" with no extra segments.
+    tmp = dst.with_name(f".{dst.stem}.{uuid.uuid4().hex}.part{dst.suffix}")
+    try:
+        run_ffmpeg([
+            # -noautorotate before the input, exactly as make_proxy does: a
+            # rotation this library did not choose must never reach the filter
+            # chain. -display_rotation 0 then strips stale Display Matrix side
+            # data, so a rotation-aware player cannot double-rotate a clip whose
+            # rotation is already baked into the pixels.
+            "-noautorotate",
+            "-display_rotation", "0",
+            # -ss before -i is both fast and frame-accurate here, because the
+            # output is always re-encoded. Accuracy is not optional: an in-point
+            # landing on the previous keyframe would put a second of the wrong
+            # footage at the head of the clip, and these boundaries were trimmed
+            # by hand.
+            "-ss", f"{start_ms / 1000:.3f}",
+            "-i", str(src),
+            "-t", f"{duration_ms / 1000:.3f}",
+            "-vf", vf,
+            # CFR at the locked rate. The first real source runs at 29.964 fps, so
+            # this duplicates roughly one frame in 830 -- imperceptible, and
+            # required, because mismatched frame rates break `-c copy`.
+            "-r", str(CLIP_FPS),
+            "-c:v", "libx264",
+            "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
+            "-crf", str(CLIP_CRF),
+            "-preset", "medium",
+            "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+            "-movflags", "+faststart",
+            str(tmp),
+        ])
+        os.replace(tmp, dst)
+    except BaseException:
+        # Best-effort only: a failure here (e.g. permissions) must never
+        # replace the TranscodeError/other exception already propagating with
+        # some unrelated error about the temp file. missing_ok=True alone
+        # would not save us if unlink() raises something other than
+        # FileNotFoundError, hence the explicit suppress.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
 
 
 def make_thumbs(

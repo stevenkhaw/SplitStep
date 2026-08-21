@@ -5,6 +5,7 @@ from bootleg.db.rallies import (
     list_rallies,
     replace_rallies,
     set_bounds,
+    set_clip_path,
     set_rejected,
     set_star,
 )
@@ -45,8 +46,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 4
-    assert migrate(conn) == 4
+    assert migrate(conn) == 5
+    assert migrate(conn) == 5
 
 
 def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
@@ -79,7 +80,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 4
+    assert migrate(conn) == 5
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -88,6 +89,73 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     # The rebuild must not have quietly disabled enforcement for the rest of
     # this connection's life -- 004 deliberately toggles no pragmas.
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
+    # 005 is the one irreversible reinterpretation of a user's real data on
+    # this branch: every existing star meant "a point was played out", so it
+    # copies star to the new `point` column and then clears every star,
+    # leaving `starred` free to mean "a highlight" going forward. It runs
+    # exactly once, ever, against real libraries -- there is no test using a
+    # raw pre-005 database today; every test in test_rallies_point.py starts
+    # from the already-migrated `conn` fixture, so this backfill has run
+    # against nothing but the (untested) assumption that it is correct.
+    # Migrate to 004, plant one rally per combination the backfill has to
+    # get right, then let 005 run over them.
+    conn = connect(tmp_path / "old.db")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        n = int(path.name.split("_", 1)[0])
+        if n > 4:
+            break
+        conn.executescript(path.read_text())
+        conn.execute(f"PRAGMA user_version={n}")
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s1','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src1','s1',1,'now',0,1000,1920,1080,30.0,0,'a.mov','ready')"
+    )
+    # Starred, not rejected -- the ordinary case: a filmed tiebreaker where
+    # star was the only mark available for "this is a point".
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_star','s1','src1',1,0,1000,0,1000,0.9,1,0)"
+    )
+    # Rejected, not starred -- a bad detection. rejected must survive
+    # untouched; point must not be invented for it.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_rejected','s1','src1',2,1000,2000,1000,2000,0.9,0,1)"
+    )
+    # Neither -- an ordinary unreviewed rally, must come out with point = 0.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_plain','s1','src1',3,2000,3000,2000,3000,0.9,0,0)"
+    )
+    conn.commit()
+
+    assert migrate(conn) == 5
+
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
+    # point equals the old starred, per row.
+    assert rows["r_star"]["point"] == 1
+    assert rows["r_rejected"]["point"] == 0
+    assert rows["r_plain"]["point"] == 0
+    # every starred is 0 afterwards, including the row that used to be 1.
+    assert rows["r_star"]["starred"] == 0
+    assert rows["r_rejected"]["starred"] == 0
+    assert rows["r_plain"]["starred"] == 0
+    # rejected is untouched by a migration that only ever reads/writes star
+    # and point.
+    assert rows["r_rejected"]["rejected"] == 1
+    assert rows["r_star"]["rejected"] == 0
+    assert rows["r_plain"]["rejected"] == 0
 
 
 def test_rally_cascades_when_source_deleted(library):
@@ -264,6 +332,53 @@ def test_replace_rallies_drops_rejected_when_overlap_is_small(conn):
 
     replace_rallies(conn, s, src, [Interval(30_000, 34_000, 0.7)])
     assert list_rallies(conn, s)[0]["rejected"] == 0
+
+
+def test_replace_rallies_carries_clip_path_when_the_span_is_unchanged(conn):
+    """set_clip_path's docstring: the column records "what WAS cut", and
+    Reclaim Space needs it to know an original is safe to delete. Before
+    this fix, the INSERT in replace_rallies never listed clip_path at all,
+    so any re-segment -- even one that left every span untouched -- wiped
+    every recorded clip path in the session to NULL.
+    """
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    rally_id = list_rallies(conn, s)[0]["id"]
+    set_clip_path(conn, rally_id, "sessions/2026-08-19/clips/01-1000-5000.mp4")
+
+    # A re-segment that reproduces this rally's exact span unchanged,
+    # alongside a genuinely new one it must not invent a path for.
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8), Interval(9000, 12000, 0.7)])
+
+    rows = {(r["start_ms"], r["end_ms"]): r for r in list_rallies(conn, s)}
+    assert rows[(1000, 5000)]["clip_path"] == "sessions/2026-08-19/clips/01-1000-5000.mp4"
+    assert rows[(9000, 12000)]["clip_path"] is None
+
+
+def test_replace_rallies_drops_clip_path_when_bounds_shift_even_slightly(conn):
+    """clip_path is span-specific, unlike starred/rejected/point, which is
+    why it needs its own carry-over rule rather than reusing _overlaps_any.
+    A boundary nudge small enough to keep the star by >50% overlap must NOT
+    keep pointing at a clip cut for the old span: that file's span no longer
+    matches the rally's new bounds, so clip_relpath of the current bounds
+    resolves to a different, nonexistent path -- exactly the "exists or does
+    not" property clip_relpath's docstring describes.
+    """
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    replace_rallies(conn, s, src, [Interval(1000, 5000, 0.8)])
+    rally_id = list_rallies(conn, s)[0]["id"]
+    set_clip_path(conn, rally_id, "sessions/2026-08-19/clips/01-1000-5000.mp4")
+    set_star(conn, rally_id, True)
+
+    # Shifted just enough to still count as the same rally for the star
+    # carry-over (>50% overlap), but not the identical span.
+    replace_rallies(conn, s, src, [Interval(1200, 5200, 0.7)])
+
+    row = list_rallies(conn, s)[0]
+    assert row["starred"] == 1
+    assert row["clip_path"] is None
 
 
 def test_set_rejected_hides_nothing_but_flags_the_row(conn):

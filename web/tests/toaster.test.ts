@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createToaster } from '../src/lib/toaster.svelte'
+import { createToaster, toastToneClasses } from '../src/lib/toaster.svelte'
 
 describe('createToaster', () => {
   beforeEach(() => {
@@ -60,5 +60,42 @@ describe('createToaster', () => {
     toaster.dismiss(first)
     expect(toaster.toasts).toHaveLength(1)
     expect(toaster.toasts[0].message).toBe('b')
+  })
+
+  // Every existing caller of push() is a failure notice (star/reject persist
+  // failing, a boundary edit getting refused). Defaulting the tone to
+  // 'error' is what lets all of those call sites stay exactly as they are
+  // -- one-argument calls that keep reading red -- while the export success
+  // path opts into 'info' explicitly. Flipping this default would silently
+  // restyle every one of those genuine failures.
+  it('push without a tone defaults to error', () => {
+    const toaster = createToaster()
+    toaster.push('a persist failed')
+    expect(toaster.toasts[0].tone).toBe('error')
+  })
+
+  it('an explicit info tone survives to the rendered toast', () => {
+    const toaster = createToaster()
+    toaster.push('24 queued', 'info')
+    expect(toaster.toasts[0].tone).toBe('info')
+  })
+})
+
+describe('toastToneClasses', () => {
+  it('keeps error alarming red', () => {
+    expect(toastToneClasses('error')).toMatch(/red/)
+  })
+
+  it('renders info in a distinct, non-red style', () => {
+    const classes = toastToneClasses('info')
+    expect(classes).not.toMatch(/red/)
+  })
+
+  it('is consistent for the same tone regardless of surface', () => {
+    // Both call shapes a consumer might use must still key off tone, not
+    // silently fall back to error -- that is exactly the bug where an
+    // info toast reads as red in whichever mode forgot to branch on it.
+    expect(toastToneClasses('info')).not.toBe(toastToneClasses('error'))
+    expect(toastToneClasses('info', 'muted')).not.toBe(toastToneClasses('error', 'muted'))
   })
 })

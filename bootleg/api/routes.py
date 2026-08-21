@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from bootleg.accel import detect_accel
+from bootleg.db import jobs as jobq
 from bootleg.db.labels import (
     FLAG_ORDER,
     VERDICTS,
@@ -26,6 +27,7 @@ from bootleg.db.rallies import (
     mark_reviewed,
     replace_rallies,
     set_bounds,
+    set_point,
     set_rejected,
     set_star,
 )
@@ -40,6 +42,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
+from bootleg.export import SETS, plan_export
 from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
@@ -57,6 +60,10 @@ class StarBody(BaseModel):
 
 class RejectBody(BaseModel):
     rejected: bool
+
+
+class PointBody(BaseModel):
+    point: bool
 
 
 class BoundsBody(BaseModel):
@@ -129,6 +136,17 @@ class SetupBody(BaseModel):
     preset_id: str
 
 
+class ExportBody(BaseModel):
+    which: str
+
+    @field_validator("which")
+    @classmethod
+    def check_which(cls, v: str) -> str:
+        if v not in SETS:
+            raise ValueError(f"which must be one of {list(SETS)}")
+        return v
+
+
 def _conn(request: Request) -> sqlite3.Connection:
     return request.app.state.conns.get()
 
@@ -143,7 +161,8 @@ def api_list_sessions(request: Request):
     out = []
     for s in list_sessions(conn):
         counts = conn.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(starred),0) AS starred"
+            "SELECT COUNT(*) AS total, COALESCE(SUM(starred),0) AS starred,"
+            " COALESCE(SUM(point),0) AS point"
             " FROM rallies WHERE session_id = ? AND rejected = 0",
             (s["id"],),
         ).fetchone()
@@ -151,6 +170,7 @@ def api_list_sessions(request: Request):
             **dict(s),
             "rally_count": counts["total"],
             "starred_count": counts["starred"],
+            "point_count": counts["point"],
         })
     return out
 
@@ -165,6 +185,29 @@ def api_get_session(session_id: str, request: Request):
         "session": dict(session),
         "sources": [dict(r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
+    }
+
+
+@router.post("/api/sessions/{session_id}/export")
+def api_export(session_id: str, body: ExportBody, request: Request):
+    conn = _conn(request)
+    if get_session(conn, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    library = _library(request)
+
+    plan = plan_export(library, conn, session_id, body.which)
+    for payload in plan.pending:
+        jobq.enqueue(conn, "clip", payload)
+
+    # `total` comes from the plan, not a second COUNT(*) -- two queries that
+    # must agree is the shape that let already_cut silently absorb in-flight
+    # and unavailable rallies before.
+    return {
+        "queued": len(plan.pending),
+        "already_cut": plan.already_cut,
+        "in_flight": plan.in_flight,
+        "unavailable": plan.unavailable,
+        "total": plan.total,
     }
 
 
@@ -207,6 +250,17 @@ def api_reject(rally_id: str, body: RejectBody, request: Request):
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)
     set_rejected(conn, rally_id, body.rejected)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/point")
+def api_point(rally_id: str, body: PointBody, request: Request):
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    set_point(conn, rally_id, body.point)
+    # Refreshes review status, unlike the label route: marking a point is a
+    # ruling on the clip in the same family as star and reject, and
+    # reviewed_at records that a human ruled on the rally at all.
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 

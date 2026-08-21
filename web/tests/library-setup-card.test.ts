@@ -381,4 +381,39 @@ describe('Library', () => {
       expect(mockApi.getSession).toHaveBeenCalledTimes(1)
     })
   })
+
+  it('renders the point count beside the star count, points first', async () => {
+    // point_count and starred_count are independent -- migration 005 moved
+    // every pre-existing star to point and cleared stars, so a session with
+    // real points and zero stars is the exact case this card exists to
+    // surface, not an edge case to shrug off.
+    mockApi.listSessions.mockResolvedValue([
+      {
+        id: 's-points',
+        title: 'Points Session',
+        played_on: '2026-08-19',
+        status: 'ready',
+        rally_count: 32,
+        point_count: 24,
+        starred_count: 0,
+      },
+    ])
+
+    instance = mount(Library, { target, props: {} })
+    flushSync()
+
+    await vi.waitFor(() => {
+      expect(target.querySelector('button')).not.toBeNull()
+    })
+
+    const summary = target.querySelector('.font-mono')
+    expect(summary?.textContent).toContain('P24')
+    expect(summary?.textContent).toContain('★0')
+    // Points is the structural fact (a session has points); starred is a
+    // highlight subset of that. The count that reads first should be the
+    // more numerous, more structural one.
+    expect(summary!.textContent!.indexOf('P24')).toBeLessThan(
+      summary!.textContent!.indexOf('★0')
+    )
+  })
 })

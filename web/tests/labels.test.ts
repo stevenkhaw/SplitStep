@@ -16,6 +16,7 @@ function rally(idx: number, over: Partial<Rally> = {}): Rally {
     confidence: 0.7,
     starred: 0,
     rejected: 0,
+    point: 0,
     reviewed_at: null,
     ...over,
   }

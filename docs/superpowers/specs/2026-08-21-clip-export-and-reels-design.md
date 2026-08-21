@@ -85,7 +85,7 @@ lives in its own table, and deliberately stays out of
 `starred` and `rejected` and belongs inside it.
 
 ```sql
--- 004_point_flag.sql
+-- 005_point_flag.sql
 ALTER TABLE rallies ADD COLUMN point INTEGER NOT NULL DEFAULT 0;
 
 -- One-time reinterpretation of existing data, and it is a reinterpretation
@@ -202,7 +202,7 @@ lets a reel span sessions once there is more than one.
 migrate.
 
 ```sql
--- 005_reel_items_by_span.sql
+-- 006_reel_items_by_span.sql
 DROP TABLE reel_items;
 CREATE TABLE reel_items (
   reel_id   TEXT NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
@@ -343,7 +343,7 @@ element preload the review queue relies on.
   mismatch path taking the re-encode fallback.
 - **`replace_rallies` carries `point` across by overlap** — the test that stops
   a re-segment wiping every mark.
-- **Migration `004`** backfills exactly once and correctly; **`005`** recreates
+- **Migration `005`** backfills exactly once and correctly; **`006`** recreates
   `reel_items` with no rally foreign key.
 - **Span-derived clip paths**: an identical span after a re-segment resolves to
   the same file, so export skips it.

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from bootleg.api.app import create_app
 from bootleg.api.routes import _evict_old_frames
 from bootleg.db.presets import create_preset
-from bootleg.db.rallies import list_rallies, replace_rallies, set_star
+from bootleg.db.rallies import list_rallies, replace_rallies, set_point, set_rejected, set_star
 from bootleg.db.schema import connect
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.geometry import Quad
@@ -47,6 +47,26 @@ def test_list_sessions_includes_counts(client, seeded):
     assert len(body) == 1
     assert body[0]["rally_count"] == 2
     assert body[0]["starred_count"] == 0
+
+
+def test_list_sessions_reports_point_count(client, conn, seeded):
+    # Points and stars are independent flags (a point need not be starred),
+    # so a session can carry points with zero stars -- the case the Library
+    # card exists to surface. A rejected rally is not a rally at all, so it
+    # must not inflate point_count any more than it inflates rally_count or
+    # starred_count; both live rows here are marked as points, but only one
+    # survives the rejected=0 filter.
+    rallies = list_rallies(conn, seeded["session_id"])
+    set_point(conn, rallies[0]["id"], True)
+    set_point(conn, rallies[1]["id"], True)
+    set_rejected(conn, rallies[1]["id"], True)
+
+    r = client.get("/api/sessions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body[0]["point_count"] == 1
+    assert body[0]["starred_count"] == 0
+    assert body[0]["rally_count"] == 1
 
 
 def test_get_session_returns_sources_and_rallies(client, seeded):

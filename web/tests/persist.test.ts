@@ -7,6 +7,7 @@ function api(overrides: Partial<PersistApi> = {}): PersistApi {
   return {
     star: vi.fn().mockResolvedValue(undefined),
     reject: vi.fn().mockResolvedValue(undefined),
+    point: vi.fn().mockResolvedValue(undefined),
     reviewed: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -17,8 +18,10 @@ const starAction: PersistableAction = {
   rallyId: 'r1',
   starred: true,
   rejected: false,
+  point: false,
   previousStarred: false,
   previousRejected: false,
+  previousPoint: false,
 }
 
 const rejectAction: PersistableAction = {
@@ -26,8 +29,10 @@ const rejectAction: PersistableAction = {
   rallyId: 'r2',
   starred: false,
   rejected: true,
+  point: false,
   previousStarred: false,
   previousRejected: false,
+  previousPoint: false,
 }
 
 const skipAction: PersistableAction = {
@@ -35,11 +40,30 @@ const skipAction: PersistableAction = {
   rallyId: 'r3',
   starred: false,
   rejected: false,
+  point: false,
   previousStarred: false,
   previousRejected: false,
+  previousPoint: false,
 }
 
-const undoAction: UndoAction = { kind: 'undo', rallyId: 'r4', starred: true, rejected: false }
+const pointAction: PersistableAction = {
+  kind: 'point',
+  rallyId: 'r1',
+  starred: false,
+  rejected: false,
+  point: true,
+  previousStarred: false,
+  previousRejected: false,
+  previousPoint: false,
+}
+
+const undoAction: UndoAction = {
+  kind: 'undo',
+  rallyId: 'r4',
+  starred: true,
+  rejected: false,
+  point: false,
+}
 
 describe('persistAction', () => {
   it('calls api.star for a star action', async () => {
@@ -55,7 +79,14 @@ describe('persistAction', () => {
     expect(a.reject).toHaveBeenCalledWith('r2', true)
   })
 
-  it('calls both api.star and api.reject, in order, for an undo action', async () => {
+  it('persists a point action', async () => {
+    const a = api()
+    const outcome = await persistAction(pointAction, a)
+    expect(a.point).toHaveBeenCalledWith('r1', true)
+    expect(outcome).toEqual({ ok: true })
+  })
+
+  it('calls api.star, api.reject and api.point, in order, for an undo action', async () => {
     const calls: string[] = []
     const a = api({
       star: vi.fn().mockImplementation(async () => {
@@ -64,11 +95,15 @@ describe('persistAction', () => {
       reject: vi.fn().mockImplementation(async () => {
         calls.push('reject')
       }),
+      point: vi.fn().mockImplementation(async () => {
+        calls.push('point')
+      }),
     })
     await persistAction(undoAction, a)
     expect(a.star).toHaveBeenCalledWith('r4', true)
     expect(a.reject).toHaveBeenCalledWith('r4', false)
-    expect(calls).toEqual(['star', 'reject'])
+    expect(a.point).toHaveBeenCalledWith('r4', false)
+    expect(calls).toEqual(['star', 'reject', 'point'])
   })
 
   it('reports the failed action as the thing to revert when a star persist fails', async () => {
@@ -131,8 +166,10 @@ describe('persistAction — skip no longer marks a rally reviewed', () => {
     rallyId: 'r3',
     starred: false,
     rejected: false,
+    point: false,
     previousStarred: false,
     previousRejected: false,
+    previousPoint: false,
   }
 
   it('calls nothing and reports success', async () => {
