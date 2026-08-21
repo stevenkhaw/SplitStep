@@ -89,15 +89,22 @@ def plan_export(
                 continue
             sources[rally["source_id"]] = source
 
+        if has_pending_clip(conn, rally["source_id"], rally["start_ms"], rally["end_ms"]):
+            # Checked BEFORE the on-disk existence check below, not after.
+            # make_clip encodes to a temp path and os.replace()s onto the
+            # final name only once ffmpeg exits 0 (see its docstring), so in
+            # the ordinary case a running job's file genuinely does not exist
+            # yet at this path -- but a killed-and-requeued job (reclaim_stale)
+            # can leave a *stale, already-complete* file at this exact path
+            # from a run before the one now in flight, and a filesystem-first
+            # check would read that as "already cut" while a live job is
+            # about to overwrite it. A job for this exact span is already
+            # queued or running -- in flight, not cut -- and that must win.
+            in_flight += 1
+            continue
         name = clip_relpath(source["idx"], rally["start_ms"], rally["end_ms"])
         if (clips_dir / name).exists():
             already_cut += 1
-            continue
-        if has_pending_clip(conn, rally["source_id"], rally["start_ms"], rally["end_ms"]):
-            # A job for this exact span is already queued or running -- in
-            # flight, not cut. Pressing export again while it encodes must
-            # not report it as done.
-            in_flight += 1
             continue
 
         pending.append({

@@ -108,6 +108,62 @@ def test_a_span_with_a_clip_job_in_flight_is_not_queued_twice(library, conn, see
     assert plan.in_flight == 1
 
 
+def test_an_in_flight_job_with_a_file_already_on_disk_is_in_flight_not_already_cut(
+    library, conn, seeded
+):
+    """The real state H1 was filed against: make_clip's own docstring notes a
+    killed-and-requeued job (reclaim_stale) can leave a stale, complete file
+    at the exact span-derived path from an earlier attempt while a fresh job
+    for the same span is queued or running right now. Before the fix,
+    plan_export checked `.exists()` before `has_pending_clip`, so this state
+    -- a live job PLUS a file at the path -- was reported as already_cut, the
+    exact bug live-verified against the running export: 8 clips done in the
+    DB but 9 .mp4s on disk, the 9th being the running job's own output.
+    has_pending_clip must be consulted first, so a live job always wins.
+    """
+    rally = seeded["rallies"][0]
+    set_point(conn, rally["id"], True)
+    enqueue(conn, "clip", {"source_id": seeded["source_id"], "rally_id": rally["id"],
+                           "start_ms": rally["start_ms"], "end_ms": rally["end_ms"]})
+    _touch_clip(library, seeded["session_id"], seeded["idx"], rally["start_ms"], rally["end_ms"])
+
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert plan.pending == []
+    assert plan.in_flight == 1
+    assert plan.already_cut == 0
+
+
+def test_a_failed_clip_jobs_span_is_re_cut_not_already_cut(library, conn, seeded):
+    """The property that survives H1's atomic-rename fix, in place of the
+    'truncated file with no live job' scenario the bug report described.
+
+    Before this branch, that scenario was real: ffmpeg wrote straight to the
+    final path with -y, so a killed job left a truncated file exactly there,
+    the job's own row went to 'failed' (neither queued nor running, so
+    has_pending_clip is False), and every later export saw the file and
+    called it already_cut forever -- permanent corruption, per H1.
+
+    make_clip's fix (see transcode.py) makes that specific scenario
+    impossible by construction: it now encodes to a sibling temp path and
+    os.replace()s onto the final name only after ffmpeg exits 0, so a killed
+    or failed job can never leave anything at the exact span-derived path --
+    only a real, complete clip lands there. What this test checks is the
+    property that actually holds now: a failed job with (necessarily) no
+    file on disk must come back pending, not already_cut, so the next export
+    re-cuts it normally.
+    """
+    rally = seeded["rallies"][0]
+    set_point(conn, rally["id"], True)
+    job_id = enqueue(conn, "clip", {"source_id": seeded["source_id"], "rally_id": rally["id"],
+                                    "start_ms": rally["start_ms"], "end_ms": rally["end_ms"]})
+    conn.execute("UPDATE jobs SET status = 'failed', error = 'boom' WHERE id = ?", (job_id,))
+    conn.commit()
+
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert [s["start_ms"] for s in plan.pending] == [rally["start_ms"]]
+    assert plan.already_cut == 0
+
+
 def test_plan_export_rejects_an_unknown_set(library, conn, seeded):
     with pytest.raises(ValueError, match="which must be one of"):
         plan_export(library, conn, seeded["session_id"], "everything")

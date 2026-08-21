@@ -5,7 +5,14 @@ import pytest
 
 from bootleg.media.clips import clip_relpath
 from bootleg.media.probe import probe
-from bootleg.media.transcode import CLIP_CRF, CLIP_FPS, CLIP_HEIGHT, CLIP_WIDTH, make_clip
+from bootleg.media.transcode import (
+    CLIP_CRF,
+    CLIP_FPS,
+    CLIP_HEIGHT,
+    CLIP_WIDTH,
+    TranscodeError,
+    make_clip,
+)
 
 
 @pytest.fixture
@@ -211,3 +218,57 @@ def test_make_clip_rejects_a_non_positive_duration(tmp_path):
     with pytest.raises(ValueError, match="positive duration"):
         make_clip(src, dst, start_ms=3000, end_ms=1000)
     assert not dst.exists()
+
+
+def test_make_clip_does_not_expose_dst_until_ffmpeg_succeeds(tmp_path, monkeypatch):
+    """H1's core bug, reproduced without a real encode: a previous version
+    passed dst itself as ffmpeg's -y output, so a file existed at the
+    span-derived path from the first byte ffmpeg wrote -- a live encode
+    read as done by plan_export's `.exists()` check. make_clip must instead
+    write to a temp path in the same directory and only os.replace() onto
+    dst after ffmpeg exits 0, so dst does not exist while "ffmpeg" (faked
+    here) is still working.
+    """
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"stand-in source; run_ffmpeg is faked below")
+    dst = tmp_path / "clip.mp4"
+    dst_existed_mid_encode = []
+
+    def fake_run_ffmpeg(args, timeout=None):
+        out = Path(args[-1])
+        assert out != dst, "make_clip must encode to a temp path, not straight to dst"
+        assert out.parent == dst.parent, "the temp path must be a sibling of dst (same filesystem)"
+        dst_existed_mid_encode.append(dst.exists())
+        out.write_bytes(b"encoded output")
+
+    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", fake_run_ffmpeg)
+    make_clip(src, dst, start_ms=1000, end_ms=3000)
+
+    assert dst_existed_mid_encode == [False]
+    assert dst.exists()
+    assert dst.read_bytes() == b"encoded output"
+    # No stray temp file left behind after a successful replace.
+    assert [p for p in tmp_path.iterdir() if ".part." in p.name] == []
+
+
+def test_make_clip_leaves_no_temp_file_and_reraises_on_ffmpeg_failure(tmp_path, monkeypatch):
+    """H1's second consequence -- a killed/failed encode permanently
+    corrupting the span-derived path -- is impossible by construction once
+    dst is only ever created by a post-success os.replace(): a failed
+    run_ffmpeg call raises before that replace ever runs, so dst is never
+    created. Cleanup of the temp file must not swallow the original error.
+    """
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"stand-in source")
+    dst = tmp_path / "clip.mp4"
+
+    def boom(args, timeout=None):
+        raise TranscodeError("ffmpeg exploded")
+
+    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", boom)
+
+    with pytest.raises(TranscodeError, match="exploded"):
+        make_clip(src, dst, start_ms=1000, end_ms=3000)
+
+    assert not dst.exists()
+    assert [p for p in tmp_path.iterdir() if ".part." in p.name] == []
