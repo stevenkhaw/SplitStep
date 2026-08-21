@@ -6,6 +6,7 @@
   import { NOTE_MAX_CHARS, NoteWriter, seedNotes } from '../lib/notes'
   import { describePersistFailure, persistAction } from '../lib/persist'
   import { QueueController } from '../lib/queue'
+  import { navigate } from '../lib/router.svelte'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
@@ -200,6 +201,21 @@
       toaster.push(describeExportResult(which, result), 'info')
     } catch (e) {
       toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
+    }
+  }
+
+  // Creating a reel cuts NOTHING. §6.2 draws that line deliberately: the
+  // builder's "Cut missing clips" stays the only path that starts an
+  // encode, so a button labelled "reel" never silently launches half an
+  // hour of work. A second press merges additively server-side, so pressing
+  // this again after marking three more points appends those three and
+  // leaves any hand-ordering alone.
+  async function buildReel(which: 'points' | 'starred'): Promise<void> {
+    try {
+      const result = await api.createSessionReel(detail.session.id, which)
+      navigate(`/reels/${result.slug}`)
+    } catch (e) {
+      toaster.push(`Couldn't build the ${exportSetLabel(which)} reel -- ${String(e)}`)
     }
   }
 
@@ -420,9 +436,10 @@
          into label mode -- pressing L -- was undiscoverable exactly when a
          reviewer who just finished a pass is most likely to want it. -->
     <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
-    <!-- Cutting only -- reel creation is a separate plan (Plan B). Encoding
-         progress is the jobs badge's job; this fires the request and reports
-         the plan's outcome, nothing more. -->
+    <!-- Two rows, four actions: cut, and compile. The reel buttons are
+         ADDITIONS beside Plan A's export pair, never replacements -- cutting
+         clips and compiling a reel are different decisions, and only the
+         first one starts an encode. -->
     <div class="mt-4 flex items-center justify-center gap-3">
       <button
         class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
@@ -439,6 +456,24 @@
         onclick={() => exportSet('starred')}
       >
         Export starred clips ({stats.starredCount})
+      </button>
+    </div>
+    <div class="mt-2 flex items-center justify-center gap-3">
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.pointCount === 0}
+        onclick={() => buildReel('points')}
+      >
+        Reel of all points ({stats.pointCount})
+      </button>
+      <button
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={stats.starredCount === 0}
+        onclick={() => buildReel('starred')}
+      >
+        Reel of starred ({stats.starredCount})
       </button>
     </div>
   </section>
