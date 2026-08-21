@@ -206,3 +206,61 @@ def test_a_label_carries_an_existing_boundary_correction_forward(client, conn, s
     assert rows[0]["verdict"] == "clean"
     assert rows[0]["true_start_ms"] == 1400
     assert rows[0]["true_end_ms"] == 4600
+
+
+def test_a_label_after_a_drag_recomputes_flags_instead_of_trusting_an_empty_client_list(
+    client, conn, seeded
+):
+    # Finding 1. LabelController (web/src/lib/labels.ts) skips every row
+    # whose verdict is NULL when it seeds state, so the drag's row above is
+    # invisible in label mode -- the reviewer never saw ['start_early',
+    # 'end_late'] to keep or clear. boundary_flags=[] on the label POST is
+    # therefore not an explicit choice to clear them; it must not be trusted
+    # over what the carried true_start_ms/true_end_ms actually measure.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+    r = client.post(f"/api/rallies/{rally['id']}/label",
+                    json={"verdict": "clean", "boundary_flags": []})
+    assert r.status_code == 200
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "clean"
+    assert rows[0]["true_start_ms"] == 1400
+    assert rows[0]["true_end_ms"] == 4600
+    assert rows[0]["boundary_flags"] == ["start_early", "end_late"]
+
+
+def test_a_label_with_a_carried_correction_ignores_a_conflicting_client_flag_list(
+    client, conn, seeded
+):
+    # Same principle, stronger case: once a numeric correction is carried
+    # forward, boundary_flags is a pure function of det_* vs true_* -- there
+    # is exactly one right answer, so even a non-empty client list must not
+    # override it when it disagrees. The client could not have measured this
+    # correction (see test above), so its guess is not authoritative.
+    rally = _first_rally(conn)
+    client.post(f"/api/rallies/{rally['id']}/bounds",
+                json={"start_ms": 1400, "end_ms": 4600})
+    client.post(f"/api/rallies/{rally['id']}/label",
+                json={"verdict": "clean", "boundary_flags": ["start_late"]})
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert len(rows) == 1
+    assert rows[0]["boundary_flags"] == ["start_early", "end_late"]
+
+
+def test_a_label_with_no_carried_correction_still_honours_explicit_client_flags(
+    client, conn, seeded
+):
+    # The other half of the same decision: with nothing carried forward to
+    # measure against, the client's flags are the reviewer's own live,
+    # explicit judgement and must still be written as sent.
+    rally = _first_rally(conn)
+    r = client.post(f"/api/rallies/{rally['id']}/label",
+                    json={"verdict": "partly", "boundary_flags": ["start_early"]})
+    assert r.status_code == 200
+
+    rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
+    assert rows[0]["boundary_flags"] == ["start_early"]

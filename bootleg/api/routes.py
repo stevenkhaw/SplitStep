@@ -13,6 +13,7 @@ from bootleg.db.labels import (
     FLAG_ORDER,
     VERDICTS,
     add_label,
+    derive_boundary_flags,
     latest_label_for_span,
     latest_labels,
     parse_flags,
@@ -262,19 +263,44 @@ def api_label(rally_id: str, body: LabelBody, request: Request):
     # append-only row this call writes -- being the newest -- would become
     # the one latest_labels returns, silently erasing the correction from
     # every reader (H1, docs/superpowers/specs/2026-08-21-rally-labelling-
-    # design.md). boundary_flags is not carried the same way: it comes
-    # straight from the request, which is the reviewer's live, explicit
-    # choice for this judgement, not something to infer from an older row.
+    # design.md).
     prior = latest_label_for_span(conn, span["source_id"], span["det_start_ms"], span["det_end_ms"])
+    true_start_ms = prior["true_start_ms"] if prior is not None else None
+    true_end_ms = prior["true_end_ms"] if prior is not None else None
+
+    # boundary_flags is NOT simply "carried forward" the same way true_* is,
+    # nor simply "taken from the request" the way it looks at first glance
+    # (and the way this route used to treat it, which was Finding 1). Once a
+    # correction is carried forward, the flags implied by it are a pure
+    # function of det_* vs true_* -- there is exactly one right answer, and
+    # the client cannot be trusted to have supplied it: LabelController
+    # (web/src/lib/labels.ts) skips every row whose verdict is NULL when it
+    # seeds label-mode state, so a drag-only row's derived flags are never
+    # shown to the reviewer, and boundary_flags=[] on this request is not a
+    # considered choice to clear them -- it is every request's default,
+    # informed by nothing. A non-empty-but-different client list is no more
+    # trustworthy for the same reason: it is still a guess made blind to the
+    # measurement now on record, so recomputing wins even then, discarding
+    # whatever the client sent. Only when NO correction is being carried
+    # forward is there no measurement to defer to, and the client's list is
+    # the reviewer's own live, explicit judgement -- that case is honoured
+    # as-is, unchanged from before this fix.
+    if true_start_ms is not None and true_end_ms is not None:
+        boundary_flags = derive_boundary_flags(
+            span["det_start_ms"], span["det_end_ms"], true_start_ms, true_end_ms
+        )
+    else:
+        boundary_flags = body.boundary_flags
+
     label_id = add_label(
         conn,
         source_id=span["source_id"],
         span_start_ms=span["det_start_ms"],
         span_end_ms=span["det_end_ms"],
         verdict=body.verdict,
-        boundary_flags=body.boundary_flags,
-        true_start_ms=prior["true_start_ms"] if prior is not None else None,
-        true_end_ms=prior["true_end_ms"] if prior is not None else None,
+        boundary_flags=boundary_flags,
+        true_start_ms=true_start_ms,
+        true_end_ms=true_end_ms,
         rally_id=rally_id,
     )
     # No session_status refresh: a label is a note about the detector, not a

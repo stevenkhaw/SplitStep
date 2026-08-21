@@ -114,6 +114,36 @@ def latest_label_for_span(
     ).fetchone()
 
 
+def derive_boundary_flags(
+    det_start_ms: int, det_end_ms: int, true_start_ms: int, true_end_ms: int
+) -> list[str]:
+    """Which edges moved which way, as a pure function of the four ms values.
+
+    Once a measured correction exists there is exactly one right answer for
+    boundary_flags -- it is the sign of true_* vs det_*, not an opinion. Two
+    callers need this: `record_boundary_correction` derives it for the row a
+    drag writes, and `api_label` recomputes it when carrying a correction
+    forward onto a verdict row rather than trusting a client-supplied list
+    (Finding 1, docs/superpowers/specs/2026-08-21-rally-labelling-design.md
+    -- the reviewer cannot have seen these flags to knowingly clear them,
+    since LabelController never surfaces a verdict-NULL row). One definition
+    here instead of two copies is what keeps "which edge moved which way"
+    from drifting between the two call sites.
+    """
+    flags: list[str] = []
+    # Detector opened before play began -> it started early, and vice versa.
+    if true_start_ms > det_start_ms:
+        flags.append("start_early")
+    elif true_start_ms < det_start_ms:
+        flags.append("start_late")
+    # Detector ran on past the end -> it ended late, and vice versa.
+    if true_end_ms < det_end_ms:
+        flags.append("end_late")
+    elif true_end_ms > det_end_ms:
+        flags.append("end_early")
+    return flags
+
+
 def record_boundary_correction(
     conn: sqlite3.Connection,
     *,
@@ -143,17 +173,7 @@ def record_boundary_correction(
     if (true_start_ms, true_end_ms) == (det_start_ms, det_end_ms):
         return None
 
-    flags: list[str] = []
-    # Detector opened before play began -> it started early, and vice versa.
-    if true_start_ms > det_start_ms:
-        flags.append("start_early")
-    elif true_start_ms < det_start_ms:
-        flags.append("start_late")
-    # Detector ran on past the end -> it ended late, and vice versa.
-    if true_end_ms < det_end_ms:
-        flags.append("end_late")
-    elif true_end_ms > det_end_ms:
-        flags.append("end_early")
+    flags = derive_boundary_flags(det_start_ms, det_end_ms, true_start_ms, true_end_ms)
 
     # boundary_flags is NOT carried forward the same way: it is a pure
     # function of (true_start_ms, true_end_ms, det_start_ms, det_end_ms), all
