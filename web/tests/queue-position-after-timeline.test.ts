@@ -17,6 +17,8 @@ const mockApi = {
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
+  label: vi.fn().mockResolvedValue({ ok: true }),
+  sourceLabels: vi.fn().mockResolvedValue([]),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),
   listPresets: vi.fn().mockResolvedValue([]),
   createPreset: vi.fn().mockResolvedValue({ id: 'preset1' }),
@@ -95,6 +97,7 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] })
     mockApi.listPresets.mockResolvedValue([])
     mockApi.jobs.mockResolvedValue([])
+    mockApi.sourceLabels.mockResolvedValue([])
     target = document.createElement('div')
     document.body.appendChild(target)
   })
@@ -126,6 +129,40 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     await vi.waitFor(() => expect(target.textContent).toMatch(/set in\/out/))
 
     press('Escape')
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally \d+ \/ 3/))
+    expect(target.textContent).toMatch(/rally 3 \/ 3/)
+  })
+
+  it('lands back on the same rally after label mode, not the first unreviewed one', async () => {
+    // Same defect, different sibling: `mode === 'label'` is its own branch in
+    // Session's `{#if}/{:else if}` chain, so switching into it already tears
+    // QueueMode down regardless of `{#key rallyRevision}` -- the same
+    // mechanism the timeline case above exploits. Label mode never bumps
+    // rallyRevision (it has no reason to refetch), so this only passes if
+    // queue position is restored via startAtRallyId, the same way
+    // openTimeline/closeTimeline restore it.
+    mockApi.getSession.mockResolvedValue(
+      detailWith([rally('r1', 1), rally('r2', 2), rally('r3', 3)]),
+    )
+
+    instance = mount(SessionHarness, { target })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/rally 1 \/ 3/))
+
+    // Walk to rally 3. Nothing is starred or rejected, so every rally still
+    // has reviewed_at === null -- exactly the state that makes a remount
+    // snap back to rally 1.
+    press('ArrowRight')
+    press('ArrowRight')
+    expect(target.textContent).toMatch(/rally 3 \/ 3/)
+
+    press('l')
+    // LabelMode's own help line -- the queue never renders it. Its
+    // sourceLabels() fetch resolves on a microtask, so this also waits out
+    // the mount before the second `l` fires.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/back to queue/))
+
+    press('l')
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally \d+ \/ 3/))
     expect(target.textContent).toMatch(/rally 3 \/ 3/)
   })

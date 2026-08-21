@@ -98,10 +98,30 @@
       })
   }
 
-  // Unlike closeTimeline, this does NOT refetch. Label mode writes only to
-  // rally_labels; it never changes a rally's bounds, flags or review status,
-  // so `detail` cannot have gone stale and a refetch would only discard
-  // QueueMode's undo stack by bumping rallyRevision.
+  // Reuses focusedRallyId rather than a field of its own -- it means "the
+  // rally the user stepped away from" regardless of which mode did the
+  // stepping. Safe to share with TimelineMode's use of the same field: the
+  // `{#if mode === 'queue'} ... {:else if mode === 'label'} ... {:else if
+  // focusedRallyId}` chain below tests `mode === 'label'` before it ever
+  // reaches the TimelineMode branch, so setting focusedRallyId here cannot
+  // mis-route into the timeline.
+  function openLabel(rallyId: string) {
+    focusedRallyId = rallyId
+    mode = 'label'
+  }
+
+  // Unlike closeTimeline, this does NOT refetch -- label mode writes only to
+  // rally_labels, never a rally's bounds, flags or review status, so
+  // `detail` cannot have gone stale. That's the only thing skipping the
+  // refetch buys, though: `mode === 'label'` already tears QueueMode down
+  // the instant it's set (Svelte destroys the outgoing branch of an
+  // `{#if}/{:else if}` chain regardless of `{#key rallyRevision}`), so its
+  // undo stack and cursor are gone before this function ever runs. Queue
+  // position survives the round trip because openLabel set focusedRallyId
+  // first -- the fresh QueueController built on return calls
+  // jumpTo(startAtRallyId) against it, the same mechanism openTimeline/
+  // closeTimeline already rely on -- not because avoiding a refetch avoided
+  // a remount.
   function closeLabel() {
     mode = 'queue'
   }
@@ -166,7 +186,7 @@
       <QueueMode
         {detail}
         onopen_timeline={openTimeline}
-        onopen_label={() => (mode = 'label')}
+        onopen_label={openLabel}
         startAtRallyId={focusedRallyId}
       />
     {:else if mode === 'label'}

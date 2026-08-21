@@ -2346,24 +2346,27 @@ Expected: PASS, 20 passed
 In `web/src/components/QueueMode.svelte`, add to `Props`:
 
 ```ts
-    /** Enter label mode. Separate from review: a verdict is a note about the
-     * detector, not a decision about the clip, so it deliberately does not
-     * touch star/reject or the session's review status. */
-    onopen_label: () => void
+    /** Enter label mode, on this rally -- Session threads it through as
+     * startAtRallyId the same way onopen_timeline's rallyId is, so a fresh
+     * QueueController on return jumps back here instead of opening on
+     * whichever rally is first-unreviewed. Separate from review: a verdict
+     * is a note about the detector, not a decision about the clip, so it
+     * deliberately does not touch star/reject or the session's review status. */
+    onopen_label: (rallyId: string) => void
 ```
 
 destructure it:
 
 ```ts
-  let { detail, onopen_timeline, onopen_label }: Props = $props()
+  let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
 ```
 
-add to the `switch` in `onKey`, after the `'t'` case:
+add to the `switch` in `onKey`, after the `'t'` case, guarded the same way as `'t'`/`'T'` (no `current` means the queue is finished, and there is nothing to open a label view on):
 
 ```ts
       case 'l':
       case 'L':
-        onopen_label()
+        if (current) onopen_label(current.id)
         break
 ```
 
@@ -2394,10 +2397,30 @@ Widen the mode union (line 18):
 Add next to `closeTimeline`:
 
 ```ts
-  // Unlike closeTimeline, this does NOT refetch. Label mode writes only to
-  // rally_labels; it never changes a rally's bounds, flags or review status,
-  // so `detail` cannot have gone stale and a refetch would only discard
-  // QueueMode's undo stack by bumping rallyRevision.
+  // Reuses focusedRallyId rather than a field of its own -- it means "the
+  // rally the user stepped away from" regardless of which mode did the
+  // stepping. Safe to share with TimelineMode's use of the same field: the
+  // `{#if mode === 'queue'} ... {:else if mode === 'label'} ... {:else if
+  // focusedRallyId}` chain below tests `mode === 'label'` before it ever
+  // reaches the TimelineMode branch, so setting focusedRallyId here cannot
+  // mis-route into the timeline.
+  function openLabel(rallyId: string) {
+    focusedRallyId = rallyId
+    mode = 'label'
+  }
+
+  // Unlike closeTimeline, this does NOT refetch -- label mode writes only to
+  // rally_labels, never a rally's bounds, flags or review status, so
+  // `detail` cannot have gone stale. That's the only thing skipping the
+  // refetch buys, though: `mode === 'label'` already tears QueueMode down
+  // the instant it's set (Svelte destroys the outgoing branch of an
+  // `{#if}/{:else if}` chain regardless of `{#key rallyRevision}`), so its
+  // undo stack and cursor are gone before this function ever runs. Queue
+  // position survives the round trip because openLabel set focusedRallyId
+  // first -- the fresh QueueController built on return calls
+  // jumpTo(startAtRallyId) against it, the same mechanism openTimeline/
+  // closeTimeline already rely on -- not because avoiding a refetch avoided
+  // a remount.
   function closeLabel() {
     mode = 'queue'
   }
@@ -2408,7 +2431,12 @@ Extend the keyed block:
 ```svelte
   {#key rallyRevision}
     {#if mode === 'queue'}
-      <QueueMode {detail} onopen_timeline={openTimeline} onopen_label={() => (mode = 'label')} />
+      <QueueMode
+        {detail}
+        onopen_timeline={openTimeline}
+        onopen_label={openLabel}
+        startAtRallyId={focusedRallyId}
+      />
     {:else if mode === 'label'}
       <LabelMode {detail} onclose={closeLabel} />
     {:else if focusedRallyId}

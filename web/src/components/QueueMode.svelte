@@ -18,10 +18,13 @@
      * session correctly, instead of seeding from `detail.rallies`' stale
      * server-snapshot flags. */
     onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
-    /** Enter label mode, on this rally. Separate from review: a verdict is a
-     * note about the detector, not a decision about the clip, so it
+    /** Enter label mode, on this rally -- Session threads it through as
+     * startAtRallyId the same way onopen_timeline's rallyId is, so a fresh
+     * QueueController on return jumps back here instead of opening on
+     * whichever rally is first-unreviewed. Separate from review: a verdict
+     * is a note about the detector, not a decision about the clip, so it
      * deliberately does not touch star/reject or the session's review status. */
-    onopen_label: () => void
+    onopen_label: (rallyId: string) => void
     /** Open on this rally instead of the first unreviewed one, when it is
      * still in the queue. Session passes the rally the user just left the
      * timeline from -- see the constructor call below for why a remount
@@ -201,7 +204,7 @@
         break
       case 'l':
       case 'L':
-        onopen_label()
+        if (current) onopen_label(current.id)
         break
     }
   }
