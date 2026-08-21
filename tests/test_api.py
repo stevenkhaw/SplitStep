@@ -581,6 +581,26 @@ def test_note_route_accepts_a_note_at_exactly_the_cap(client, conn, seeded):
     assert r.status_code == 200
 
 
+def test_note_route_trims_before_measuring_length(client, conn, seeded):
+    # The validator must trim whitespace before measuring length. This test
+    # proves it: 120 characters of text is legal, but only if we measure AFTER
+    # trimming. A buggy implementation that measures before trimming rejects
+    # "  " + "x" * 120 + "  " as 124 characters raw, even though the trimmed
+    # string is exactly at the cap and what the reviewer will actually see. No
+    # other note test can tell the two implementations apart — they all omit
+    # whitespace at the boundary.
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+
+    padded_note = "  " + "x" * 120 + "  "
+    assert len(padded_note) == 124  # Raw string is over the cap
+
+    r = client.post(f"/api/rallies/{rally_id}/note", json={"note": padded_note})
+    assert r.status_code == 200
+
+    # The stored note is trimmed to exactly 120 characters
+    assert list_rallies(conn, seeded["session_id"])[0]["note"] == "x" * 120
+
+
 def test_note_route_clears_a_note_with_an_empty_string(client, conn, seeded):
     # Deleting a note is the same write as setting one. A separate DELETE
     # route would be a second code path for "the note is now empty".
