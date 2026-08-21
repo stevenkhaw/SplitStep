@@ -601,3 +601,57 @@ def test_clips_export_on_an_unknown_session_fails(library, conn, capsys):
     rc = main(["--library", str(library.root), "clips", "export", "nope"])
     assert rc == 1
     assert "not found" in capsys.readouterr().err.lower()
+
+
+def test_clips_export_on_a_genuinely_empty_set_says_so(library, conn, capsys):
+    # No rally in the session is starred at all -- unlike the "already cut"
+    # and "in flight" cases below, this set never had anything to cut, so
+    # the message must not claim clips exist that were never queued.
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    conn.close()
+
+    rc = main(["--library", str(library.root), "clips", "export", session_id, "--set", "starred"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "queued 0 clip job(s)" in out
+    assert "no rallies in the starred set" in out
+    assert "already exists" not in out
+    assert "already cut" not in out
+
+
+def test_clips_export_when_everything_is_unavailable_says_so(library, conn, capsys):
+    # The one rally in the set points at a source that no longer exists --
+    # different from "in flight" and from a genuinely empty set, and the
+    # message must say which of the three it actually is.
+    from bootleg.db.rallies import replace_rallies, set_point
+    from bootleg.detect.segment import Interval
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 5000, 0.8)])
+    set_point(conn, conn.execute("SELECT id FROM rallies").fetchone()["id"], True)
+
+    # rallies.source_id is ON DELETE CASCADE, so the ordinary path to a
+    # vanished source would take the rally down with it. Toggle the pragma
+    # off for this one delete to get the row shape the guard defends against
+    # -- a rally whose source really is gone -- without losing the rally.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.close()
+
+    rc = main(["--library", str(library.root), "clips", "export", session_id])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "queued 0 clip job(s)" in out
+    assert "1 unavailable" in out
+    assert "no rallies in the points set" not in out
+    assert "already exists" not in out

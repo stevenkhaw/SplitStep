@@ -395,7 +395,13 @@ def cmd_clips_export(args) -> int:
         jobq.enqueue(conn, "clip", payload)
     print(f"queued {len(plan.pending)} clip job(s) for {args.set} in {args.session_id}")
     if not plan.pending:
-        if plan.in_flight or plan.unavailable:
+        if plan.total == 0:
+            # Distinct from every branch below: an empty set never had a
+            # clip to begin with, so "already exists" (which implies one was
+            # cut) would be a flat lie -- this is the case that prompted the
+            # split in the first place.
+            print(f"nothing to cut -- no rallies in the {args.set} set")
+        elif plan.in_flight or plan.unavailable:
             # Same honesty problem the route had: a nonzero already_cut can
             # coexist with jobs still encoding or rallies whose source is
             # gone, and folding those into "already exists" would say every
