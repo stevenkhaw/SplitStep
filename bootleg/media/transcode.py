@@ -91,6 +91,85 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: i
     run_ffmpeg(args)
 
 
+# The locked clip profile. CHANGING ANY OF THESE BREAKS `-c copy` AGAINST
+# EVERY CLIP EVER CUT: the concat demuxer refuses streams whose codec
+# parameters differ, so a reel mixing an old clip and a new one either fails
+# or produces artifacts. Sources that do not match are conformed at cut time
+# rather than at concat time -- an upscale is a smaller price than a clip
+# library that cannot be concatenated.
+CLIP_WIDTH = 3840
+CLIP_HEIGHT = 2160
+CLIP_FPS = 30
+CLIP_CRF = 20
+
+
+def make_clip(
+    src: Path,
+    dst: Path,
+    *,
+    start_ms: int,
+    end_ms: int,
+    rotation_deg: int = 0,
+) -> None:
+    """Cut one span to the locked clip profile.
+
+    Software libx264 on purpose, never a hardware encoder: those emit
+    vendor-specific SPS/PPS headers, so a clip cut on the Mac and one cut on
+    the 4070Ti would fail to concat cleanly or concat with artifacts. libx264
+    produces identical headers on every machine, permanently. Roughly 30
+    seconds per 20-second 4K clip, which is the right trade for an artifact
+    that must stay byte-compatible for years.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    duration_ms = end_ms - start_ms
+    if duration_ms <= 0:
+        raise ValueError(f"clip needs a positive duration, got {duration_ms}ms")
+
+    # Rotation FIRST, then scale, then pad. At 90 and 270 the rotation swaps
+    # the frame's axes, so scaling before rotating pads against the wrong one.
+    # Irrelevant at 0 and 180, wrong the moment the camera is mounted sideways.
+    vf = ",".join(
+        f
+        for f in (
+            rotation_filter(rotation_deg),
+            f"scale={CLIP_WIDTH}:{CLIP_HEIGHT}:force_original_aspect_ratio=decrease",
+            f"pad={CLIP_WIDTH}:{CLIP_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+        )
+        if f
+    )
+
+    run_ffmpeg([
+        # -noautorotate before the input, exactly as make_proxy does: a
+        # rotation this library did not choose must never reach the filter
+        # chain. -display_rotation 0 then strips stale Display Matrix side
+        # data, so a rotation-aware player cannot double-rotate a clip whose
+        # rotation is already baked into the pixels.
+        "-noautorotate",
+        "-display_rotation", "0",
+        # -ss before -i is both fast and frame-accurate here, because the
+        # output is always re-encoded. Accuracy is not optional: an in-point
+        # landing on the previous keyframe would put a second of the wrong
+        # footage at the head of the clip, and these boundaries were trimmed
+        # by hand.
+        "-ss", f"{start_ms / 1000:.3f}",
+        "-i", str(src),
+        "-t", f"{duration_ms / 1000:.3f}",
+        "-vf", vf,
+        # CFR at the locked rate. The first real source runs at 29.964 fps, so
+        # this duplicates roughly one frame in 830 -- imperceptible, and
+        # required, because mismatched frame rates break `-c copy`.
+        "-r", str(CLIP_FPS),
+        "-c:v", "libx264",
+        "-profile:v", "high",
+        "-pix_fmt", "yuv420p",
+        "-crf", str(CLIP_CRF),
+        "-preset", "medium",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart",
+        str(dst),
+    ])
+
+
 def make_thumbs(
     src: Path, dst: Path, every_s: int = 10, cols: int = 10, tile_w: int = 160
 ) -> None:
