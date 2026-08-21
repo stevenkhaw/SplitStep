@@ -5,6 +5,7 @@ export interface Session {
   status: string
   rally_count: number
   starred_count: number
+  point_count: number
 }
 
 export interface Source {
@@ -40,7 +41,7 @@ export interface Rally {
 }
 
 export interface SessionDetail {
-  session: Omit<Session, 'rally_count' | 'starred_count'>
+  session: Omit<Session, 'rally_count' | 'starred_count' | 'point_count'>
   sources: Source[]
   rallies: Rally[]
 }

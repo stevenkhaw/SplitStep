@@ -109,7 +109,7 @@
         >
           <span class="font-medium">{s.title}</span>
           <span class="font-mono text-xs text-neutral-400">
-            {s.rally_count} rallies · ★{s.starred_count} · {s.status}
+            {s.rally_count} rallies · P{s.point_count} · ★{s.starred_count} · {s.status}
           </span>
         </button>
       </li>

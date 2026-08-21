@@ -161,7 +161,8 @@ def api_list_sessions(request: Request):
     out = []
     for s in list_sessions(conn):
         counts = conn.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(starred),0) AS starred"
+            "SELECT COUNT(*) AS total, COALESCE(SUM(starred),0) AS starred,"
+            " COALESCE(SUM(point),0) AS point"
             " FROM rallies WHERE session_id = ? AND rejected = 0",
             (s["id"],),
         ).fetchone()
@@ -169,6 +170,7 @@ def api_list_sessions(request: Request):
             **dict(s),
             "rally_count": counts["total"],
             "starred_count": counts["starred"],
+            "point_count": counts["point"],
         })
     return out
 
