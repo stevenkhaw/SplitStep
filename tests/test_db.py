@@ -90,6 +90,73 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
+def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
+    # 005 is the one irreversible reinterpretation of a user's real data on
+    # this branch: every existing star meant "a point was played out", so it
+    # copies star to the new `point` column and then clears every star,
+    # leaving `starred` free to mean "a highlight" going forward. It runs
+    # exactly once, ever, against real libraries -- there is no test using a
+    # raw pre-005 database today; every test in test_rallies_point.py starts
+    # from the already-migrated `conn` fixture, so this backfill has run
+    # against nothing but the (untested) assumption that it is correct.
+    # Migrate to 004, plant one rally per combination the backfill has to
+    # get right, then let 005 run over them.
+    conn = connect(tmp_path / "old.db")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        n = int(path.name.split("_", 1)[0])
+        if n > 4:
+            break
+        conn.executescript(path.read_text())
+        conn.execute(f"PRAGMA user_version={n}")
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s1','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src1','s1',1,'now',0,1000,1920,1080,30.0,0,'a.mov','ready')"
+    )
+    # Starred, not rejected -- the ordinary case: a filmed tiebreaker where
+    # star was the only mark available for "this is a point".
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_star','s1','src1',1,0,1000,0,1000,0.9,1,0)"
+    )
+    # Rejected, not starred -- a bad detection. rejected must survive
+    # untouched; point must not be invented for it.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_rejected','s1','src1',2,1000,2000,1000,2000,0.9,0,1)"
+    )
+    # Neither -- an ordinary unreviewed rally, must come out with point = 0.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_plain','s1','src1',3,2000,3000,2000,3000,0.9,0,0)"
+    )
+    conn.commit()
+
+    assert migrate(conn) == 5
+
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
+    # point equals the old starred, per row.
+    assert rows["r_star"]["point"] == 1
+    assert rows["r_rejected"]["point"] == 0
+    assert rows["r_plain"]["point"] == 0
+    # every starred is 0 afterwards, including the row that used to be 1.
+    assert rows["r_star"]["starred"] == 0
+    assert rows["r_rejected"]["starred"] == 0
+    assert rows["r_plain"]["starred"] == 0
+    # rejected is untouched by a migration that only ever reads/writes star
+    # and point.
+    assert rows["r_rejected"]["rejected"] == 1
+    assert rows["r_star"]["rejected"] == 0
+    assert rows["r_plain"]["rejected"] == 0
+
+
 def test_rally_cascades_when_source_deleted(library):
     conn = connect(library.db_path)
     migrate(conn)
