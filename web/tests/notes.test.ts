@@ -34,7 +34,7 @@ describe('normalizeNote', () => {
     expect(normalizeNote('x'.repeat(200))).toHaveLength(NOTE_MAX_CHARS)
   })
 
-  it('trims before measuring, so trailing spaces cannot push a note over', () => {
+  it('a note at the cap plus trailing spaces still fits', () => {
     expect(normalizeNote('x'.repeat(120) + '   ')).toHaveLength(NOTE_MAX_CHARS)
   })
 
@@ -163,6 +163,58 @@ describe('NoteWriter', () => {
     expect(outcome.status).toBe('failed')
     expect(w.get('r1')).toBe('old note')
     expect(w.has('r1')).toBe(true)
+  })
+
+  it('the last write failing restores what the server actually holds', async () => {
+    // Ported from labels.test.ts's LabelWriter test of the same name. Each
+    // commit here settles before the next one starts, so #confirmed and the
+    // commit's own `saved` snapshot are always equal by construction --
+    // whatever the previous write landed as. A test shaped like this alone
+    // cannot tell #confirmed apart from `saved`; it is a sanity check on the
+    // depth === 1 path, not proof the map matters. The burst test below is
+    // the one that actually discriminates.
+    const net = controllableApi()
+    const w = new NoteWriter(net.api, new Map([['r1', 'original']]))
+
+    const first = w.commit('r1', 'first')
+    await tick()
+    net.release(0)
+    await first
+
+    const second = w.commit('r1', 'second')
+    await tick()
+    net.release(0, 'fail')
+    const outcome = await second
+
+    expect(outcome.status).toBe('failed')
+    expect(w.get('r1')).toBe('first')
+  })
+
+  it('a burst that fails outright restores the state from before the burst', async () => {
+    // Not to the first write's optimistic value: neither write reached the
+    // server, so the only state a reader would agree with is the one that
+    // predates the whole burst. Seeded with 'original', distinguishable from
+    // both optimistic values, so a bug that restores to the failing write's
+    // own `saved` snapshot (captured synchronously at commit() time, after
+    // the FIRST write's optimistic apply already happened) shows up as
+    // 'first' rather than 'original' -- exactly the swap this test caught
+    // when #confirmed.get(rallyId) ?? saved was replaced with plain `saved`.
+    const net = controllableApi()
+    const w = new NoteWriter(net.api, new Map([['r1', 'original']]))
+
+    const first = w.commit('r1', 'first')
+    const second = w.commit('r1', 'second')
+
+    await tick()
+    net.release(0, 'fail')
+    expect(await first).toEqual({ status: 'superseded' })
+
+    await tick()
+    net.release(0, 'fail')
+    const outcome = await second
+
+    expect(outcome.status).toBe('failed')
+    expect(w.get('r1')).toBe('original')
   })
 
   it('clearing a note removes the entry, so has() stays the single source of truth', async () => {

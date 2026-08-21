@@ -1,3 +1,4 @@
+import math
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -92,7 +93,14 @@ def _carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str:
     read-back SELECT carries no ORDER BY, so without this the winner would be
     whichever row sqlite happened to list first -- not an answer.
     """
-    best_note, best_overlap_ms, best_start_ms = "", 0, None
+    # best_start_ms starts at +inf, not None: `r["start_ms"] < best_start_ms`
+    # below is a real numeric comparison on every qualifying row, including
+    # the first. A None start was only ever safe because the first row to
+    # clear the >= STAR_OVERLAP_MIN gate always has overlap_ms > 0 ==
+    # best_overlap_ms, so the `overlap_ms > best_overlap_ms` disjunct wins
+    # before the None comparison is reached -- a short-circuit that silently
+    # depended on STAR_OVERLAP_MIN being greater than zero.
+    best_note, best_overlap_ms, best_start_ms = "", 0, math.inf
     for r in rows:
         if not r["note"]:
             continue
