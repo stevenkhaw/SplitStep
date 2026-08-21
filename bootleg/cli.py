@@ -7,6 +7,7 @@ from pathlib import Path
 
 from bootleg.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from bootleg.db import jobs as jobq
+from bootleg.db.labels import latest_labels, parse_flags
 from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import list_rallies, replace_rallies
 from bootleg.db.schema import connect, migrate
@@ -20,6 +21,7 @@ from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, segment
 from bootleg.jobs.handlers import HANDLERS
 from bootleg.jobs.worker import Worker
+from bootleg.label_score import rows_to_labels, score_against_labels
 from bootleg.setup import queue_setup
 from bootleg.watcher import InboxWatcher
 
@@ -235,6 +237,102 @@ def cmd_segment(args) -> int:
     return 0
 
 
+def _source_or_fail(conn, source_id: str):
+    source = get_source(conn, source_id)
+    if source is None:
+        print(f"source not found: {source_id}", file=sys.stderr)
+        return None
+    return source
+
+
+def cmd_labels_export(args) -> int:
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    source = _source_or_fail(conn, args.source_id)
+    if source is None:
+        return 1
+
+    rows = latest_labels(conn, args.source_id)
+    payload = {
+        # Library-relative, matching labels_2026-08-18_source01.json's own
+        # "source" field -- an absolute path would be meaningless once the
+        # export is committed and read on another machine.
+        "source": str(
+            library.source_dir(source["session_id"], source["idx"]).relative_to(library.root)
+        ),
+        "source_id": args.source_id,
+        "exported_on": datetime.now(UTC).date().isoformat(),
+        "labels": [
+            {
+                "span_start_ms": r["span_start_ms"],
+                "span_end_ms": r["span_end_ms"],
+                "verdict": r["verdict"],
+                "boundary_flags": parse_flags(r["boundary_flags"]),
+                "true_start_ms": r["true_start_ms"],
+                "true_end_ms": r["true_end_ms"],
+            }
+            for r in rows
+        ],
+    }
+    text = json.dumps(payload, indent=1)
+    if args.out:
+        Path(args.out).write_text(text + "\n")
+        print(f"wrote {len(payload['labels'])} labels to {args.out}")
+    else:
+        print(text)
+    return 0
+
+
+def _fmt_ms(v: float | None) -> str:
+    return "--" if v is None else f"{v:+.0f} ms"
+
+
+def _fmt_pct(v: float | None) -> str:
+    return "--" if v is None else f"{v * 100:.0f}%"
+
+
+def cmd_labels_score(args) -> int:
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    source = _source_or_fail(conn, args.source_id)
+    if source is None:
+        return 1
+
+    path = library.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
+    if not path.exists():
+        print(f"source has not been detected yet: {args.source_id}", file=sys.stderr)
+        return 1
+
+    frames = read_features(path)
+    params = params_for_frames(frames, threshold=args.threshold)
+    intervals = segment(frames, params)
+    labels = rows_to_labels(latest_labels(conn, args.source_id))
+    score = score_against_labels(intervals, labels)
+
+    print(f"{len(intervals)} candidate rallies at threshold {params.threshold:.2f}"
+          f" against {len(labels)} labelled spans")
+    print(f"  precision                        {_fmt_pct(score.precision)}"
+          f"  ({score.matched_play} play / {score.matched_play + score.matched_not_play} decided)")
+    print(f"  span recall (labelled spans only) {_fmt_pct(score.span_recall)}"
+          f"  ({score.labelled_clean - score.missed_clean} of {score.labelled_clean} clean)")
+    print(f"  unknown                          {score.unknown}"
+          "  (candidates matching no label)")
+    print(f"  start bias / MAE                 {_fmt_ms(score.start_bias_ms)}"
+          f" / {_fmt_ms(score.start_mae_ms)}   (n={score.boundary_n})")
+    print(f"  end bias / MAE                   {_fmt_ms(score.end_bias_ms)}"
+          f" / {_fmt_ms(score.end_mae_ms)}")
+    # Printed every run, not as a footnote in the docs. Every label in the
+    # corpus attaches to a span the detector proposed, so this figure cannot
+    # see play the detector never proposed -- and a number called plain
+    # "recall" here would repeat exactly the mistake that let audio-impact
+    # clustering stand in as ground truth.
+    print("\n  span recall cannot see play the detector never proposed:"
+          " every label sits on a span it did.")
+    return 0
+
+
 def cmd_preset_add(args) -> int:
     """Create a court preset from four normalized 0-1 points.
 
@@ -345,6 +443,20 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("source_id")
     sp.add_argument("preset_id")
     sp.set_defaults(func=cmd_source_set_preset)
+
+    p = sub.add_parser("labels", help="export or score the human label corpus")
+    labels_sub = p.add_subparsers(dest="labels_cmd", required=True)
+
+    le = labels_sub.add_parser("export", help="write a source's labels as JSON")
+    le.add_argument("source_id")
+    le.add_argument("--out", help="write to this path instead of stdout")
+    le.set_defaults(func=cmd_labels_export)
+
+    ls = labels_sub.add_parser("score", help="score a segmentation against the labels")
+    ls.add_argument("source_id")
+    ls.add_argument("--threshold", type=float, default=None,
+                    help="override the profile's default score threshold")
+    ls.set_defaults(func=cmd_labels_score)
 
     args = parser.parse_args(argv)
     try:

@@ -435,3 +435,86 @@ def test_segment_leaves_the_session_review_status_consistent(
         "segment wrote a fresh set of unreviewed rallies but left the session "
         "marked 'reviewed'"
     )
+
+
+def test_labels_export_writes_the_corpus_as_json(library, conn, capsys, tmp_path):
+    # json, main, add_source, find_or_create_session_for_date and
+    # write_features are already imported at the top of this file.
+    from bootleg.db.labels import add_label
+    from bootleg.db.rallies import replace_rallies
+    from bootleg.detect.segment import Interval
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 5000, 0.8)])
+    add_label(conn, source_id=source_id, span_start_ms=1000, span_end_ms=5000,
+              verdict="clean", boundary_flags=["end_late"])
+    conn.close()
+
+    out = tmp_path / "labels.json"
+    rc = main(["--library", str(library.root), "labels", "export", source_id,
+               "--out", str(out)])
+    assert rc == 0
+
+    payload = json.loads(out.read_text())
+    assert payload["source_id"] == source_id
+    assert payload["source"] == "sessions/2026-08-18/sources/01"
+    assert payload["labels"] == [{
+        "span_start_ms": 1000, "span_end_ms": 5000, "verdict": "clean",
+        "boundary_flags": ["end_late"], "true_start_ms": None, "true_end_ms": None,
+    }]
+
+
+def test_labels_export_on_an_unknown_source_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "labels", "export", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()
+
+
+def test_labels_score_reports_the_recall_caveat_and_the_unknown_count(
+    library, conn, capsys, ground_features
+):
+    """The two output constraints the spec makes non-negotiable.
+
+    A bare "recall" would repeat the error that cost the last validation
+    round, and a precision figure with the unknown count hidden conceals a
+    sweep that matched three candidates and missed forty.
+    """
+    from bootleg.db.labels import add_label
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    add_label(conn, source_id=source_id, span_start_ms=1000, span_end_ms=5000,
+              verdict="not_play")
+    conn.close()
+
+    src_dir = library.source_dir(session_id, idx)
+    src_dir.mkdir(parents=True, exist_ok=True)
+    write_features(src_dir / "features.jsonl", ground_features)
+
+    rc = main(["--library", str(library.root), "labels", "score", source_id])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "span recall (labelled spans only)" in out
+    assert "cannot see play the detector never proposed" in out
+    assert "unknown" in out
+
+
+def test_labels_score_without_features_fails(library, conn, capsys):
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    conn.close()
+
+    rc = main(["--library", str(library.root), "labels", "score", source_id])
+    assert rc == 1
+    assert "not been detected" in capsys.readouterr().err.lower()
