@@ -335,11 +335,14 @@ def test_replace_rallies_drops_rejected_when_overlap_is_small(conn):
 
 
 def test_replace_rallies_carries_clip_path_when_the_span_is_unchanged(conn):
-    """set_clip_path's docstring: the column records "what WAS cut", and
-    Reclaim Space needs it to know an original is safe to delete. Before
+    """set_clip_path's docstring: the column records "what WAS cut". Before
     this fix, the INSERT in replace_rallies never listed clip_path at all,
     so any re-segment -- even one that left every span untouched -- wiped
     every recorded clip path in the session to NULL.
+
+    Carrying it forward is also what makes `clips prune` clear it: a claim
+    that propagates across sweeps is one that outlives the file it names
+    unless something nulls it out.
     """
     s = find_or_create_session_for_date(conn, "2026-08-19")
     src, _ = _add(conn, s, 60_000)

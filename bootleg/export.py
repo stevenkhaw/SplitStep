@@ -206,11 +206,12 @@ def delete_orphan_clips(
     `clip_path` is cleared BEFORE the file goes, and that order is
     deliberate. The column records what WAS cut rather than what the current
     bounds imply (see `set_clip_path`), so a rally whose bounds were dragged
-    still names the file being swept, and Reclaim Space is going to read
-    that column to decide a 5.6 GB original is safe to delete. Clearing
-    first means the worst a failed unlink can leave behind is a column that
-    understates what is on disk, which makes Reclaim Space more cautious;
-    the other order would leave it claiming a clip that no longer exists.
+    still names the file being swept -- and `_carried_clip_path` copies it
+    onto the new row on every exact-span re-segment, so a stale one does not
+    decay with time, it propagates. Clearing first means the worst a failed
+    unlink can leave behind is a column that understates what is on disk,
+    which is the harmless direction; the other order leaves a row asserting
+    a clip that is not there.
     """
     deleted = 0
     for orphan in orphans:

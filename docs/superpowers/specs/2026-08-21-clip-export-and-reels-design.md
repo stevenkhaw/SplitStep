@@ -127,8 +127,11 @@ not stable and must not appear in a filename.
 This makes staleness a pure function. `clip_relpath(source_idx, start_ms,
 end_ms)` computed from the rally's *current* bounds either exists or does not.
 No new columns, no filename parsing, no mtime comparison. `rallies.clip_path`
-is still set on completion — it is what the UI reads to show a rally as
-already cut.
+is still set on completion, but **nothing reads it** — not the UI, not the API,
+not `plan_export`, which asks the filesystem. It was written for Reclaim Space,
+which §9 now rejects. It is kept because it is the only record of what was cut
+for a span its rally no longer has, which is what §4.4's sweep nulls out when
+it deletes that file.
 
 Export is therefore incremental by construction: exporting a set enqueues jobs
 only for spans with no clip on disk. Re-exporting after marking three more
@@ -285,11 +288,11 @@ bootleg clips prune   <session_id> --yes    # actually deletes
 a user was shown is what gets deleted. It clears `rallies.clip_path` **before**
 unlinking, and that order is deliberate: the column records what *was* cut
 rather than what the current bounds imply, so a rally whose bounds were dragged
-still names the file being swept — and Reclaim Space is going to read that
-column to decide a 5.6 GB original is safe to delete. Clearing first means a
-failed unlink leaves a column that understates what is on disk, which makes
-Reclaim Space more cautious; the other order would leave it claiming a clip
-that no longer exists.
+still names the file being swept — and `_carried_clip_path` copies that claim
+onto the new row at every exact-span re-segment, so a stale one propagates
+rather than decays. Clearing first means a failed unlink leaves a column that
+understates what is on disk, which is the harmless direction; the other order
+leaves a row asserting a clip that is not there.
 
 There is deliberately **no automatic sweep and no HTTP route**. Deleting a clip
 costs a four-to-eight-minute re-encode to get it back and there is no undo, so

@@ -122,11 +122,11 @@ def test_deleting_orphans_removes_exactly_those_files(library, conn, seeded):
 
 def test_deleting_an_orphan_clears_the_clip_path_that_pointed_at_it(library, conn, seeded):
     """rallies.clip_path records what WAS cut, deliberately not what the
-    current bounds imply -- and Reclaim Space will read it to decide an
-    original is safe to delete. A drag moves the bounds without moving
-    clip_path, so the file it names can be swept as an orphan while the
-    column still claims a clip exists. Leaving that behind would let Reclaim
-    Space delete a 5.6 GB original whose only clip we just removed.
+    current bounds imply. A drag moves the bounds without moving clip_path,
+    so the file it names can be swept as an orphan while the column still
+    claims a clip exists -- and _carried_clip_path copies that claim onto
+    the new row at every exact-span re-segment, so it outlives the sweep
+    that invalidated it unless the sweep clears it.
     """
     session_id, idx = seeded["session_id"], seeded["idx"]
     path = _cut(library, session_id, clip_relpath(idx, 9000, 14000))
