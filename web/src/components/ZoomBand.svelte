@@ -54,6 +54,24 @@
   const frac = (ms: number) => msToFraction(ms - windowStartMs, span)
 
   /**
+   * How far from a handle a press still counts as grabbing it.
+   *
+   * Deliberately larger than the handle's 12px visual width -- ordinary hit
+   * slop, and the failure mode here is worse than a plain miss: a press that
+   * matches no handle falls through to `onscrub`, so missing the grab moves
+   * the playhead and reads as "the drag didn't take" rather than as nothing
+   * happening. 24px is the WCAG 2.5.8 minimum target size.
+   *
+   * Bounded above by the rallies themselves: the shortest rally in a real
+   * session (2.4 s) draws ~66px wide in the 40 s zoom window, so two 24px
+   * zones still leave a gap to scrub in. If the two ever do meet on a
+   * narrower rally, `nearestHandle` splits the difference at the midpoint
+   * rather than favouring one side, so it degrades gracefully instead of
+   * making one handle unreachable.
+   */
+  const HANDLE_GRAB_PX = 24
+
+  /**
    * Move the playhead line. Called by the parent on every video-progress
    * tick (up to ~60Hz) -- writing that through Svelte state would re-render
    * this whole band every frame, so it goes straight to the DOM instead,
@@ -76,7 +94,7 @@
       f,
       frac(rally.start_ms),
       frac(rally.end_ms),
-      12,
+      HANDLE_GRAB_PX,
       band.getBoundingClientRect().width,
     )
     if (handle) {
@@ -142,19 +160,38 @@
     <div
       class="pointer-events-none absolute top-2 bottom-2 rounded bg-blue-500/30"
       style={`left:${frac(n.start_ms) * 100}%;width:${
-        Math.max(0.2, frac(n.end_ms) - frac(n.start_ms)) * 100
+        Math.max(0.2, (frac(n.end_ms) - frac(n.start_ms)) * 100)
       }%`}
     ></div>
   {/each}
 
+  <!--
+    The floors below are PERCENTAGES, so the `* 100` belongs inside the
+    Math.max, not outside it. Outside, `Math.max(0.4, fraction)` compares a
+    0..1 fraction against 0.4 and reads as a 40% minimum -- which, against
+    TimelineMode's 40 s zoom window, silently inflated every rally shorter
+    than 16 s to a fixed 16 s wide. Median rally here is 7.6 s.
+
+    That is not merely cosmetic: `nearestHandle` hit-tests the pointer
+    against frac(start_ms)/frac(end_ms), while the user aims at the box's
+    drawn edges. Inflating the width moved the drawn right handle ~21% of the
+    band away from where the hit test looked for it, far outside the 12px
+    grab radius, so grabbing it fell through to a scrub and the right handle
+    could not be dragged at all. The left edge was unaffected, since `left`
+    was always the true fraction -- which is why only the right handle broke.
+  -->
   <div
     class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-blue-400 bg-blue-400/25"
     style={`left:${frac(rally.start_ms) * 100}%;width:${
-      Math.max(0.4, frac(rally.end_ms) - frac(rally.start_ms)) * 100
+      Math.max(0.4, (frac(rally.end_ms) - frac(rally.start_ms)) * 100)
     }%`}
   >
-    <div class="absolute -top-0.5 -bottom-0.5 -left-1 w-2 rounded bg-blue-400"></div>
-    <div class="absolute -top-0.5 -bottom-0.5 -right-1 w-2 rounded bg-blue-400"></div>
+    <!-- 12px wide, centred on the boundary via the -1.5 inset. The press
+         target is wider still (HANDLE_GRAB_PX); this is only the affordance,
+         sized so the thing you aim at is actually visible against a 66px-wide
+         short rally. -->
+    <div class="absolute -top-0.5 -bottom-0.5 -left-1.5 w-3 rounded bg-blue-400"></div>
+    <div class="absolute -top-0.5 -bottom-0.5 -right-1.5 w-3 rounded bg-blue-400"></div>
   </div>
 
   <!--

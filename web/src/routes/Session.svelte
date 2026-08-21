@@ -163,7 +163,12 @@
   -->
   {#key rallyRevision}
     {#if mode === 'queue'}
-      <QueueMode {detail} onopen_timeline={openTimeline} onopen_label={() => (mode = 'label')} />
+      <QueueMode
+        {detail}
+        onopen_timeline={openTimeline}
+        onopen_label={() => (mode = 'label')}
+        startAtRallyId={focusedRallyId}
+      />
     {:else if mode === 'label'}
       <LabelMode {detail} onclose={closeLabel} />
     {:else if focusedRallyId}

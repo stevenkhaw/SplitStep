@@ -18,13 +18,18 @@
      * session correctly, instead of seeding from `detail.rallies`' stale
      * server-snapshot flags. */
     onopen_timeline: (rallyId: string, liveRallies: Rally[]) => void
-    /** Enter label mode. Separate from review: a verdict is a note about the
-     * detector, not a decision about the clip, so it deliberately does not
-     * touch star/reject or the session's review status. */
+    /** Enter label mode, on this rally. Separate from review: a verdict is a
+     * note about the detector, not a decision about the clip, so it
+     * deliberately does not touch star/reject or the session's review status. */
     onopen_label: () => void
+    /** Open on this rally instead of the first unreviewed one, when it is
+     * still in the queue. Session passes the rally the user just left the
+     * timeline from -- see the constructor call below for why a remount
+     * would otherwise lose their place. */
+    startAtRallyId?: string | null
   }
 
-  let { detail, onopen_timeline, onopen_label }: Props = $props()
+  let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
@@ -36,6 +41,20 @@
   // from under it. `untrack` tells svelte-check this one-time read is
   // intentional rather than an accidental non-reactive reference.
   const queue = new QueueController(untrack(() => detail.rallies))
+  // A fresh controller opens on the first rally whose reviewed_at is null,
+  // which is the right resume point for a new session and the wrong one for
+  // a remount. Returning from the timeline forces a remount (Session bumps
+  // rallyRevision -- the only way a trimmed rally's new bounds reach the
+  // queue at all), and reviewed_at is stamped by star/reject alone, never by
+  // a bounds edit, so trimming rally 40 of 61 and pressing esc would drop
+  // the user back at whichever rally they had not yet judged.
+  //
+  // jumpTo silently does nothing for an id it cannot find, which is exactly
+  // right for the other remount trigger: a re-segment rebuilds every rally
+  // with a new uuid, so a stale id from a previous timeline visit correctly
+  // falls through to the first-unreviewed default.
+  const initialRallyId = untrack(() => startAtRallyId)
+  if (initialRallyId) queue.jumpTo(initialRallyId)
   const toaster = createToaster()
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)
