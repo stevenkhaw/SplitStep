@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { spanKey, spanRef } from '../lib/reels'
   import { formatDuration, formatTs } from '../lib/time'
@@ -16,7 +17,12 @@
   let { existing, defaultSessionId = null, onadd, onclose }: Props = $props()
 
   let sessions = $state<Session[]>([])
-  let sessionId = $state<string | null>(defaultSessionId)
+  // Deliberately a one-time seed, not a reactive read: the picker is seeded
+  // once from the reel's last item, and the parent remounts it when adding to
+  // a different reel, so following a later prop change would fight the user's
+  // own session selection. `untrack` tells svelte-check this one-time read is
+  // intentional rather than an accidental non-reactive reference.
+  let sessionId = $state<string | null>(untrack(() => defaultSessionId))
   let rallies = $state<Rally[]>([])
   let filter = $state<Filter>('points')
   let checked = $state(new Set<string>())
