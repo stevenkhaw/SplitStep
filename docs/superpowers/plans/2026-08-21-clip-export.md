@@ -1181,16 +1181,30 @@ the first enqueued clip suppress all the rest."
 
 ### Task 6: Export a set
 
+> **Amended 2026-08-21, post-review.** The version below is what actually
+> shipped after a review pass caught two problems in the first cut of this
+> task: (1) the route hand-rolled the `which` → column ternary a second
+> time, unguarded, for a `total` query that duplicated `spans_to_cut`'s own
+> count; (2) `already_cut` conflated three different outcomes — a clip
+> genuinely on disk, a clip job already in flight for that exact span, and a
+> rally whose source row had vanished — so pressing export twice while the
+> first batch was still encoding reported everything as "already cut," which
+> was false. The function is now `plan_export` (it plans an export, not just
+> lists spans) and returns an `ExportPlan`; the column ternary lives in one
+> guarded place, `column_for`. Every caller — the route, and the CLI Task 7
+> adds — must use this contract, not the one originally drafted below.
+
 **Files:**
 - Modify: `bootleg/api/routes.py` (`POST /api/sessions/{session_id}/export`)
-- Create: `bootleg/export.py` (`spans_to_cut`)
+- Create: `bootleg/export.py` (`plan_export`, `column_for`, `ExportPlan`)
 - Test: `tests/test_export.py`
 
 **Interfaces:**
 - Consumes: `clip_relpath`, `has_pending_clip`, `jobq.enqueue`, `list_rallies`, `get_source`.
 - Produces:
-  - `spans_to_cut(library, conn, session_id, which: str) -> list[dict]`
-  - `POST /api/sessions/{session_id}/export` — body `{"which": "points"|"starred"}` → `{"queued": int, "already_cut": int, "total": int}`
+  - `column_for(which: str) -> str` — the single guarded place `which` becomes a column name; raises `ValueError` on anything outside `SETS`.
+  - `plan_export(library, conn, session_id, which: str) -> ExportPlan`, where `ExportPlan` is a frozen dataclass: `pending: list[dict]`, `already_cut: int`, `in_flight: int`, `unavailable: int`, plus a derived `total` property (`len(pending) + already_cut + in_flight + unavailable` — never a second query, so it cannot disagree with the other four).
+  - `POST /api/sessions/{session_id}/export` — body `{"which": "points"|"starred"}` → `{"queued": int, "already_cut": int, "in_flight": int, "unavailable": int, "total": int}`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1205,7 +1219,7 @@ from bootleg.db.jobs import enqueue
 from bootleg.db.rallies import replace_rallies, set_point, set_rejected, set_star
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
-from bootleg.export import spans_to_cut
+from bootleg.export import column_for, plan_export
 from bootleg.media.clips import clip_relpath
 
 
@@ -1238,18 +1252,29 @@ def _touch_clip(library, session_id, idx, start_ms, end_ms):
     return path
 
 
+def _vanish_source(conn, source_id):
+    # rallies.source_id is ON DELETE CASCADE, so the ordinary path to a
+    # vanished source would take its rallies with it. Toggle the pragma off
+    # for this one delete to get the row shape the guard defends against --
+    # a rally whose source really is gone -- without also losing the rally.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
 def test_points_set_returns_only_points(library, conn, seeded):
     set_point(conn, seeded["rallies"][0]["id"], True)
     set_star(conn, seeded["rallies"][1]["id"], True)
-    spans = spans_to_cut(library, conn, seeded["session_id"], "points")
-    assert [s["start_ms"] for s in spans] == [1000]
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert [s["start_ms"] for s in plan.pending] == [1000]
 
 
 def test_starred_set_returns_only_starred(library, conn, seeded):
     set_point(conn, seeded["rallies"][0]["id"], True)
     set_star(conn, seeded["rallies"][1]["id"], True)
-    spans = spans_to_cut(library, conn, seeded["session_id"], "starred")
-    assert [s["start_ms"] for s in spans] == [9000]
+    plan = plan_export(library, conn, seeded["session_id"], "starred")
+    assert [s["start_ms"] for s in plan.pending] == [9000]
 
 
 def test_rejected_rallies_are_never_cut(library, conn, seeded):
@@ -1258,7 +1283,9 @@ def test_rejected_rallies_are_never_cut(library, conn, seeded):
     rally = seeded["rallies"][0]
     set_point(conn, rally["id"], True)
     set_rejected(conn, rally["id"], True)
-    assert spans_to_cut(library, conn, seeded["session_id"], "points") == []
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert plan.pending == []
+    assert plan.total == 0
 
 
 def test_a_span_whose_clip_exists_is_skipped(library, conn, seeded):
@@ -1267,7 +1294,9 @@ def test_a_span_whose_clip_exists_is_skipped(library, conn, seeded):
     rally = seeded["rallies"][0]
     set_point(conn, rally["id"], True)
     _touch_clip(library, seeded["session_id"], seeded["idx"], 1000, 5000)
-    assert spans_to_cut(library, conn, seeded["session_id"], "points") == []
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert plan.pending == []
+    assert plan.already_cut == 1
 
 
 def test_a_span_whose_bounds_moved_is_cut_again(library, conn, seeded):
@@ -1278,8 +1307,8 @@ def test_a_span_whose_bounds_moved_is_cut_again(library, conn, seeded):
     _touch_clip(library, seeded["session_id"], seeded["idx"], 1000, 5000)
     conn.execute("UPDATE rallies SET start_ms = 1400 WHERE id = ?", (rally["id"],))
     conn.commit()
-    spans = spans_to_cut(library, conn, seeded["session_id"], "points")
-    assert [s["start_ms"] for s in spans] == [1400]
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert [s["start_ms"] for s in plan.pending] == [1400]
 
 
 def test_a_span_with_a_clip_job_in_flight_is_not_queued_twice(library, conn, seeded):
@@ -1287,12 +1316,27 @@ def test_a_span_with_a_clip_job_in_flight_is_not_queued_twice(library, conn, see
     set_point(conn, rally["id"], True)
     enqueue(conn, "clip", {"source_id": seeded["source_id"], "rally_id": rally["id"],
                            "start_ms": 1000, "end_ms": 5000})
-    assert spans_to_cut(library, conn, seeded["session_id"], "points") == []
+    plan = plan_export(library, conn, seeded["session_id"], "points")
+    assert plan.pending == []
+    assert plan.in_flight == 1
 
 
-def test_spans_to_cut_rejects_an_unknown_set(library, conn, seeded):
+def test_plan_export_rejects_an_unknown_set(library, conn, seeded):
     with pytest.raises(ValueError, match="which must be one of"):
-        spans_to_cut(library, conn, seeded["session_id"], "everything")
+        plan_export(library, conn, seeded["session_id"], "everything")
+
+
+def test_column_for_rejects_unknown_set_and_route_still_422s(client, seeded):
+    # column_for is the one guarded place the column ternary happens now --
+    # a caller that reaches it outside the API (a script, model_construct())
+    # gets the same ValueError the route's pydantic validator produces as a
+    # 422, rather than a silently-interpolated garbage column name.
+    with pytest.raises(ValueError, match="which must be one of"):
+        column_for("everything")
+
+    r = client.post(f"/api/sessions/{seeded['session_id']}/export",
+                    json={"which": "everything"})
+    assert r.status_code == 422
 
 
 def test_route_reports_queued_against_already_cut(client, library, conn, seeded):
@@ -1303,11 +1347,83 @@ def test_route_reports_queued_against_already_cut(client, library, conn, seeded)
     r = client.post(f"/api/sessions/{seeded['session_id']}/export",
                     json={"which": "points"})
     assert r.status_code == 200
-    assert r.json() == {"queued": 1, "already_cut": 1, "total": 2}
+    assert r.json() == {
+        "queued": 1, "already_cut": 1, "in_flight": 0, "unavailable": 0, "total": 2,
+    }
     queued = conn.execute(
         "SELECT COUNT(*) AS n FROM jobs WHERE type = 'clip'"
     ).fetchone()["n"]
     assert queued == 1
+
+
+def test_route_reports_in_flight_as_in_flight_not_already_cut(client, conn, seeded):
+    # Pressing export a second time while the first batch is still encoding
+    # must not tell the user everything is already cut -- it isn't.
+    rally = seeded["rallies"][0]
+    set_point(conn, rally["id"], True)
+    enqueue(conn, "clip", {"source_id": seeded["source_id"], "rally_id": rally["id"],
+                           "start_ms": rally["start_ms"], "end_ms": rally["end_ms"]})
+
+    r = client.post(f"/api/sessions/{seeded['session_id']}/export",
+                    json={"which": "points"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["in_flight"] == 1
+    assert body["already_cut"] == 0
+    assert body["queued"] == 0
+    assert body["total"] == 1
+
+
+def test_route_reports_vanished_source_as_unavailable_not_already_cut(client, conn, seeded):
+    rally = seeded["rallies"][0]
+    set_point(conn, rally["id"], True)
+    _vanish_source(conn, seeded["source_id"])
+
+    r = client.post(f"/api/sessions/{seeded['session_id']}/export",
+                    json={"which": "points"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["unavailable"] == 1
+    assert body["already_cut"] == 0
+    assert body["queued"] == 0
+    assert body["total"] == 1
+
+
+def test_the_four_numbers_account_for_every_rally_in_the_set(client, library, conn, seeded):
+    # One rally per outcome -- pending, already cut, in flight, and a
+    # vanished source -- from two different sources, so that the four
+    # numbers in the response must sum to exactly the four rallies flagged
+    # in the set, with none double-counted and none dropped.
+    session_id = seeded["session_id"]
+    pending_rally, cut_rally, flight_rally = seeded["rallies"]
+    for rally in (pending_rally, cut_rally, flight_rally):
+        set_point(conn, rally["id"], True)
+
+    _touch_clip(library, session_id, seeded["idx"], cut_rally["start_ms"], cut_rally["end_ms"])
+    enqueue(conn, "clip", {
+        "source_id": seeded["source_id"], "rally_id": flight_rally["id"],
+        "start_ms": flight_rally["start_ms"], "end_ms": flight_rally["end_ms"],
+    })
+
+    gone_source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T11:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9001.MOV",
+    )
+    replace_rallies(conn, session_id, gone_source_id, [Interval(2000, 6000, 0.8)])
+    gone_rally = conn.execute(
+        "SELECT * FROM rallies WHERE source_id = ?", (gone_source_id,)
+    ).fetchone()
+    set_point(conn, gone_rally["id"], True)
+    _vanish_source(conn, gone_source_id)
+
+    r = client.post(f"/api/sessions/{session_id}/export", json={"which": "points"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {
+        "queued": 1, "already_cut": 1, "in_flight": 1, "unavailable": 1, "total": 4,
+    }
+    assert body["queued"] + body["already_cut"] + body["in_flight"] + body["unavailable"] \
+        == body["total"]
 
 
 def test_route_404s_on_an_unknown_session(client, seeded):
@@ -1330,6 +1446,7 @@ Expected: collection error — no `bootleg.export`
 
 ```python
 import sqlite3
+from dataclasses import dataclass, field
 
 from bootleg.config import Library
 from bootleg.db.jobs import has_pending_clip
@@ -1339,23 +1456,61 @@ from bootleg.media.clips import clip_relpath
 SETS = ("points", "starred")
 
 
-def spans_to_cut(
+def column_for(which: str) -> str:
+    """The rallies column that `which` selects.
+
+    The result is interpolated directly into a WHERE clause via f-string in
+    `plan_export`, never bound as a parameter -- this guard is what keeps
+    that safe, so it must run before the ternary on *every* call, not just
+    at the API edge. `ExportBody.check_which` also rejects a bad `which`
+    before the route runs, but that is a second, independent gate on the
+    same string; it does not make this one redundant, and a caller that
+    reaches this function some other way (a script, `model_construct()`, a
+    copy-pasted query elsewhere) must not be able to skip it.
+    """
+    if which not in SETS:
+        raise ValueError(f"which must be one of {list(SETS)}, got {which!r}")
+    return "point" if which == "points" else "starred"
+
+
+@dataclass(frozen=True)
+class ExportPlan:
+    """The outcome of sorting `which`'s rallies into pending vs. the three
+    distinct reasons a rally is not pending.
+
+    `already_cut`, `in_flight`, and `unavailable` are real, different
+    outcomes -- a clip on disk, a job already working on the same span, and
+    a rally whose source row is gone -- and a caller that wants to tell a
+    user "0 queued, 24 already cut" needs to say that only when it is true.
+    `total` is derived from the other four rather than stored or queried
+    separately, so it can never drift out of agreement with them: there is
+    one query's worth of rows, sorted into four bins, not two queries that
+    each count and might disagree.
+    """
+
+    pending: list[dict] = field(default_factory=list)
+    already_cut: int = 0
+    in_flight: int = 0
+    unavailable: int = 0
+
+    @property
+    def total(self) -> int:
+        return len(self.pending) + self.already_cut + self.in_flight + self.unavailable
+
+
+def plan_export(
     library: Library, conn: sqlite3.Connection, session_id: str, which: str
-) -> list[dict]:
-    """The spans in `which` that have no clip yet and no clip job in flight.
+) -> ExportPlan:
+    """Sort `which`'s rallies (points or starred, minus rejected) into an
+    `ExportPlan`: spans with no clip yet and no clip job in flight, plus a
+    count for each reason the rest were excluded.
 
     Incremental by construction rather than by bookkeeping: a clip either
     exists at the path its current bounds imply, or it does not. Nothing
     records staleness, because there is nothing to keep in sync -- a rally
     whose bounds moved simply resolves to a different path, which is missing.
     """
-    if which not in SETS:
-        raise ValueError(f"which must be one of {list(SETS)}, got {which!r}")
-
-    # The f-string interpolates a column name chosen from a fixed tuple, never
-    # from request data -- the guard above is what keeps that true, so it must
-    # stay directly above this query rather than drifting into the caller.
-    column = "point" if which == "points" else "starred"
+    column = column_for(which)
     rows = conn.execute(
         f"SELECT * FROM rallies WHERE session_id = ? AND {column} = 1"
         " AND rejected = 0 ORDER BY idx",
@@ -1365,21 +1520,31 @@ def spans_to_cut(
     clips_dir = library.clips_dir(session_id)
     sources: dict[str, sqlite3.Row] = {}
     pending: list[dict] = []
+    already_cut = 0
+    in_flight = 0
+    unavailable = 0
 
     for rally in rows:
         source = sources.get(rally["source_id"])
         if source is None:
             source = get_source(conn, rally["source_id"])
             if source is None:
-                # A rally whose source vanished cannot be cut. Skip rather than
-                # raise: one broken row must not block exporting the rest.
+                # A rally whose source vanished cannot be cut, now or later --
+                # unavailable, not already cut. Skip rather than raise: one
+                # broken row must not block exporting the rest.
+                unavailable += 1
                 continue
             sources[rally["source_id"]] = source
 
         name = clip_relpath(source["idx"], rally["start_ms"], rally["end_ms"])
         if (clips_dir / name).exists():
+            already_cut += 1
             continue
         if has_pending_clip(conn, rally["source_id"], rally["start_ms"], rally["end_ms"]):
+            # A job for this exact span is already queued or running -- in
+            # flight, not cut. Pressing export again while it encodes must
+            # not report it as done.
+            in_flight += 1
             continue
 
         pending.append({
@@ -1389,11 +1554,15 @@ def spans_to_cut(
             "end_ms": rally["end_ms"],
         })
 
-    return pending
+    return ExportPlan(
+        pending=pending, already_cut=already_cut, in_flight=in_flight, unavailable=unavailable
+    )
 ```
 
-The returned dicts are exactly the `clip` job payload, so the caller enqueues
-them unchanged.
+`plan_export`'s pending dicts are exactly the `clip` job payload, so the
+caller enqueues them unchanged. `column_for` is the one place the `which` ->
+column ternary happens; both `plan_export` and the route go through it
+rather than each hand-rolling the check.
 
 - [ ] **Step 4: Add the route**
 
@@ -1402,7 +1571,7 @@ them unchanged.
 
 ```python
 from bootleg.db import jobs as jobq
-from bootleg.export import SETS, spans_to_cut
+from bootleg.export import SETS, plan_export
 ```
 
 Then the body model and route:
@@ -1426,17 +1595,20 @@ def api_export(session_id: str, body: ExportBody, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     library = _library(request)
 
-    pending = spans_to_cut(library, conn, session_id, body.which)
-    for payload in pending:
+    plan = plan_export(library, conn, session_id, body.which)
+    for payload in plan.pending:
         jobq.enqueue(conn, "clip", payload)
 
-    column = "point" if body.which == "points" else "starred"
-    total = conn.execute(
-        f"SELECT COUNT(*) AS n FROM rallies WHERE session_id = ?"
-        f" AND {column} = 1 AND rejected = 0",
-        (session_id,),
-    ).fetchone()["n"]
-    return {"queued": len(pending), "already_cut": total - len(pending), "total": total}
+    # `total` comes from the plan, not a second COUNT(*) -- two queries that
+    # must agree is the shape that let already_cut silently absorb in-flight
+    # and unavailable rallies before.
+    return {
+        "queued": len(plan.pending),
+        "already_cut": plan.already_cut,
+        "in_flight": plan.in_flight,
+        "unavailable": plan.unavailable,
+        "total": plan.total,
+    }
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
@@ -1490,7 +1662,7 @@ staleness because there is nothing to keep in sync."
 Export point clips (24)        Export starred clips (0)
 ```
 
-Each calls `api.exportClips`, then reports the result through the existing toaster — `queued`, `already_cut` and `total`, so a second press visibly says "0 queued, 24 already cut" rather than looking broken. Disable a button whose count is zero. Encoding progress is the jobs badge's job; do not build a second progress UI.
+Each calls `api.exportClips`, then reports the result through the existing toaster. The response is `{queued, already_cut, in_flight, unavailable, total}` (Task 6, amended) — four honest counts, not one bucket standing in for three different outcomes. A second press while the first batch is still encoding must say "0 queued, 3 in flight" rather than "0 queued, 3 already cut"; only report "already cut" for spans that actually have a clip on disk. Surface `unavailable` too if it is nonzero (a source that vanished out from under a flagged rally) rather than silently dropping it from the total the user sees. Disable a button whose count is zero. Encoding progress is the jobs badge's job; do not build a second progress UI.
 
 Reel creation is **not** part of this plan — these buttons cut clips and nothing else. Plan B adds the reel actions beside them.
 
@@ -1499,7 +1671,7 @@ Reel creation is **not** part of this plan — these buttons cut clips and nothi
 Create `web/tests/export-buttons.test.ts`. Copy the `mockApi` /
 `vi.mock('../src/lib/api')` / media-stub preamble from
 `web/tests/queue-position-after-timeline.test.ts` verbatim, adding
-`exportClips: vi.fn().mockResolvedValue({ queued: 2, already_cut: 0, total: 2 })`
+`exportClips: vi.fn().mockResolvedValue({ queued: 2, already_cut: 0, in_flight: 0, unavailable: 0, total: 2 })`
 to the mock, then:
 
 ```ts
@@ -1509,7 +1681,9 @@ describe('the reviewed panel exports clips', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockApi.exportClips.mockResolvedValue({ queued: 2, already_cut: 0, total: 2 })
+    mockApi.exportClips.mockResolvedValue({
+      queued: 2, already_cut: 0, in_flight: 0, unavailable: 0, total: 2,
+    })
     target = document.createElement('div')
     document.body.appendChild(target)
   })
@@ -1562,7 +1736,9 @@ describe('the reviewed panel exports clips', () => {
 
   it('reports already-cut so a second press does not look broken', async () => {
     mockApi.getSession.mockResolvedValue(reviewed())
-    mockApi.exportClips.mockResolvedValue({ queued: 0, already_cut: 2, total: 2 })
+    mockApi.exportClips.mockResolvedValue({
+      queued: 0, already_cut: 2, in_flight: 0, unavailable: 0, total: 2,
+    })
     instance = mount(SessionHarness, { target })
     flushSync()
     await vi.waitFor(() => expect(target.textContent).toMatch(/Session reviewed/))
@@ -1570,6 +1746,21 @@ describe('the reviewed panel exports clips', () => {
     button(/point clips/i).click()
     // Without this the second press is indistinguishable from a dead button.
     await vi.waitFor(() => expect(target.textContent).toMatch(/already cut/i))
+  })
+
+  it('reports in-flight separately so a second press mid-encode is honest', async () => {
+    // Encoding is still running from the first press -- these spans are not
+    // "already cut", and must not be reported as if they were.
+    mockApi.getSession.mockResolvedValue(reviewed())
+    mockApi.exportClips.mockResolvedValue({
+      queued: 0, already_cut: 0, in_flight: 2, unavailable: 0, total: 2,
+    })
+    instance = mount(SessionHarness, { target })
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Session reviewed/))
+
+    button(/point clips/i).click()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/in flight/i))
   })
 
   it('disables a set with nothing in it', async () => {
@@ -1603,12 +1794,20 @@ def cmd_clips_export(args) -> int:
         print(f"session not found: {args.session_id}", file=sys.stderr)
         return 1
 
-    pending = spans_to_cut(library, conn, args.session_id, args.set)
-    for payload in pending:
+    plan = plan_export(library, conn, args.session_id, args.set)
+    for payload in plan.pending:
         jobq.enqueue(conn, "clip", payload)
-    print(f"queued {len(pending)} clip job(s) for {args.set} in {args.session_id}")
-    if not pending:
-        print("nothing to cut -- every clip in that set already exists")
+    print(f"queued {len(plan.pending)} clip job(s) for {args.set} in {args.session_id}")
+    if not plan.pending:
+        if plan.in_flight or plan.unavailable:
+            # Same honesty problem the route had: a nonzero already_cut can
+            # coexist with jobs still encoding or rallies whose source is
+            # gone, and folding those into "already exists" would say every
+            # clip is done when some are not, or never will be.
+            print(f"nothing new to cut -- {plan.already_cut} already cut, "
+                  f"{plan.in_flight} in flight, {plan.unavailable} unavailable")
+        else:
+            print("nothing to cut -- every clip in that set already exists")
     return 0
 ```
 
@@ -1658,13 +1857,14 @@ def test_clips_export_a_second_time_queues_nothing_and_says_so(library, conn, ca
 
     main(["--library", str(library.root), "clips", "export", session_id])
     capsys.readouterr()
-    # The job from the first run is still queued, so the span is in flight and
-    # must not be enqueued twice.
+    # The job from the first run is still queued, so the span is in flight --
+    # not cut -- and must not be enqueued twice, and must not be reported as
+    # "already exists" (it doesn't, yet).
     rc = main(["--library", str(library.root), "clips", "export", session_id])
     assert rc == 0
     out = capsys.readouterr().out
     assert "queued 0 clip job(s)" in out
-    assert "already exists" in out
+    assert "in flight" in out
 
 
 def test_clips_export_on_an_unknown_session_fails(library, conn, capsys):
@@ -1691,9 +1891,10 @@ git add web/src/lib/api.ts web/src/components/QueueMode.svelte web/tests \
 git commit -m "feat: export buttons on the reviewed panel, and bootleg clips export
 
 The end-of-queue panel has been a dead end carrying a comment reserving this
-spot since the review UI was built. Both buttons report queued vs already
-cut, so a second press reads as '0 queued, 24 already cut' rather than
-looking broken."
+spot since the review UI was built. Both buttons report the plan's four
+honest counts -- queued, already_cut, in_flight, unavailable -- so a second
+press mid-encode reads as '0 queued, 3 in flight' rather than the false
+'already cut', and rather than looking broken."
 ```
 
 ---

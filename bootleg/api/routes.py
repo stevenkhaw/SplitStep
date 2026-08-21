@@ -42,7 +42,7 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
-from bootleg.export import SETS, spans_to_cut
+from bootleg.export import SETS, plan_export
 from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
@@ -193,17 +193,20 @@ def api_export(session_id: str, body: ExportBody, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     library = _library(request)
 
-    pending = spans_to_cut(library, conn, session_id, body.which)
-    for payload in pending:
+    plan = plan_export(library, conn, session_id, body.which)
+    for payload in plan.pending:
         jobq.enqueue(conn, "clip", payload)
 
-    column = "point" if body.which == "points" else "starred"
-    total = conn.execute(
-        f"SELECT COUNT(*) AS n FROM rallies WHERE session_id = ?"
-        f" AND {column} = 1 AND rejected = 0",
-        (session_id,),
-    ).fetchone()["n"]
-    return {"queued": len(pending), "already_cut": total - len(pending), "total": total}
+    # `total` comes from the plan, not a second COUNT(*) -- two queries that
+    # must agree is the shape that let already_cut silently absorb in-flight
+    # and unavailable rallies before.
+    return {
+        "queued": len(plan.pending),
+        "already_cut": plan.already_cut,
+        "in_flight": plan.in_flight,
+        "unavailable": plan.unavailable,
+        "total": plan.total,
+    }
 
 
 def _session_id_for_rally(conn, rally_id: str) -> str:
