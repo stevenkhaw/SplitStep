@@ -227,3 +227,60 @@ Two live routes out, in order of confidence:
 Hand-labelling ten to fifteen clips would do more for either route than any further
 threshold work. The absence of hand labels is what let audio-impact clustering stand in as
 ground truth in the first place.
+
+## 2026-08-21: a real labelled set, and what it says
+
+Fifteen windows were hand-labelled blind — the labelling tool
+(`web/public/label.html`, served at `/label.html`) deliberately hid which windows the
+detector had flagged and how confident it was, so the judgements could not anchor to the
+detector's guesses. Nine were detector intervals sampled across the confidence range; six
+were windows the detector ignored entirely, without which only precision can be measured
+and never recall. Committed as `tests/fixtures/labels_2026-08-18_source01.json`.
+
+### The detector, measured
+
+| | |
+|---|---|
+| Precision | **4 of 9** flagged windows contain play (44%) |
+| Recall | play missed in **2 of 6** ignored windows |
+| Confidence | play mean 0.416 against not-play mean 0.388 |
+
+The single highest-confidence window in the set (0.60) is a false positive: someone walks
+directly past the lens. Confidence is not merely weak, it is uninformative — which was
+previously argued from two clips and now rests on nine.
+
+### Pose does not separate on real labels
+
+The earlier claim in the Correction section — wrist-above-shoulder separating 4/4 — does
+not survive a larger set:
+
+```
+play    above: 0.044  0.094  0.188  0.237
+none    above: 0.0 x3, 0.003, 0.017, 0.018, 0.026, 0.221, 0.352
+```
+
+Two windows drove the overlap and both were investigated. The 0.352 case is the
+walk-past-the-lens window, where tracking collapses to 0-2 of 6 frames per bin and
+produces an impossible 322 torso-lengths/sec. A tracking-quality filter (>= 4 of 6 frames)
+was applied to test whether that explained it. **It did not** — the window still scores
+0.400 on five clean bins, because the person walking past genuinely has a raised arm. The
+0.221 case is a serve wind-up falling at the very edge of an arbitrary 8 s window.
+
+Reported here rather than filtered away: a principled fix was tried, it failed, and the
+negative result stands. Four clips was too small a sample and the earlier claim was
+small-sample optimism.
+
+One result does survive. The window scoring highest on pose across the whole set (0.425)
+is clip 14 — a serve the detector **missed entirely**. Pose sees play the current model
+does not; it also fires on people who are not playing.
+
+### What the set is for
+
+Every idea in this document — audio amplitude, stereo direction, spectral timbre,
+box-centre motion, wrist speed, wrist reach, wrist elevation — can now be scored against
+one fixed set of human judgements in seconds, instead of against whichever three windows
+someone picked by hand. That is the durable outcome of this exercise; the individual
+negative results are not.
+
+Fifteen windows remains small. Anything that separates cleanly on it should be re-checked
+against a second labelling pass before it is built.

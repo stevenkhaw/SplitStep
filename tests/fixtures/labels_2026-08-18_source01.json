@@ -1,0 +1,134 @@
+{
+ "source": "sessions/2026-08-18/sources/01",
+ "labelled_on": "2026-08-21",
+ "labelled_by": "human, blind -- the tool hid which windows the detector had flagged",
+ "question": "Does this window contain active play (rally, serve or hitting) on OUR court?",
+ "labels": [
+  "play",
+  "partly",
+  "none"
+ ],
+ "note": "'partly' exists because a window can be genuinely mixed. Treating this as binary is what produced an earlier mislabelling of a camera-setup clip that actually contained play.",
+ "windows": [
+  {
+   "n": 1,
+   "start_ms": 32700,
+   "end_ms": 44500,
+   "detector_flagged": true,
+   "detector_confidence": 0.3217,
+   "label": "none"
+  },
+  {
+   "n": 2,
+   "start_ms": 59300,
+   "end_ms": 91100,
+   "detector_flagged": true,
+   "detector_confidence": 0.4558,
+   "label": "play"
+  },
+  {
+   "n": 3,
+   "start_ms": 167447,
+   "end_ms": 175447,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "none"
+  },
+  {
+   "n": 4,
+   "start_ms": 252300,
+   "end_ms": 260300,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "none"
+  },
+  {
+   "n": 5,
+   "start_ms": 312300,
+   "end_ms": 321900,
+   "detector_flagged": true,
+   "detector_confidence": 0.4053,
+   "label": "play"
+  },
+  {
+   "n": 6,
+   "start_ms": 363500,
+   "end_ms": 371500,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "none"
+  },
+  {
+   "n": 7,
+   "start_ms": 375300,
+   "end_ms": 378300,
+   "detector_flagged": true,
+   "detector_confidence": 0.6004,
+   "label": "none"
+  },
+  {
+   "n": 8,
+   "start_ms": 409900,
+   "end_ms": 417900,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "partly"
+  },
+  {
+   "n": 9,
+   "start_ms": 529100,
+   "end_ms": 541100,
+   "detector_flagged": true,
+   "detector_confidence": 0.4324,
+   "label": "play"
+  },
+  {
+   "n": 10,
+   "start_ms": 598300,
+   "end_ms": 603300,
+   "detector_flagged": true,
+   "detector_confidence": 0.2718,
+   "label": "none"
+  },
+  {
+   "n": 11,
+   "start_ms": 718500,
+   "end_ms": 728500,
+   "detector_flagged": true,
+   "detector_confidence": 0.3872,
+   "label": "none"
+  },
+  {
+   "n": 12,
+   "start_ms": 761900,
+   "end_ms": 769900,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "none"
+  },
+  {
+   "n": 13,
+   "start_ms": 770700,
+   "end_ms": 782057,
+   "detector_flagged": true,
+   "detector_confidence": 0.3711,
+   "label": "play"
+  },
+  {
+   "n": 14,
+   "start_ms": 792578,
+   "end_ms": 800578,
+   "detector_flagged": false,
+   "detector_confidence": null,
+   "label": "partly"
+  },
+  {
+   "n": 15,
+   "start_ms": 1057500,
+   "end_ms": 1060100,
+   "detector_flagged": true,
+   "detector_confidence": 0.3592,
+   "label": "none"
+  }
+ ]
+}
