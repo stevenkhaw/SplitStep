@@ -5,7 +5,15 @@
   import { isEditableTarget } from '../lib/keyboard'
   import { createToaster } from '../lib/toaster.svelte'
   import { formatTs, frameStep } from '../lib/time'
-  import { clampMinGap, msToFraction, toSessionMs, zoomWindow } from '../lib/timeline'
+  import {
+    clampMinGap,
+    msToFraction,
+    setInPoint,
+    setOutPoint,
+    toSessionMs,
+    zoomWindow,
+  } from '../lib/timeline'
+  import type { BoundsEdit } from '../lib/timeline'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
@@ -233,6 +241,18 @@
     }
   }
 
+  // Refusals are surfaced, never silent. The whole reason `[` could destroy a
+  // rally is that it did so with no confirmation, no undo and no save notice,
+  // so a refusal that said nothing would be only a smaller version of the same
+  // bug.
+  function applyEdit(edit: BoundsEdit): void {
+    if (!edit.ok) {
+      toaster.push(edit.reason)
+      return
+    }
+    commitBounds(edit.startMs, edit.endMs)
+  }
+
   function onKey(e: KeyboardEvent) {
     if (isEditableTarget(e.target)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -242,10 +262,10 @@
         onclose()
         break
       case '[':
-        commitBounds(deck?.currentMs() ?? rally.start_ms, rally.end_ms)
+        applyEdit(setInPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.start_ms))
         break
       case ']':
-        commitBounds(rally.start_ms, deck?.currentMs() ?? rally.end_ms)
+        applyEdit(setOutPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.end_ms))
         break
       case ',': {
         const ms = frameStep(deck?.currentMs() ?? 0, source.fps, -1)

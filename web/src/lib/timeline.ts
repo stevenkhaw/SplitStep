@@ -104,6 +104,60 @@ export function clampMinGap(
   return { startMs, endMs }
 }
 
+/**
+ * The result of a keyboard bounds edit: either a new pair of bounds, or a
+ * refusal carrying a reason the UI can show the user.
+ */
+export type BoundsEdit =
+  | { ok: true; startMs: number; endMs: number }
+  | { ok: false; reason: string }
+
+/**
+ * Set a rally's in-point to the playhead, refusing rather than collapsing.
+ *
+ * `clampMinGap` cannot express "no". Given an in-point past the rally's end it
+ * anchors the in-point and drags the out-point to `start + MIN_RALLY_MS`,
+ * which prevents an inverted rally but silently destroys a good one. That is
+ * not hypothetical: rally 17 of session 2026-08-18 was a 9.6 s rally found in
+ * the database as a 100 ms sliver seven seconds past its own end, because `[`
+ * was pressed with the playhead parked out there. There was no confirmation,
+ * no undo in this mode, and no save feedback, so it happened invisibly.
+ *
+ * Refusing does not block re-spanning a rally wholesale -- the one workflow
+ * the collapse behaviour supported. Move the out-point first, then the
+ * in-point follows; only the order changes.
+ */
+export function setInPoint(
+  startMs: number,
+  endMs: number,
+  playheadMs: number,
+  minMs: number = MIN_RALLY_MS,
+): BoundsEdit {
+  if (playheadMs > endMs - minMs) {
+    return {
+      ok: false,
+      reason: "That's past this rally's end — set the out-point first, then the in-point.",
+    }
+  }
+  return { ok: true, startMs: playheadMs, endMs }
+}
+
+/** Mirror of `setInPoint` for the out-point. See its comment for the why. */
+export function setOutPoint(
+  startMs: number,
+  endMs: number,
+  playheadMs: number,
+  minMs: number = MIN_RALLY_MS,
+): BoundsEdit {
+  if (playheadMs < startMs + minMs) {
+    return {
+      ok: false,
+      reason: "That's before this rally's start — set the in-point first, then the out-point.",
+    }
+  }
+  return { ok: true, startMs, endMs: playheadMs }
+}
+
 /** Which drag handle, if any, a pointer at `xFraction` is grabbing. */
 export function nearestHandle(
   xFraction: number,
