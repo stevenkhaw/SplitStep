@@ -38,6 +38,15 @@ describe('normalizeNote', () => {
     expect(normalizeNote('x'.repeat(120) + '   ')).toHaveLength(NOTE_MAX_CHARS)
   })
 
+  it('trims leading space before capping, not after', () => {
+    // The order is only observable from the leading side. With three leading
+    // spaces and 125 x's, trim-then-cap keeps 120 x's; cap-then-trim would
+    // slice at 120 characters INCLUDING the spaces and return only 117.
+    // The trailing-space test above cannot see this: slicing a prefix and
+    // trimming a trailing run of whitespace commute.
+    expect(normalizeNote('   ' + 'x'.repeat(125))).toBe('x'.repeat(120))
+  })
+
   it('leaves a note at exactly the cap alone', () => {
     expect(normalizeNote('x'.repeat(120))).toHaveLength(NOTE_MAX_CHARS)
   })
