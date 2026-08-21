@@ -8,6 +8,8 @@ import {
   scoreCurvePoints,
   scoreToY,
   sessionTimeline,
+  setInPoint,
+  setOutPoint,
   toSessionMs,
   zoomWindow,
 } from '../src/lib/timeline'
@@ -226,5 +228,64 @@ describe('scoreCurvePoints', () => {
     // window extends past the end of the series -- only what exists is drawn
     const points = scoreCurvePoints([0, 1], 1000, 0, 5000, 1000, 38)
     expect(points).toBe('0,38 1000,2')
+  })
+})
+
+describe('setInPoint / setOutPoint refuse a collapse (rally 17 destruction, 2026-08-21)', () => {
+  // Rally 17 of session 2026-08-18 was a 9.6 s rally at 312300-321900. It was
+  // found in the database as 328867-328967 -- exactly MIN_RALLY_MS, parked at
+  // a playhead seven seconds past its own end. Pressing `[` there anchored the
+  // in-point and dragged the out-point to start+100ms, silently destroying it.
+  const START = 312300
+  const END = 321900
+
+  it('refuses an in-point at or past the rally end', () => {
+    const r = setInPoint(START, END, END + 7000)
+    expect(r.ok).toBe(false)
+  })
+
+  it('explains what to do instead, rather than just failing', () => {
+    const r = setInPoint(START, END, END + 7000)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/out-point/i)
+  })
+
+  it('refuses an in-point that would leave less than the minimum gap', () => {
+    expect(setInPoint(START, END, END - 50).ok).toBe(false)
+  })
+
+  it('accepts an in-point that leaves exactly the minimum gap', () => {
+    const r = setInPoint(START, END, END - MIN_RALLY_MS)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect([r.startMs, r.endMs]).toEqual([END - MIN_RALLY_MS, END])
+  })
+
+  it('accepts an ordinary trim and leaves the far bound untouched', () => {
+    const r = setInPoint(START, END, START + 2000)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect([r.startMs, r.endMs]).toEqual([START + 2000, END])
+  })
+
+  it('refuses an out-point at or before the rally start', () => {
+    expect(setOutPoint(START, END, START - 5000).ok).toBe(false)
+    expect(setOutPoint(START, END, START + 50).ok).toBe(false)
+  })
+
+  it('accepts an ordinary out-point trim', () => {
+    const r = setOutPoint(START, END, END - 2000)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect([r.startMs, r.endMs]).toEqual([START, END - 2000])
+  })
+
+  it('leaves re-spanning a rally possible by setting the far bound first', () => {
+    // The old collapse behaviour was load-bearing for one workflow: moving a
+    // rally wholesale to a later span. Refusing must not block that -- it just
+    // has to be done out-point first.
+    const out = setOutPoint(START, END, 340000)
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    const inn = setInPoint(out.startMs, out.endMs, 330000)
+    expect(inn.ok).toBe(true)
+    if (inn.ok) expect([inn.startMs, inn.endMs]).toEqual([330000, 340000])
   })
 })
