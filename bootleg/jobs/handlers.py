@@ -8,6 +8,7 @@ from pathlib import Path
 from bootleg.config import Library
 from bootleg.db import jobs as jobq
 from bootleg.db.rallies import replace_rallies, set_clip_path
+from bootleg.db.reels import get_reel, mark_rendered
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
@@ -27,9 +28,11 @@ from bootleg.detect.segment import params_for_frames, segment
 from bootleg.detect.vision import build_features, iter_person_boxes
 from bootleg.jobs.worker import Handler, no_progress
 from bootleg.media.clips import clip_relpath
+from bootleg.media.concat import concat_clips
 from bootleg.media.files import find_original
 from bootleg.media.probe import display_size, probe
 from bootleg.media.transcode import ProgressFn, make_clip, make_proxy, make_thumbs
+from bootleg.reels import clip_paths, missing_clip_count, resolve_items
 
 log = logging.getLogger(__name__)
 
@@ -386,9 +389,60 @@ def handle_clip(library: Library, payload: dict,
         set_clip_path(conn, rally_id, str(dst.relative_to(library.root)))
 
 
+def handle_reel(library: Library, payload: dict,
+                progress: ProgressFn = no_progress) -> None:
+    """Concatenate a reel's clips into `reels/<slug>.mp4`.
+
+    Idempotent by overwrite, like every other handler.
+
+    Refuses while any clip is missing rather than cutting them itself. That
+    is the same rule the render route enforces, repeated here rather than
+    trusted: clips can be deleted between enqueue and run, and a reel is not
+    a place to discover that four points are gone. Auto-enqueueing the cuts
+    from inside a render would also turn one button into half an hour of
+    encoding nobody asked for.
+    """
+    conn = _open(library)
+    reel = get_reel(conn, payload["reel_id"])
+    if reel is None:
+        raise ValueError(f"No such reel: {payload['reel_id']}")
+
+    items = resolve_items(library, conn, reel["id"])
+    if not items:
+        raise ValueError(f"Reel {reel['slug']} has no items to render")
+    missing = missing_clip_count(items)
+    if missing:
+        raise ValueError(
+            f"Reel {reel['slug']} has {missing} clip(s) not cut yet; "
+            f"cut them before rendering"
+        )
+
+    inputs = clip_paths(library, items)
+    dst = library.reels_dir / f"{reel['slug']}.mp4"
+
+    # A -c copy remux is about the sum of its inputs. The re-encode fallback
+    # can land either side of that, so double it -- and refusing early beats
+    # dying at 90% of a twenty-minute reel, which is the whole point of the
+    # check.
+    library.require_free(sum(p.stat().st_size for p in inputs) * 2)
+
+    # progress is threaded through to the re-encode fallback only -- the
+    # copy is effectively instantaneous, and `activeJobsLabel` suppresses the
+    # percentage entirely until a job reports one, so a copy simply shows the
+    # job count. The fallback is minutes on a real reel and is worth a bar.
+    mode = concat_clips(inputs, dst, on_progress=progress)
+    if mode == "reencode":
+        # concat_clips already logged the mismatch that caused this; this
+        # line is what ties it to a reel by name in the same log.
+        log.warning("reel %s fell back to a re-encode", reel["slug"])
+
+    mark_rendered(conn, reel["id"], str(dst.relative_to(library.root)))
+
+
 HANDLERS: dict[str, Handler] = {
     "ingest": handle_ingest,
     "build_proxy": handle_build_proxy,
     "detect": handle_detect,
     "clip": handle_clip,
+    "reel": handle_reel,
 }
