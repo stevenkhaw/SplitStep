@@ -217,6 +217,14 @@
       case 'U':
         apply(queue.undo())
         break
+      case '`':
+      case '~':
+        // Backtick sits left of 1, so the speed row reads ` 1 2 3 in
+        // ascending order under the fingers. '~' is the same physical key
+        // with shift held -- a slip there should still slow down rather
+        // than do nothing.
+        speed = 0.5
+        break
       case '1':
         speed = 1
         break
@@ -347,7 +355,7 @@
   </div>
 
   <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · P point · X reject (again to undo) · R replay · ← back · → next · U undo · 1/2/3 speed · T timeline · L label
+    S star · P point · X reject (again to undo) · R replay · ← back · → next · U undo · `/1/2/3 speed · T timeline · L label
   </p>
 {/if}
 
