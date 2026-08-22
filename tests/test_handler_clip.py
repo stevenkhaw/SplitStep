@@ -73,13 +73,14 @@ def test_handle_clip_raises_on_an_unknown_source(library, conn, a_rally):
 
 
 def test_handle_clip_cuts_from_the_proxy_when_the_original_is_reclaimed(
-    library, conn, a_rally
+    library, conn, a_rally, hlg_setparams
 ):
     source = a_rally["source"]
     # Stand in for a reclaimed source: proxy present, original flag cleared.
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=2",
          "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
          str(source.dir / "proxy.mp4")],
         check=True, capture_output=True,

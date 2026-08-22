@@ -16,17 +16,21 @@ from bootleg.media.transcode import (
 
 
 @pytest.fixture
-def source_4k(tmp_path):
+def source_4k(tmp_path, hlg_setparams):
     """6 seconds of 4K30 with a tone, so a 2-second cut has room either side."""
     out = tmp_path / "src.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=3840x2160:rate=30:duration=6",
          "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
          str(out)],
         check=True, capture_output=True,
     )
+    assert _stream_field(out, "v:0", "color_range,color_space,color_transfer,color_primaries") == (
+        "tv,bt2020nc,arib-std-b67,bt2020"
+    ), "fixture did not come out tagged as the locked profile"
     return out
 
 
@@ -141,7 +145,7 @@ def _pixel(frame: bytes, width: int, x: int, y: int) -> bytes:
     return frame[offset : offset + 3]
 
 
-def test_make_clip_conforms_a_quarter_turn_to_the_locked_frame(tmp_path):
+def test_make_clip_conforms_a_quarter_turn_to_the_locked_frame(tmp_path, hlg_setparams):
     """At 90 the source's axes swap, so rotation must be applied BEFORE scale
     and pad -- scaling first pads against the wrong axis.
 
@@ -158,6 +162,7 @@ def test_make_clip_conforms_a_quarter_turn_to_the_locked_frame(tmp_path):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=2160x3840:rate=30:duration=3",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
         check=True, capture_output=True,
     )
@@ -178,13 +183,14 @@ def test_make_clip_conforms_a_quarter_turn_to_the_locked_frame(tmp_path):
             )
 
 
-def test_make_clip_upscales_and_pads_a_1080p_source(tmp_path):
+def test_make_clip_upscales_and_pads_a_1080p_source(tmp_path, hlg_setparams):
     """A reclaimed source is cut from the 1080p proxy. The clip library cannot
     hold mixed parameters -- `-c copy` refuses them -- so it is conformed."""
     src = tmp_path / "small.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
         check=True, capture_output=True,
     )
@@ -288,7 +294,7 @@ def _stream_field(path: Path, stream: str, field: str) -> str:
     return out
 
 
-def test_make_clip_pins_square_pixels(tmp_path):
+def test_make_clip_pins_square_pixels(tmp_path, hlg_setparams):
     """A non-square SAR is a property of the SOURCE, not of the locked
     profile, so nothing in the profile constrained it -- and libx264 writes
     a non-1:1 sample aspect ratio into the SPS VUI. That makes the clip's
@@ -300,7 +306,7 @@ def test_make_clip_pins_square_pixels(tmp_path):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=1920x1080:rate=30:duration=3",
-         "-vf", "setsar=2/1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+         "-vf", f"setsar=2/1,{hlg_setparams}", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
         check=True, capture_output=True,
     )
     assert _stream_field(src, "v:0", "sample_aspect_ratio") == "2:1", "fixture is not anamorphic"
@@ -312,7 +318,7 @@ def test_make_clip_pins_square_pixels(tmp_path):
     assert (info.width, info.height) == (CLIP_WIDTH, CLIP_HEIGHT)
 
 
-def test_make_clip_conforms_an_anamorphic_source_without_stretching_it(tmp_path):
+def test_make_clip_conforms_an_anamorphic_source_without_stretching_it(tmp_path, hlg_setparams):
     """Pinning SAR to 1:1 is only half the job. A 1920x1080 source at SAR 2:1
     displays as 3840x1080; scaling its *coded* 16:9 frame to the locked frame
     and then declaring the pixels square would fill 3840x2160 with a picture
@@ -328,7 +334,7 @@ def test_make_clip_conforms_an_anamorphic_source_without_stretching_it(tmp_path)
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=1920x1080:rate=30:duration=3",
-         "-vf", "setsar=2/1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+         "-vf", f"setsar=2/1,{hlg_setparams}", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
         check=True, capture_output=True,
     )
     dst = tmp_path / "clip.mp4"
@@ -344,7 +350,7 @@ def test_make_clip_conforms_an_anamorphic_source_without_stretching_it(tmp_path)
             )
 
 
-def test_make_clip_synthesizes_silence_for_a_source_with_no_audio(tmp_path):
+def test_make_clip_synthesizes_silence_for_a_source_with_no_audio(tmp_path, hlg_setparams):
     """The presence of an audio stream is a property of the source too, and
     the locked profile does not survive its absence: a silent source yields a
     video-only clip, and concat against clips that do carry audio either
@@ -355,6 +361,7 @@ def test_make_clip_synthesizes_silence_for_a_source_with_no_audio(tmp_path):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi",
          "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
         check=True, capture_output=True,
     )
@@ -423,7 +430,7 @@ def test_make_clip_without_a_progress_callback_still_cuts(source_4k, tmp_path):
     assert probe(dst).duration_ms >= 1900
 
 
-def test_clips_from_mismatched_sources_concat_with_c_copy(source_4k, tmp_path):
+def test_clips_from_mismatched_sources_concat_with_c_copy(source_4k, tmp_path, hlg_setparams):
     """The property every conforming rule in make_clip exists to protect,
     asserted end to end rather than parameter by parameter.
 
@@ -440,13 +447,15 @@ def test_clips_from_mismatched_sources_concat_with_c_copy(source_4k, tmp_path):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=3",
          "-f", "lavfi", "-i", "sine=frequency=330:duration=3",
-         "-vf", "setsar=2/1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-vf", f"setsar=2/1,{hlg_setparams}",   # the anamorphic one
+         "-c:v", "libx264", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-shortest", str(anamorphic)],
         check=True, capture_output=True,
     )
     silent = tmp_path / "silent.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-vf", hlg_setparams,                   # the silent one
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(silent)],
         check=True, capture_output=True,
     )

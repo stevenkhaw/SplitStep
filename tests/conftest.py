@@ -32,12 +32,35 @@ def conn(library):
 
 
 @pytest.fixture
-def sample_video(tmp_path):
-    """2 second 320x240 30fps clip with a 440Hz tone."""
+def hlg_setparams() -> str:
+    """The `setparams` filter that tags a synthetic source as the locked profile.
+
+    Every source fixture in this suite needs it, because `make_clip` refuses
+    a source whose colour metadata is not the profile's -- and lavfi output
+    carries none at all.
+
+    It has to be a filter, not the -color_range/-colorspace/-color_primaries
+    /-color_trc output flags. Measured on ffmpeg 9.0.1: with a lavfi input
+    those flags write the matrix and the range and silently DROP primaries
+    and transfer, yielding a file that reports `unknown` for two of the four
+    fields. A fixture built that way would look right in the command line,
+    pass a careless assertion, and misrepresent what make_clip sees. With a
+    real file as input the flags do stick, which is why make_clip itself
+    uses them and only the fixtures need this.
+
+    Returned bare so a caller with an existing -vf can comma-join onto it.
+    """
+    return "setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc:range=tv"
+
+
+@pytest.fixture
+def sample_video(tmp_path, hlg_setparams):
+    """2 second 320x240 30fps clip with a 440Hz tone, tagged as the locked profile."""
     out = tmp_path / "sample.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
          "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-vf", hlg_setparams,
          "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)],
         check=True, capture_output=True,
     )
