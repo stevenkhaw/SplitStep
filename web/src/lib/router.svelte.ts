@@ -2,10 +2,21 @@ export type Route =
   | { name: 'library' }
   | { name: 'session'; id: string }
   | { name: 'setup'; id: string }
+  | { name: 'reels' }
+  | { name: 'reel'; slug: string }
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '')
   const parts = path.split('/').filter(Boolean)
+  if (parts.length === 1 && parts[0] === 'reels') {
+    return { name: 'reels' }
+  }
+  // The slug is one segment by construction -- slugify() collapses every
+  // run of non-alphanumerics to a single hyphen, so a slug can never contain
+  // a slash. A deeper path is therefore not a reel, and falls through.
+  if (parts.length === 2 && parts[0] === 'reels') {
+    return { name: 'reel', slug: parts[1] }
+  }
   if (parts.length === 2 && parts[0] === 'setup') {
     return { name: 'setup', id: parts[1] }
   }

@@ -46,8 +46,84 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 6
-    assert migrate(conn) == 6
+    assert migrate(conn) == 7
+    assert migrate(conn) == 7
+
+
+def test_no_two_migrations_share_a_number():
+    """Two migrations numbered the same silently lose one of them, forever.
+
+    migrate() derives each file's version from its leading integer and skips
+    anything numbered <= the version already reached. So of two files sharing
+    a number, sorted order applies the first, sets user_version to it, and the
+    second is skipped on that database and every database after it -- with no
+    error, and with migrate() still returning the number the caller expected.
+
+    This project has now lost a round to that twice: 006_rally_notes and
+    006_reel_items_by_span were written on parallel branches and merged
+    cleanly, because the filenames differ and git has no idea the numbers
+    mean anything. Asserting on a specific column would only catch the
+    collision we already know about; this catches the next one, at the moment
+    someone adds the file rather than months later when a table is quietly
+    the wrong shape.
+    """
+    numbers = [int(path.name.split("_", 1)[0]) for path in MIGRATIONS.glob("*.sql")]
+    duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+    assert not duplicates, f"migrations share these numbers: {duplicates}"
+
+
+def test_migrate_refuses_before_applying_anything_if_two_files_share_a_number(
+    tmp_path, monkeypatch
+):
+    """The structural guard, not just the authoring-time assertion above.
+    test_no_two_migrations_share_a_number only protects a run that happens
+    to include it; this is the same check run inside migrate() itself, so a
+    real database cannot get partway migrated with the collision still live
+    -- 001 (no collision at all) must NOT have applied either.
+    """
+    import bootleg.db.schema as schema_mod
+
+    fake_migrations = tmp_path / "migrations"
+    fake_migrations.mkdir()
+    (fake_migrations / "001_first.sql").write_text("CREATE TABLE a (id INTEGER);")
+    (fake_migrations / "002_second.sql").write_text("CREATE TABLE b (id INTEGER);")
+    (fake_migrations / "002_second_too.sql").write_text("CREATE TABLE c (id INTEGER);")
+    monkeypatch.setattr(schema_mod, "MIGRATIONS", fake_migrations)
+
+    conn = connect(tmp_path / "collision.db")
+    with pytest.raises(RuntimeError, match=r"\[2\]"):
+        schema_mod.migrate(conn)
+
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "a" not in tables
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+
+
+def test_every_migration_applies_to_a_fresh_database(tmp_path):
+    """A fresh database really carries the effect of EVERY migration.
+
+    The version number alone proves only that the highest-numbered file ran.
+    When 006_reel_items_by_span collided with 006_rally_notes, migrate()
+    returned 6 and rallies.note existed -- and reel_items was still the
+    pre-006 shape, because the second 006 had been skipped. Nothing failed.
+
+    So this asserts the youngest observable effect of each recent migration
+    rather than the version: 005's point column, 006's note column, and 007
+    having actually replaced reel_items (no rally_id, and a source_id foreign
+    key instead).
+    """
+    conn = connect(tmp_path / "fresh.db")
+    migrate(conn)
+
+    rallies = {r["name"] for r in conn.execute("PRAGMA table_info(rallies)")}
+    assert "point" in rallies       # 005
+    assert "note" in rallies        # 006
+
+    reel_items = {r["name"] for r in conn.execute("PRAGMA table_info(reel_items)")}
+    assert "rally_id" not in reel_items                          # 007 replaced it
+    assert {"source_id", "start_ms", "end_ms"} <= reel_items
+    targets = {fk["table"] for fk in conn.execute("PRAGMA foreign_key_list(reel_items)")}
+    assert targets == {"reels", "sources"}
 
 
 def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
@@ -80,7 +156,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 6
+    assert migrate(conn) == 7
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -140,7 +216,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 6
+    assert migrate(conn) == 7
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.

@@ -1,5 +1,7 @@
 <script lang="ts">
   import Library from './routes/Library.svelte'
+  import Reel from './routes/Reel.svelte'
+  import Reels from './routes/Reels.svelte'
   import Session from './routes/Session.svelte'
   import Setup from './routes/Setup.svelte'
   import { createRouter } from './lib/router.svelte'
@@ -12,6 +14,10 @@
     <Library />
   {:else if router.current.name === 'setup'}
     <Setup id={router.current.id} />
+  {:else if router.current.name === 'reels'}
+    <Reels />
+  {:else if router.current.name === 'reel'}
+    <Reel slug={router.current.slug} />
   {:else}
     <Session id={router.current.id} />
   {/if}

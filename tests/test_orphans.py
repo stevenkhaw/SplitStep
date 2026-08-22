@@ -1,6 +1,7 @@
 import pytest
 
 from bootleg.db.rallies import replace_rallies, set_rejected
+from bootleg.db.reels import add_items, create_reel
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
 from bootleg.export import delete_orphan_clips, find_orphan_clips
@@ -52,6 +53,30 @@ def test_a_clip_left_behind_by_a_re_segment_is_an_orphan(library, conn, seeded):
     assert orphans[0].source_idx == idx
     assert orphans[0].path.name == clip_relpath(idx, 9000, 14000)
     assert orphans[0].size_bytes == orphans[0].path.stat().st_size
+
+
+def test_a_clip_a_reel_holds_survives_a_resegment(library, conn, seeded):
+    """reels.py's own invariant, from ReelItem's docstring: an item whose
+    rally has vanished under a re-segment "renders as orphaned and stays
+    playable, cuttable and renderable -- the clip on disk is what the reel
+    is made of". find_orphan_clips must honour that claim, not just the
+    rallies table's -- otherwise `clips prune` deletes footage a reel is
+    still built from the moment a threshold sweep moves the rally out from
+    under it, at ~2 MB/second and with no re-encode possible if the
+    original has since been discarded.
+    """
+    session_id, source_id, idx = seeded["session_id"], seeded["source_id"], seeded["idx"]
+    reel = create_reel(conn, "highlights")
+    add_items(conn, reel["id"], [(source_id, 9000, 14000)])
+    _cut(library, session_id, clip_relpath(idx, 9000, 14000))
+
+    # The threshold sweep that carries the star/rejected flags across but
+    # moves this span just enough that the rally no longer names this file.
+    moved = [Interval(1000, 5000, 0.8), Interval(9200, 13800, 0.7), Interval(20000, 26000, 0.6)]
+    replace_rallies(conn, session_id, source_id, moved)
+
+    orphans = find_orphan_clips(library, conn, session_id)
+    assert clip_relpath(idx, 9000, 14000) not in {o.path.name for o in orphans}
 
 
 def test_a_rejected_rallys_clip_is_not_an_orphan(library, conn, seeded):

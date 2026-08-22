@@ -168,13 +168,30 @@ def find_orphan_clips(
         # ordinary state of a session rather than a problem.
         return []
 
+    # Unioned with reel_items, not rallies alone. reels.py's ReelItem
+    # docstring states the invariant this has to honour: an item whose rally
+    # vanished under a re-segment "renders as orphaned and stays playable,
+    # cuttable and renderable -- the clip on disk is what the reel is made
+    # of, and a rally is a guess the detector re-makes every sweep." A
+    # threshold sweep therefore turns every reel item into exactly the shape
+    # this function used to sweep up: a clip with no matching row in
+    # rallies. Span-keying is what lets a reel survive a sweep at all
+    # (reel_items carries no rally_id, deliberately -- see 007's migration
+    # comment); leaving reel_items out of `claimed` would make that survival
+    # cosmetic, since `clips prune` would delete the bytes the very next time
+    # someone ran it. Joined through sources for the idx clip_relpath needs,
+    # same as the rallies half of this query.
     claimed = {
         clip_relpath(row["idx"], row["start_ms"], row["end_ms"])
         for row in conn.execute(
             "SELECT s.idx AS idx, r.start_ms AS start_ms, r.end_ms AS end_ms"
             " FROM rallies r JOIN sources s ON s.id = r.source_id"
-            " WHERE r.session_id = ?",
-            (session_id,),
+            " WHERE r.session_id = ?"
+            " UNION"
+            " SELECT s.idx AS idx, i.start_ms AS start_ms, i.end_ms AS end_ms"
+            " FROM reel_items i JOIN sources s ON s.id = i.source_id"
+            " WHERE s.session_id = ?",
+            (session_id, session_id),
         )
     }
 

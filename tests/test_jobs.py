@@ -8,6 +8,7 @@ import pytest
 from bootleg.db.jobs import (
     claim,
     enqueue,
+    enqueue_reel_once,
     finish,
     has_pending_job,
     heartbeat,
@@ -237,6 +238,104 @@ def test_claim_is_atomic_across_connections(library):
             assert len(claimed_by) <= 1, f"both connections claimed {job_id}: {results}"
             if len(claimed_by) == 2:
                 assert claimed_by[0] != claimed_by[1]
+    finally:
+        setup_conn.close()
+
+
+def test_enqueue_reel_once_enqueues_when_nothing_pending(conn):
+    job_id, already_running = enqueue_reel_once(conn, "reel-1")
+    assert already_running is False
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row["type"] == "reel"
+    assert row["status"] == "queued"
+    assert json.loads(row["payload"]) == {"reel_id": "reel-1"}
+
+
+def test_enqueue_reel_once_returns_the_existing_job_on_a_second_call(conn):
+    first_id, _ = enqueue_reel_once(conn, "reel-1")
+    second_id, already_running = enqueue_reel_once(conn, "reel-1")
+    assert second_id == first_id
+    assert already_running is True
+    assert conn.execute("SELECT COUNT(*) c FROM jobs").fetchone()["c"] == 1
+
+
+def test_enqueue_reel_once_does_not_confuse_two_reels(conn):
+    # Matched via json_extract, so one reel's render can never suppress
+    # another's -- the same reason has_pending_clip exists beside
+    # has_pending_job.
+    first_id, _ = enqueue_reel_once(conn, "reel-1")
+    other_id, already_running = enqueue_reel_once(conn, "reel-2")
+    assert other_id != first_id
+    assert already_running is False
+
+
+def test_enqueue_reel_once_ignores_a_finished_render(conn):
+    # A completed (or failed) render must not block a re-render -- only
+    # 'queued'/'running' count as "in flight".
+    job_id, _ = enqueue_reel_once(conn, "reel-1")
+    finish(conn, job_id)
+    new_id, already_running = enqueue_reel_once(conn, "reel-1")
+    assert new_id != job_id
+    assert already_running is False
+
+
+def _enqueue_reel_once_after_barrier(db_path, idx, barrier, results):
+    """Race helper for test_enqueue_reel_once_is_atomic_across_connections.
+
+    Defined at module scope (not nested in the test's loop) so it never closes
+    over a loop variable -- every input it needs is an explicit argument.
+    """
+    worker_conn = connect(db_path)
+    try:
+        barrier.wait()
+        job_id, already_running = enqueue_reel_once(worker_conn, "reel-1")
+        results[idx] = (job_id, already_running)
+    finally:
+        worker_conn.close()
+
+
+def test_enqueue_reel_once_is_atomic_across_connections(library):
+    """Reproduces the race Finding 1 describes: api_render_reel used to run a
+    SELECT for an in-flight 'reel' job and a separate INSERT with no lock
+    between them, and every API route gets its own thread and its own sqlite
+    connection (ThreadLocalConnections), so two concurrent renders of the
+    same reel could each pass the SELECT and each INSERT. This drives two
+    separate connections at a barrier, mirroring what two Starlette worker
+    threads actually get -- a TestClient-based test cannot reach this, since
+    TestClient issues requests sequentially on one thread.
+    """
+    setup_conn = connect(library.db_path)
+    migrate(setup_conn)
+    try:
+        for _ in range(30):
+            barrier = threading.Barrier(2)
+            results = [None, None]
+
+            t1 = threading.Thread(
+                target=_enqueue_reel_once_after_barrier,
+                args=(library.db_path, 0, barrier, results),
+            )
+            t2 = threading.Thread(
+                target=_enqueue_reel_once_after_barrier,
+                args=(library.db_path, 1, barrier, results),
+            )
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            assert results[0][0] == results[1][0], f"two distinct jobs: {results}"
+            in_flight = ("running", "queued")
+            count = setup_conn.execute(
+                "SELECT COUNT(*) c FROM jobs WHERE type = 'reel' AND status IN (?, ?)"
+                " AND json_extract(payload, '$.reel_id') = 'reel-1'",
+                in_flight,
+            ).fetchone()["c"]
+            assert count == 1, f"expected exactly one in-flight reel job, found {count}"
+
+            # Clean up so the next iteration starts from an empty queue.
+            setup_conn.execute("DELETE FROM jobs WHERE type = 'reel'")
+            setup_conn.commit()
     finally:
         setup_conn.close()
 

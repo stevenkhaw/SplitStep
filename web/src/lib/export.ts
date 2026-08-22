@@ -8,21 +8,26 @@ export function exportSetLabel(which: 'points' | 'starred'): string {
 }
 
 /**
- * A short, human-readable notice for the reviewed panel's toaster.
+ * The four-count phrase both cut buttons report.
  *
  * `queued` is always shown, even at zero, and the other three only appear
  * when nonzero -- so a second press mid-encode reads as "0 queued, 3 in
- * flight" rather than the false "0 queued, 3 already cut" that the plan's
- * four separate counts exist specifically to prevent (see ExportPlan in
- * bootleg/export.py). Collapsing already_cut/in_flight/unavailable back
- * into one bucket here would silently reintroduce the bug the endpoint's
- * four-count contract was built to fix.
+ * flight" rather than the false "0 queued, 3 already cut" that the four
+ * separate counts exist to prevent (see ExportPlan in bootleg/export.py).
+ * One implementation, called from the reviewed panel and from the reel
+ * builder: two copies of this would be two chances to collapse the buckets
+ * back into one, which is the mistake that once made a second press
+ * mid-encode report everything as done.
  */
-export function describeExportResult(which: 'points' | 'starred', result: ExportResult): string {
-  const label = exportSetLabel(which)
+export function describeExportCounts(result: ExportResult): string {
   const parts = [`${result.queued} queued`]
   if (result.already_cut > 0) parts.push(`${result.already_cut} already cut`)
   if (result.in_flight > 0) parts.push(`${result.in_flight} in flight`)
   if (result.unavailable > 0) parts.push(`${result.unavailable} unavailable`)
-  return `${label}: ${parts.join(', ')}`
+  return parts.join(', ')
+}
+
+/** A short, human-readable notice for the reviewed panel's toaster. */
+export function describeExportResult(which: 'points' | 'starred', result: ExportResult): string {
+  return `${exportSetLabel(which)}: ${describeExportCounts(result)}`
 }

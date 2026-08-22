@@ -33,6 +33,15 @@ from bootleg.db.rallies import (
     set_rejected,
     set_star,
 )
+from bootleg.db.reels import (
+    add_items,
+    create_reel,
+    find_reel_by_name,
+    get_reel_by_slug,
+    list_reels,
+    remove_item,
+    set_order,
+)
 from bootleg.db.sessions import (
     get_session,
     get_source,
@@ -44,11 +53,12 @@ from bootleg.db.sessions import (
 from bootleg.detect.features import read_features
 from bootleg.detect.geometry import Quad
 from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
-from bootleg.export import SETS, plan_export
+from bootleg.export import SETS, column_for, plan_export
 from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError, rotation_filter
+from bootleg.reels import missing_clip_count, plan_reel_export, resolve_items
 from bootleg.setup import queue_setup
 
 from .media import range_response
@@ -155,6 +165,62 @@ class SetupBody(BaseModel):
 
 
 class ExportBody(BaseModel):
+    which: str
+
+    @field_validator("which")
+    @classmethod
+    def check_which(cls, v: str) -> str:
+        if v not in SETS:
+            raise ValueError(f"which must be one of {list(SETS)}")
+        return v
+
+
+class ReelCreateBody(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, v: str) -> str:
+        # Stripped here rather than at the call site so the slug and the
+        # displayed name are derived from the same string -- a name of pure
+        # whitespace would otherwise slug to "reel" and render as blank.
+        name = v.strip()
+        if not name:
+            raise ValueError("a reel needs a name")
+        return name
+
+
+class SpanBody(BaseModel):
+    """One reel item, addressed the way reel_items keys it.
+
+    Never a rally_id: replace_rallies deletes every rally for a source on a
+    sweep, so a client holding one has a reference that expires. A span does
+    not -- it is what the clip on disk is named for.
+    """
+
+    source_id: str
+    start_ms: int
+    end_ms: int
+
+    @model_validator(mode="after")
+    def check_order(self):
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+    def as_tuple(self) -> tuple[str, int, int]:
+        return (self.source_id, self.start_ms, self.end_ms)
+
+
+class ReelItemsBody(BaseModel):
+    items: list[SpanBody]
+
+
+class ReelOrderBody(BaseModel):
+    order: list[SpanBody]
+
+
+class SessionReelBody(BaseModel):
     which: str
 
     @field_validator("which")
@@ -815,3 +881,228 @@ def api_preview(
     else:
         os.utime(dst, None)
     return FileResponse(dst, media_type="image/jpeg")
+
+
+def _reel_or_404(conn: sqlite3.Connection, slug: str) -> sqlite3.Row:
+    reel = get_reel_by_slug(conn, slug)
+    if reel is None:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    return reel
+
+
+def _item_json(item) -> dict:
+    """One builder row. `rally` is None for an orphan -- an item whose span no
+    rally holds any more, which the UI badges rather than hides."""
+    return {
+        "source_id": item.source_id,
+        "session_id": item.session_id,
+        "source_idx": item.source_idx,
+        "start_ms": item.start_ms,
+        "end_ms": item.end_ms,
+        "duration_ms": item.duration_ms,
+        "position": item.position,
+        "clip_ready": item.clip_ready,
+        "rally": item.rally,
+    }
+
+
+@router.get("/api/reels")
+def api_list_reels(request: Request):
+    return [dict(r) for r in list_reels(_conn(request))]
+
+
+@router.post("/api/reels")
+def api_create_reel(body: ReelCreateBody, request: Request):
+    reel = create_reel(_conn(request), body.name)
+    # item_count so a freshly created reel has the same shape as a listed
+    # one; the list page renders straight from either.
+    return {**dict(reel), "item_count": 0}
+
+
+@router.get("/api/reels/{slug}")
+def api_get_reel(slug: str, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    items = resolve_items(_library(request), conn, reel["id"])
+    return {
+        # item_count so a single reel has the SAME shape as a listed one.
+        # The frontend shares one `Reel` type across both routes, so a
+        # missing field here would be `undefined` at runtime while the type
+        # promised a number -- silent until something rendered it. Taken
+        # from the already-resolved items rather than a second COUNT(*), so
+        # the two can never disagree.
+        "reel": {**dict(reel), "item_count": len(items)},
+        "items": [_item_json(i) for i in items],
+    }
+
+
+@router.post("/api/reels/{slug}/items")
+def api_add_reel_items(slug: str, body: ReelItemsBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    spans = [s.as_tuple() for s in body.items]
+    added = add_items(conn, reel["id"], spans)
+    # `existing` is reported separately rather than folded into a single
+    # "total added" so a second click can honestly say "1 added, 2 already
+    # there" instead of implying it did nothing. Deduped with set() because
+    # these spans come straight from the client and may repeat -- the picker
+    # can hand us the same rally twice (add_items already tolerates that; see
+    # its docstring) -- and an undeduped count would double-report the same
+    # already-there span as two.
+    return {
+        "added": added,
+        "existing": len(set(spans)) - added,
+        "total": len(resolve_items(_library(request), conn, reel["id"])),
+    }
+
+
+@router.post("/api/reels/{slug}/items/remove")
+def api_remove_reel_item(slug: str, body: SpanBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    removed = remove_item(conn, reel["id"], body.source_id, body.start_ms, body.end_ms)
+    return {
+        "removed": removed,
+        "total": len(resolve_items(_library(request), conn, reel["id"])),
+    }
+
+
+@router.post("/api/reels/{slug}/order")
+def api_set_reel_order(slug: str, body: ReelOrderBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    try:
+        set_order(conn, reel["id"], [s.as_tuple() for s in body.order])
+    except ValueError as exc:
+        # 409, not 422: the request is well-formed, the client's view of the
+        # membership is simply stale (a removal in another tab, most likely).
+        # Refetching is the fix, and the UI says so.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/api/reels/{slug}/export")
+def api_export_reel_clips(slug: str, request: Request):
+    """Cut the clips this reel is missing. Never called by render."""
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    plan = plan_reel_export(_library(request), conn, reel["id"])
+    for payload in plan.pending:
+        jobq.enqueue(conn, "clip", payload)
+    return {
+        "queued": len(plan.pending),
+        "already_cut": plan.already_cut,
+        "in_flight": plan.in_flight,
+        "unavailable": plan.unavailable,
+        "total": plan.total,
+    }
+
+
+@router.post("/api/reels/{slug}/render")
+def api_render_reel(slug: str, request: Request):
+    """Enqueue the concat. Refuses while any clip is missing, naming the count.
+
+    Deliberately does NOT cut the missing clips: a button labelled "render"
+    must not start half an hour of encoding. Cutting stays the separate,
+    explicitly-pressed action next to it.
+    """
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    items = resolve_items(_library(request), conn, reel["id"])
+    if not items:
+        raise HTTPException(status_code=409, detail="This reel has no items yet.")
+    missing = missing_clip_count(items)
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{missing} clip(s) not cut yet. Cut them first.",
+        )
+
+    # A double-click must not queue two concats onto one output path.
+    # Returning the job already in flight makes the second press honest
+    # rather than a silent no-op. enqueue_reel_once does the check-and-insert
+    # under one write lock (see its docstring) -- this route must not inline
+    # that SELECT itself, or it drifts back into the race the function exists
+    # to close.
+    job_id, already_running = jobq.enqueue_reel_once(conn, reel["id"])
+    return {"job_id": job_id, "already_running": already_running}
+
+
+@router.get("/media/reels/{slug}.mp4")
+def api_reel_media(slug: str, request: Request, range: str | None = Header(default=None)):
+    """Serve a rendered reel's mp4 with 206 range support, so <video> can seek.
+
+    `slug` is used ONLY to look the reel up -- the path served comes from
+    `rendered_path` in the database, never from a join against the URL. That
+    makes traversal structurally impossible rather than filtered-against
+    (there is no filesystem path built out of client input to sanitize), and
+    it gives the right 404s for free: an unrendered reel has rendered_path
+    IS NULL, so it 404s the same way an unknown slug does, with no special
+    case needed here. range_response itself 404s a rendered_path whose file
+    has since been deleted, so that case needs no separate check either.
+    """
+    reel = get_reel_by_slug(_conn(request), slug)
+    if reel is None or reel["rendered_path"] is None:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    library_root = _library(request).root.resolve()
+    path = (library_root / reel["rendered_path"]).resolve()
+    # `Path.__truediv__` silently discards the left operand when the right is
+    # absolute -- library_root / "/etc/passwd" is just Path("/etc/passwd") --
+    # so a `rendered_path` that is ever absolute, or relative but escaping via
+    # "..", turns into arbitrary file disclosure with no traversal-looking
+    # input on this request at all. Today that can't happen: mark_rendered is
+    # the only writer of rendered_path in the whole tree, and it always stores
+    # a library-relative path derived from slugify(). But that's a guarantee
+    # held by one write site's good behaviour, not by anything at the site
+    # that actually opens the file -- a second writer, a bug in mark_rendered,
+    # or a hand-edited row would defeat it silently. resolve() before the
+    # comparison collapses ".." segments and follows symlinks, so both the
+    # absolute and the escaping-relative cases are caught the same way.
+    if not path.is_relative_to(library_root):
+        raise HTTPException(status_code=404, detail="Reel not found")
+    return range_response(path, range)
+
+
+@router.post("/api/sessions/{session_id}/reels")
+def api_session_reel(session_id: str, body: SessionReelBody, request: Request):
+    """Create (or additively merge into) the reel for a session's point or
+    starred set, and return its slug so the client can open the builder.
+
+    Resolved by NAME, not by slug: the second click must land in the reel the
+    first one made, and a hand-made reel that happens to slug the same is a
+    different reel with a different name. When a name is new, unique_slug
+    yields to whatever already holds the slug (see create_reel).
+
+    Membership is added, never set. Overwriting would silently discard a
+    manual reorder -- the same class of mistake replace_rallies makes with
+    boundary edits, which already cost this project a 9.6-second rally.
+    """
+    conn = _conn(request)
+    session = get_session(conn, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    column = column_for(body.which)
+    rows = conn.execute(
+        f"SELECT source_id, start_ms, end_ms FROM rallies WHERE session_id = ?"
+        f" AND {column} = 1 AND rejected = 0 ORDER BY idx",
+        (session_id,),
+    ).fetchall()
+    spans = [(r["source_id"], r["start_ms"], r["end_ms"]) for r in rows]
+
+    name = f"{session['played_on']} {body.which}"
+    reel = find_reel_by_name(conn, name) or create_reel(conn, name)
+    added = add_items(conn, reel["id"], spans)
+
+    # Deduped the same way as api_add_reel_items, though it is a no-op here:
+    # `spans` comes from a `rallies` query keyed one row per rally, so the
+    # (source_id, start_ms, end_ms) triple cannot repeat. Kept for
+    # consistency rather than reasoning about two different formulas for the
+    # same count.
+    return {
+        "slug": reel["slug"],
+        "name": reel["name"],
+        "added": added,
+        "existing": len(set(spans)) - added,
+        "total": len(resolve_items(_library(request), conn, reel["id"])),
+    }

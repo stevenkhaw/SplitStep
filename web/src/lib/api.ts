@@ -3,10 +3,15 @@ import type {
   Job,
   LabelRecord,
   Preset,
+  Reel,
+  ReelDetail,
+  ReelMergeResult,
+  RenderResult,
   ScoreSeries,
   Session,
   SessionDetail,
   Source,
+  SpanRef,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -35,6 +40,37 @@ export const api = {
   // plan_export reports. `setup` below hits the same mismatch the same way.
   exportClips: (sessionId: string, which: 'points' | 'starred') =>
     req<ExportResult>(`/api/sessions/${sessionId}/export`, {
+      method: 'POST',
+      body: JSON.stringify({ which }),
+    }),
+
+  listReels: () => req<Reel[]>('/api/reels'),
+  createReel: (name: string) =>
+    req<Reel>('/api/reels', { method: 'POST', body: JSON.stringify({ name }) }),
+  getReel: (slug: string) => req<ReelDetail>(`/api/reels/${slug}`),
+  addReelItems: (slug: string, items: SpanRef[]) =>
+    req<ReelMergeResult>(`/api/reels/${slug}/items`, {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  removeReelItem: (slug: string, span: SpanRef) =>
+    req<{ removed: boolean; total: number }>(`/api/reels/${slug}/items/remove`, {
+      method: 'POST',
+      body: JSON.stringify(span),
+    }),
+  setReelOrder: (slug: string, order: SpanRef[]) =>
+    req<{ ok: boolean }>(`/api/reels/${slug}/order`, {
+      method: 'POST',
+      body: JSON.stringify({ order }),
+    }),
+  // Not routed through post(): like exportClips, its return shape is the
+  // four counts plan_reel_export reports, not post()'s ok/count/id union.
+  exportReelClips: (slug: string) =>
+    req<ExportResult>(`/api/reels/${slug}/export`, { method: 'POST' }),
+  renderReel: (slug: string) =>
+    req<RenderResult>(`/api/reels/${slug}/render`, { method: 'POST' }),
+  createSessionReel: (sessionId: string, which: 'points' | 'starred') =>
+    req<ReelMergeResult>(`/api/sessions/${sessionId}/reels`, {
       method: 'POST',
       body: JSON.stringify({ which }),
     }),
@@ -72,6 +108,10 @@ export const api = {
   proxyUrl: (sessionId: string, idx: number) => `/media/${sessionId}/${idx}/proxy.mp4`,
   frameUrl: (sessionId: string, idx: number, atMs = 0) =>
     `/media/${sessionId}/${idx}/frame.jpg?at_ms=${atMs}`,
+  // The rendered 4K file, not the 1080p proxy `proxyUrl` points at -- the
+  // server resolves `slug` to a path itself, so this is a lookup key, not a
+  // filesystem path (see api_reel_media).
+  reelUrl: (slug: string) => `/media/reels/${slug}.mp4`,
 
   getSource: (id: string) => req<Source>(`/api/sources/${id}`),
   setup: (id: string, rotation_deg: number, preset_id: string) =>

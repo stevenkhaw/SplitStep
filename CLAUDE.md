@@ -17,7 +17,7 @@ Python lives in the `bootleg` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate bootleg` first):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q                              # 471 tests
+~/miniconda3/envs/bootleg/bin/pytest -q                              # 612 tests
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
@@ -159,6 +159,42 @@ safe. A `_Heartbeat` thread ticks `heartbeat_at` for the duration of a handler
 call so `reclaim_stale()` can tell an abandoned job from a live fifteen-minute
 detect. Handler registry: `HANDLERS` at the bottom of `jobs/handlers.py`.
 
+### Reels
+
+A reel is an ordered list of **clips**, and `reel_items` keys on
+`(source_id, start_ms, end_ms)` — the same triple `clip_relpath()` names the
+file for. Never on `rally_id`: `001_init.sql` declared it that way with
+`ON DELETE CASCADE`, and `replace_rallies` deletes every rally for a source
+on each sweep, so the first re-segment would have silently emptied every
+reel. Migration `007` replaced the table before it ever held a row. The
+cascade on `source_id` is deliberate and is the opposite case — no footage,
+no clip.
+
+An item whose span no rally holds any more is an **orphan**. It is badged in
+the builder and stays playable, cuttable and renderable; `handle_clip`
+therefore treats `rally_id` as optional. A reel is session-agnostic, so
+`resolve_items` joins `session_id` and `source_idx` in — the preview's proxy
+URL and the clip path both need them.
+
+The `reel` job's `-c copy` is guarded on both sides, because ffmpeg checks
+neither and measured behaviour (ffmpeg 9.0.1) is worse than "it would just
+error": the concat demuxer exits 0 with empty stderr on mismatched inputs and
+reads every clip through the *first* clip's parameters, so a divergent sample
+aspect ratio or a clip missing its audio stream produces a full-length,
+correct-duration, wrong reel. Duration alone can't see that, so there are two
+checks, not one: a pre-flight comparison of every input's codec parameters
+against the first clip's (`ClipParams`/`divergences` in `media/concat.py`),
+and a post-hoc probe of the output's duration against the sum of the inputs.
+Either failing falls back to a full re-encode at the locked profile, logged.
+Render **refuses** while any clip is missing, naming the count, and never
+auto-enqueues the cuts: the builder's *Cut missing clips* is the only button
+that starts an encode.
+
+Preview seeks the **proxy** to each item's span in order, reusing `VideoDeck`
+— it already plays a source between in/out points and preloads the next span
+across sources. It shows 1080p and cannot reveal a `-c copy` artifact (that
+is the duration/parameter checks' job); what it shows exactly is timing.
+
 ### API
 
 Every route is `def`, not `async def`, so Starlette runs it on a worker thread.
@@ -250,8 +286,11 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
 ## Deferred (not missing by accident)
 
-Reel building via `-c copy` concat and the cross-session rally browser are
-Plan 3. The `reels`/`reel_items` tables exist unused. 4K clip export shipped —
+The cross-session rally browser is the only piece of Plan 3 still deferred —
+it is a filter UI over one session's rallies until a second session exists.
+Reels shipped: `reel_items` is keyed on `(source_id, start_ms, end_ms)` by
+migration 007, the `reel` handler concatenates with `-c copy`, and `/reels`
+plus `/reels/:slug` build and preview them. 4K clip export shipped —
 `bootleg clips export`, the `clip` handler, and `clips_dir` are live.
 
 **Reclaim Space is rejected, not deferred.** The library sits on a 2TB external

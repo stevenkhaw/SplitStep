@@ -87,7 +87,11 @@
 
 <header class="mb-6 flex items-baseline justify-between">
   <h1 class="text-xl font-semibold">Sessions</h1>
-  <JobsBadge />
+  <div class="flex items-center gap-4">
+    <button class="font-mono text-xs text-neutral-400 hover:text-neutral-200"
+            onclick={() => navigate('/reels')}>Reels</button>
+    <JobsBadge />
+  </div>
 </header>
 
 {#if error}
