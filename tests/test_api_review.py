@@ -105,14 +105,22 @@ def test_seen_endpoint_sets_seen_at_but_not_reviewed_at(client, conn, seeded):
     assert row["reviewed_at"] is None
 
 
-def test_seen_endpoint_does_not_flip_session_to_reviewed(client, conn, seeded):
-    """Marking every rally seen (without starring/rejecting any of them)
-    must leave the session exactly as unreviewed as it started -- seen_at
-    plays no part in refresh_session_review_status.
+def test_seen_endpoint_finishes_a_session_with_nothing_judged(client, conn, seeded):
+    """Skimming a session end to end, ruling on nothing, finishes it.
+
+    This is the ONLY route to 'reviewed' that involves no judgement at all,
+    and it is a real pass: the reviewer looked at every rally and found
+    nothing worth starring. refresh_session_review_status reads seen_at
+    (Spec 6: starring, rejecting, skipping and auto-advance all count as
+    seen), so the right arrow alone has to be able to close a session out --
+    otherwise a fully-skimmed session sits on 'ready' with nothing left to
+    click that could ever move it.
     """
     for rally in list_rallies(conn, seeded["session_id"]):
         client.post(f"/api/rallies/{rally['id']}/seen")
-    assert get_session(conn, seeded["session_id"])["status"] != "reviewed"
+    assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
+    # ...and none of it counted as a judgement.
+    assert all(r["reviewed_at"] is None for r in list_rallies(conn, seeded["session_id"]))
 
 
 def test_seen_on_unknown_rally_is_404(client):

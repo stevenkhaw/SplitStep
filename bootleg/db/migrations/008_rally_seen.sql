@@ -10,9 +10,11 @@
 -- it the reviewer has actually looked.
 --
 -- seen_at answers "has a human looked at this" and is stamped by skip too
--- (see set_seen); reviewed_at keeps meaning "a human ruled on this" and
--- still drives session status alone -- see refresh_session_review_status,
--- deliberately left untouched by this change.
+-- (see set_seen); reviewed_at keeps meaning "a human ruled on this".
+-- Session status moves to seen_at with this migration, which is what
+-- refresh_session_review_status's own docstring always claimed it used --
+-- a session is finished when it has been looked through, not only when
+-- every rally has been ruled on.
 ALTER TABLE rallies ADD COLUMN seen_at TEXT;
 
 -- Backfill, not a fresh NULL column: every rally already carrying a

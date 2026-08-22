@@ -370,12 +370,15 @@ def api_reviewed(rally_id: str, request: Request):
 @router.post("/api/rallies/{rally_id}/seen")
 def api_seen(rally_id: str, request: Request):
     """What persist.ts's skip case calls on a plain right-arrow -- see
-    set_seen's docstring for why this must not be mark_reviewed. Same shape
-    as api_reviewed (no body, same response), refresh_session_review_status
-    included even though seen_at cannot move it: session status is still
-    computed from reviewed_at alone, so this call is a no-op for that
-    column, but every other review route reports session_status and a
-    caller should not have to special-case this one.
+    set_seen's docstring for why this must not be mark_reviewed.
+
+    Refreshes session status like star/reject/point do, and unlike the note
+    route -- because since migration 008 the status is computed from
+    `seen_at`, which is exactly the column this route writes. Skipping the
+    last unseen rally in a session is a perfectly ordinary way to finish a
+    pass, and it is the ONLY way to finish one without ruling on every
+    rally, so omitting the refresh here would leave a fully-skimmed session
+    stuck on 'ready' with nothing left to click that would ever move it.
     """
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)

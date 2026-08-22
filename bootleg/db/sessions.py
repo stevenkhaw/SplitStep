@@ -158,8 +158,14 @@ def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> 
     """Flip a session to 'reviewed' once no rally in it is unseen, without
     disturbing a status this pass does not own.
 
-    Spec 6: every exit path from a rally sets reviewed_at -- starring,
-    rejecting, skipping, and auto-advance all count as seen.
+    Spec 6: every exit path from a rally counts as seen -- starring,
+    rejecting, skipping, and auto-advance alike. That is `seen_at`, not
+    `reviewed_at`, and this used to read the wrong one. The two were a
+    single column until migration 008 split them, and once persist.ts
+    stopped writing anything on a plain right-arrow, a session could no
+    longer reach 'reviewed' by being fully skimmed -- only by having every
+    rally explicitly ruled on, which is not what this is for. Judging is
+    what `reviewed_at` records; having looked is what closes out a pass.
 
     This is one guarded UPDATE, not a read-then-write. Every HTTP request
     runs on its own thread with its own connection (see
@@ -191,7 +197,7 @@ def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> 
            SET status = CASE
                  WHEN (SELECT COUNT(*) FROM rallies WHERE session_id = :sid) > 0
                   AND NOT EXISTS (SELECT 1 FROM rallies
-                                   WHERE session_id = :sid AND reviewed_at IS NULL)
+                                   WHERE session_id = :sid AND seen_at IS NULL)
                  THEN 'reviewed' ELSE 'ready' END
          WHERE id = :sid
            AND status IN ('ready', 'reviewed')
