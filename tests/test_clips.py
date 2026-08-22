@@ -84,6 +84,47 @@ def test_make_clip_writes_the_locked_colour_metadata(source_4k, tmp_path):
     ) == f"{CLIP_COLOR_RANGE},{CLIP_COLOR_SPACE},{CLIP_COLOR_TRC},{CLIP_COLOR_PRIMARIES}"
 
 
+def test_make_clip_passes_the_colour_flags_to_ffmpeg(sample_video, tmp_path, monkeypatch):
+    """test_make_clip_writes_the_locked_colour_metadata cannot tell "we wrote
+    it" from "we inherited it": ffmpeg copies an input's colour properties
+    forward on its own, and sample_video is already tagged (via
+    hlg_setparams) as exactly the locked profile, so deleting the four
+    -color_range/-colorspace/-color_primaries/-color_trc flag pairs from
+    make_clip would leave that test green -- the encoded output looks
+    identical either way, as its own docstring says. The only way to catch a
+    dropped flag is to stop looking at the output and look at what make_clip
+    actually told ffmpeg to do.
+
+    monkeypatch replaces run_ffmpeg exactly as
+    test_make_clip_does_not_expose_dst_until_ffmpeg_succeeds does, so this
+    runs in milliseconds rather than the several seconds a real encode takes
+    -- the source still has to be real because make_clip probes it for SAR
+    and audio-stream conforming before it ever builds the argument list.
+    """
+    src = sample_video
+    dst = tmp_path / "clip.mp4"
+    captured_args: list[str] = []
+
+    def fake_run_ffmpeg(args, timeout=None, on_progress=None, total_ms=None):
+        captured_args.extend(args)
+        Path(args[-1]).write_bytes(b"encoded output")
+
+    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", fake_run_ffmpeg)
+    make_clip(src, dst, start_ms=500, end_ms=1500)
+
+    # Checked pairwise -- a flag present but paired with the wrong value
+    # (e.g. a copy-paste from the wrong constant) is exactly the bug a bare
+    # "flag in captured_args" check would miss.
+    for flag, value in (
+        ("-color_range", CLIP_COLOR_RANGE),
+        ("-colorspace", CLIP_COLOR_SPACE),
+        ("-color_primaries", CLIP_COLOR_PRIMARIES),
+        ("-color_trc", CLIP_COLOR_TRC),
+    ):
+        assert flag in captured_args, f"{flag} missing from make_clip's ffmpeg args"
+        assert captured_args[captured_args.index(flag) + 1] == value
+
+
 def test_clip_relpath_is_derived_from_the_span(tmp_path):
     # Span-derived, never idx-derived: _renumber reassigns rallies.idx across a
     # whole session on every replace_rallies, so a name built from idx points
