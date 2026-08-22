@@ -18,6 +18,7 @@ function rally(idx: number, over: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
     ...over,
   }

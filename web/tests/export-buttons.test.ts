@@ -8,6 +8,7 @@ const mockApi = {
   star: vi.fn().mockResolvedValue({ ok: true }),
   reject: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
+  seen: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   label: vi.fn().mockResolvedValue({ ok: true }),
@@ -50,6 +51,7 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
     ...overrides,
   }
@@ -99,13 +101,14 @@ describe('the reviewed panel exports clips', () => {
   })
 
   function reviewed() {
-    // Every rally already judged, so QueueController.current is undefined and
+    // Every rally already seen, so QueueController.current is undefined and
     // the finished branch renders -- the panel that has been a dead end since
-    // the review UI was built.
+    // the review UI was built. reviewed_at is also set on each: this helper
+    // is also what supplies the point/starred counts the buttons render.
     return detailWith([
-      rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z' }),
-      rally('r2', 2, { point: 1, reviewed_at: '2026-08-19T11:01:00Z' }),
-      rally('r3', 3, { starred: 1, reviewed_at: '2026-08-19T11:02:00Z' }),
+      rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' }),
+      rally('r2', 2, { point: 1, reviewed_at: '2026-08-19T11:01:00Z', seen_at: '2026-08-19T11:01:00Z' }),
+      rally('r3', 3, { starred: 1, reviewed_at: '2026-08-19T11:02:00Z', seen_at: '2026-08-19T11:02:00Z' }),
     ])
   }
 
@@ -169,7 +172,7 @@ describe('the reviewed panel exports clips', () => {
 
   it('disables a set with nothing in it', async () => {
     mockApi.getSession.mockResolvedValue(
-      detailWith([rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z' })]),
+      detailWith([rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' })]),
     )
     instance = mount(SessionHarness, { target })
     flushSync()

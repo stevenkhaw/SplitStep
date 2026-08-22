@@ -70,7 +70,14 @@ export class QueueController {
     for (const r of this.#rallies) if (r.starred) this.#starred.add(r.id)
     for (const r of this.#rallies) if (r.point) this.#points.add(r.id)
 
-    const firstUnseen = this.#rallies.findIndex((r) => r.reviewed_at === null)
+    // seen_at, not reviewed_at: reviewed_at means "a human ruled on this
+    // rally" (star/point/reject) and drives session status alone; seen_at
+    // means "a human has looked at this rally at all", including a plain
+    // right-arrow skip that renders no verdict (see persist.ts's skip
+    // case). Resuming on reviewed_at used to mean a rally that was arrowed
+    // past but never judged kept reviewed_at NULL forever, so every reopen
+    // landed back on it no matter how far the reviewer had actually looked.
+    const firstUnseen = this.#rallies.findIndex((r) => r.seen_at === null)
     this.#index = firstUnseen === -1 ? this.#rallies.length : firstUnseen
   }
 

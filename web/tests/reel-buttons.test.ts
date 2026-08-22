@@ -9,6 +9,7 @@ const mockApi = {
   reject: vi.fn().mockResolvedValue({ ok: true }),
   point: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
+  seen: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   label: vi.fn().mockResolvedValue({ ok: true }),
@@ -47,7 +48,7 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
     id, session_id: 's1', source_id: 'src1', idx,
     start_ms: idx * 10000, end_ms: idx * 10000 + 8000,
     det_start_ms: idx * 10000, det_end_ms: idx * 10000 + 8000,
-    confidence: 0.9, starred: 0, rejected: 0, point: 0, reviewed_at: null,
+    confidence: 0.9, starred: 0, rejected: 0, point: 0, reviewed_at: null, seen_at: null,
     note: '',
     ...overrides,
   }
@@ -62,9 +63,9 @@ function reviewed(): SessionDetail {
       has_original: 1, court_preset_id: null, status: 'ready', rotation_deg: 0,
     }],
     rallies: [
-      rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z' }),
-      rally('r2', 2, { point: 1, reviewed_at: '2026-08-19T11:01:00Z' }),
-      rally('r3', 3, { starred: 1, reviewed_at: '2026-08-19T11:02:00Z' }),
+      rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' }),
+      rally('r2', 2, { point: 1, reviewed_at: '2026-08-19T11:01:00Z', seen_at: '2026-08-19T11:01:00Z' }),
+      rally('r3', 3, { starred: 1, reviewed_at: '2026-08-19T11:02:00Z', seen_at: '2026-08-19T11:02:00Z' }),
     ],
   }
 }
@@ -134,7 +135,7 @@ describe('the reviewed panel compiles reels', () => {
   it('disables a reel button whose set is empty', async () => {
     mockApi.getSession.mockResolvedValue({
       ...reviewed(),
-      rallies: [rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z' })],
+      rallies: [rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' })],
     })
     instance = mount(SessionHarness, { target })
     flushSync()

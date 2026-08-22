@@ -6,6 +6,7 @@ export interface PersistApi {
   reject: (id: string, rejected: boolean) => Promise<unknown>
   point: (id: string, point: boolean) => Promise<unknown>
   reviewed: (id: string) => Promise<unknown>
+  seen: (id: string) => Promise<unknown>
 }
 
 export type PersistOutcome = { ok: true } | { ok: false; revert: PersistableAction | null }
@@ -37,12 +38,20 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         await api.point(action.rallyId, action.point)
         break
       case 'skip':
-        // Persists nothing. The right arrow is now pressed on every clip just
-        // to move through the pass, so marking each one reviewed would flip a
-        // whole session to 'reviewed' without a single judgement being made.
-        // Only star and reject count -- and the server already stamps
-        // reviewed_at inside set_star/set_rejected (COALESCE, so the first
-        // one wins), which is why dropping this call loses nothing.
+        // Stamps seen_at, deliberately NOT reviewed_at. The right arrow is
+        // pressed on every clip just to move through the pass, so marking
+        // each one *reviewed* would flip a whole session to 'reviewed'
+        // without a single judgement being made -- that reasoning still
+        // holds exactly as before, and is the reason seen_at and
+        // reviewed_at are now two separate columns rather than one
+        // overloaded one. Only star/point/reject stamp reviewed_at (via
+        // their own COALESCE), and session status is still computed from
+        // reviewed_at alone (refresh_session_review_status). seen_at exists
+        // so the queue has an honest "has a human looked at this" signal to
+        // resume from -- QueueController.firstUnseen reads it -- which
+        // reviewed_at could never provide for a rally that was arrowed past
+        // but never judged.
+        await api.seen(action.rallyId)
         break
       case 'undo':
         // Undo can restore any of the three flags (or all of them back to

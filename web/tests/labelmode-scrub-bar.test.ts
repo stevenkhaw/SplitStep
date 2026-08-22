@@ -79,6 +79,7 @@ function detail(): SessionDetail {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
   }
   return {

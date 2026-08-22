@@ -46,8 +46,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 7
-    assert migrate(conn) == 7
+    assert migrate(conn) == 8
+    assert migrate(conn) == 8
 
 
 def test_no_two_migrations_share_a_number():
@@ -156,7 +156,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 7
+    assert migrate(conn) == 8
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -216,7 +216,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 7
+    assert migrate(conn) == 8
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.
@@ -232,6 +232,55 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     assert rows["r_rejected"]["rejected"] == 1
     assert rows["r_star"]["rejected"] == 0
     assert rows["r_plain"]["rejected"] == 0
+
+
+def test_migration_008_backfills_seen_at_from_reviewed_at(tmp_path):
+    # 008 splits "seen" from "reviewed" (see rally_seen tests for the
+    # runtime behavior). Every row that already carries a reviewed_at was
+    # necessarily seen at exactly that moment -- a ruling cannot be made on
+    # a rally nobody looked at -- so seen_at backfills from it. Without this,
+    # every existing library's very next queue open would regress to rally
+    # 1: a real, if one-time, replay of the bug this migration exists to
+    # fix. Migrate to 007, plant one reviewed row and one never-touched row,
+    # then let 008 run over them.
+    conn = connect(tmp_path / "old.db")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        n = int(path.name.split("_", 1)[0])
+        if n > 7:
+            break
+        conn.executescript(path.read_text())
+        conn.execute(f"PRAGMA user_version={n}")
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s1','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src1','s1',1,'now',0,1000,1920,1080,30.0,0,'a.mov','ready')"
+    )
+    # Already ruled on -- must gain seen_at equal to its own reviewed_at.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected,reviewed_at)"
+        " VALUES ('r_reviewed','s1','src1',1,0,1000,0,1000,0.9,1,0,'2026-08-19T10:00:00+00:00')"
+    )
+    # Never touched -- must come out with seen_at still NULL, not
+    # invented from nothing.
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected)"
+        " VALUES ('r_untouched','s1','src1',2,1000,2000,1000,2000,0.9,0,0)"
+    )
+    conn.commit()
+
+    assert migrate(conn) == 8
+
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
+    assert rows["r_reviewed"]["seen_at"] == rows["r_reviewed"]["reviewed_at"]
+    assert rows["r_reviewed"]["seen_at"] == "2026-08-19T10:00:00+00:00"
+    assert rows["r_untouched"]["seen_at"] is None
+    assert rows["r_untouched"]["reviewed_at"] is None
 
 
 def test_rally_cascades_when_source_deleted(library):

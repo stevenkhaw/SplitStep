@@ -17,6 +17,7 @@ function rally(idx: number, over: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
     ...over,
   }
@@ -35,13 +36,27 @@ describe('QueueController', () => {
     expect(q.total).toBe(3)
   })
 
-  it('resumes at the first unreviewed rally', () => {
+  it('resumes at the first unseen rally', () => {
     const resumed = new QueueController([
-      rally(1, { reviewed_at: '2026-08-19T10:00:00Z' }),
-      rally(2, { reviewed_at: '2026-08-19T10:00:01Z' }),
+      rally(1, { seen_at: '2026-08-19T10:00:00Z' }),
+      rally(2, { seen_at: '2026-08-19T10:00:01Z' }),
       rally(3),
     ])
     expect(resumed.current?.id).toBe('r3')
+  })
+
+  it('does not return to a rally that was skipped but never judged', () => {
+    // seen_at set, reviewed_at still null: exactly the state a plain
+    // right-arrow skip leaves a rally in (persist.ts's skip case stamps
+    // seen_at, not reviewed_at). Resuming on reviewed_at was the bug --
+    // the queue would land back on rally 1 forever. seen_at must be what
+    // firstUnseen reads.
+    const resumed = new QueueController([
+      rally(1, { seen_at: '2026-08-19T10:00:00Z', reviewed_at: null }),
+      rally(2, { seen_at: null, reviewed_at: null }),
+      rally(3, { seen_at: null, reviewed_at: null }),
+    ])
+    expect(resumed.current?.id).toBe('r2')
   })
 
   it('advances on star and reports the action', () => {

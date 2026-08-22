@@ -9,6 +9,7 @@ function api(overrides: Partial<PersistApi> = {}): PersistApi {
     reject: vi.fn().mockResolvedValue(undefined),
     point: vi.fn().mockResolvedValue(undefined),
     reviewed: vi.fn().mockResolvedValue(undefined),
+    seen: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -118,17 +119,23 @@ describe('persistAction', () => {
     expect(outcome).toEqual({ ok: false, revert: rejectAction })
   })
 
-  it('cannot fail a skip -- it reaches the network at all', async () => {
-    // A skip persists nothing now, so there is no request to fail. Pinned
-    // because the alternative is a silent revert path that can never run:
-    // if someone reintroduces an API call here, this test catches it.
-    const a = api({
-      star: vi.fn().mockRejectedValue(new Error('network down')),
-      reject: vi.fn().mockRejectedValue(new Error('network down')),
-      reviewed: vi.fn().mockRejectedValue(new Error('network down')),
-    })
+  it('calls api.seen, not api.star/reject/reviewed, for a skip action', async () => {
+    // A skip stamps seen_at (via api.seen), deliberately NOT reviewed_at --
+    // see persist.ts's skip case. star/reject/reviewed must not be touched
+    // by a plain right-arrow.
+    const a = api()
     const outcome = await persistAction(skipAction, a)
+    expect(a.seen).toHaveBeenCalledWith('r3')
+    expect(a.star).not.toHaveBeenCalled()
+    expect(a.reject).not.toHaveBeenCalled()
+    expect(a.reviewed).not.toHaveBeenCalled()
     expect(outcome).toEqual({ ok: true })
+  })
+
+  it('reports the failed action as the thing to revert when a skip persist fails', async () => {
+    const a = api({ seen: vi.fn().mockRejectedValue(new Error('network down')) })
+    const outcome = await persistAction(skipAction, a)
+    expect(outcome).toEqual({ ok: false, revert: skipAction })
   })
 
   it('reports revert: null when an undo persist fails -- UndoAction cannot be reverted', async () => {
@@ -160,7 +167,7 @@ describe('describePersistFailure', () => {
   })
 })
 
-describe('persistAction — skip no longer marks a rally reviewed', () => {
+describe('persistAction — skip stamps seen_at, never reviewed_at', () => {
   const skipAction: PersistableAction = {
     kind: 'skip',
     rallyId: 'r3',
@@ -172,14 +179,17 @@ describe('persistAction — skip no longer marks a rally reviewed', () => {
     previousPoint: false,
   }
 
-  it('calls nothing and reports success', async () => {
-    // `→` is now pressed on every clip, so persisting it as "reviewed" would
-    // mark a whole session reviewed just for walking through it. Only S and X
-    // count -- and the server already stamps reviewed_at inside set_star and
-    // set_rejected, so nothing is lost by dropping this call.
+  it('calls only api.seen and reports success', async () => {
+    // `→` is pressed on every clip, so persisting it as "reviewed" would
+    // mark a whole session reviewed just for walking through it. Only S and
+    // X stamp reviewed_at (via set_star/set_rejected/set_point's own
+    // COALESCE) -- skip stamps the separate seen_at column instead, which
+    // is what the queue's resume position reads (QueueController's
+    // firstUnseen) without being able to move session status.
     const a = api()
     const out = await persistAction(skipAction, a)
     expect(out).toEqual({ ok: true })
+    expect(a.seen).toHaveBeenCalledWith('r3')
     expect(a.reviewed).not.toHaveBeenCalled()
     expect(a.star).not.toHaveBeenCalled()
     expect(a.reject).not.toHaveBeenCalled()

@@ -13,6 +13,7 @@ const mockApi = {
   star: vi.fn().mockResolvedValue({ ok: true }),
   reject: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
+  seen: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),
@@ -61,6 +62,7 @@ function rally(id: string, idx: number, sourceId = 'src1'): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
   }
 }

@@ -222,10 +222,18 @@ def list_rallies(conn: sqlite3.Connection, session_id: str) -> list[sqlite3.Row]
 
 
 def set_star(conn: sqlite3.Connection, rally_id: str, starred: bool) -> None:
+    # seen_at is stamped alongside reviewed_at, not just reviewed_at alone:
+    # a starred rally was necessarily looked at, and without this a rally
+    # starred on the very first pass (never skipped past) would still read
+    # as unseen -- see set_seen's docstring for the column split this
+    # protects. One `now`, not two _now() calls: a rally starred for the
+    # first time sets both columns in the same statement, and they should
+    # carry the identical instant, not two calls' worth of clock drift.
+    now = _now()
     conn.execute(
-        "UPDATE rallies SET starred = ?, reviewed_at = COALESCE(reviewed_at, ?)"
-        " WHERE id = ?",
-        (int(starred), _now(), rally_id),
+        "UPDATE rallies SET starred = ?, reviewed_at = COALESCE(reviewed_at, ?),"
+        " seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (int(starred), now, now, rally_id),
     )
     conn.commit()
 
@@ -237,20 +245,51 @@ def set_point(conn: sqlite3.Connection, rally_id: str, point: bool) -> None:
     All three flags are rulings on the clip, and reviewed_at records that a
     human has ruled on a rally at all -- so a reviewer who marks every point
     of a tiebreaker and stars none must still end with a reviewed session.
+
+    Also stamps seen_at through its own COALESCE, same reasoning as
+    set_star: a ruling cannot be made on a rally nobody looked at.
     """
+    now = _now()
     conn.execute(
-        "UPDATE rallies SET point = ?, reviewed_at = COALESCE(reviewed_at, ?)"
-        " WHERE id = ?",
-        (int(point), _now(), rally_id),
+        "UPDATE rallies SET point = ?, reviewed_at = COALESCE(reviewed_at, ?),"
+        " seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (int(point), now, now, rally_id),
     )
     conn.commit()
 
 
 def set_rejected(conn: sqlite3.Connection, rally_id: str, rejected: bool) -> None:
+    # See set_star's comment on the added seen_at stamp, including why this
+    # is one `now` shared by both COALESCEs rather than two _now() calls.
+    now = _now()
     conn.execute(
-        "UPDATE rallies SET rejected = ?, reviewed_at = COALESCE(reviewed_at, ?)"
-        " WHERE id = ?",
-        (int(rejected), _now(), rally_id),
+        "UPDATE rallies SET rejected = ?, reviewed_at = COALESCE(reviewed_at, ?),"
+        " seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (int(rejected), now, now, rally_id),
+    )
+    conn.commit()
+
+
+def set_seen(conn: sqlite3.Connection, rally_id: str) -> None:
+    """Record that a human has looked at this rally, independent of any
+    ruling (star/point/reject).
+
+    This is the other half of the reviewed_at split: reviewed_at means "a
+    human ruled on this rally" and is what session status is computed from
+    (refresh_session_review_status), while seen_at means "a human has looked
+    at this rally at all" and is what the review queue resumes from
+    (QueueController's firstUnseen). persist.ts's skip case calls this --
+    stamping reviewed_at there instead, as the code used to not do at all,
+    would flip a whole session to 'reviewed' off the back of a plain
+    right-arrow with no judgement behind it.
+
+    COALESCE, same shape as mark_reviewed: the first write wins, so
+    revisiting an already-seen rally later in the pass does not move its
+    "first seen" timestamp.
+    """
+    conn.execute(
+        "UPDATE rallies SET seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (_now(), rally_id),
     )
     conn.commit()
 

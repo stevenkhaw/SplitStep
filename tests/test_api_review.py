@@ -91,6 +91,34 @@ def test_reviewed_on_unknown_rally_is_404(client):
     assert client.post("/api/rallies/nope/reviewed").status_code == 404
 
 
+def test_seen_endpoint_sets_seen_at_but_not_reviewed_at(client, conn, seeded):
+    """The route persist.ts's skip case calls on every plain right-arrow.
+    Modeled on api_reviewed but must NOT be a ruling -- reviewed_at is what
+    session status is computed from, and marking every skip a ruling is
+    exactly the bug this endpoint exists to avoid re-introducing.
+    """
+    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
+    r = client.post(f"/api/rallies/{rally_id}/seen")
+    assert r.status_code == 200
+    row = list_rallies(conn, seeded["session_id"])[0]
+    assert row["seen_at"] is not None
+    assert row["reviewed_at"] is None
+
+
+def test_seen_endpoint_does_not_flip_session_to_reviewed(client, conn, seeded):
+    """Marking every rally seen (without starring/rejecting any of them)
+    must leave the session exactly as unreviewed as it started -- seen_at
+    plays no part in refresh_session_review_status.
+    """
+    for rally in list_rallies(conn, seeded["session_id"]):
+        client.post(f"/api/rallies/{rally['id']}/seen")
+    assert get_session(conn, seeded["session_id"])["status"] != "reviewed"
+
+
+def test_seen_on_unknown_rally_is_404(client):
+    assert client.post("/api/rallies/nope/seen").status_code == 404
+
+
 def test_star_on_unknown_rally_is_404(client):
     assert client.post(
         "/api/rallies/nope/star", json={"starred": True}

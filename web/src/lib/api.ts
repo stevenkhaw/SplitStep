@@ -80,6 +80,10 @@ export const api = {
   point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
   setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
   reviewed: (id: string) => post(`/api/rallies/${id}/reviewed`),
+  // Called on every plain right-arrow (see persist.ts's skip case) --
+  // "a human looked at this", independent of reviewed_at's "a human ruled
+  // on this". See bootleg/db/rallies.py::set_seen.
+  seen: (id: string) => post(`/api/rallies/${id}/seen`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),
   label: (id: string, verdict: string, boundary_flags: string[]) =>

@@ -11,6 +11,7 @@ const mockApi = {
   star: vi.fn(),
   reject: vi.fn(),
   reviewed: vi.fn(),
+  seen: vi.fn(),
   setBounds: vi.fn(),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] }),
@@ -62,6 +63,7 @@ function rally(overrides: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
     ...overrides,
   }

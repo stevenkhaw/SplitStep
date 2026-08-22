@@ -31,6 +31,7 @@ from bootleg.db.rallies import (
     set_note,
     set_point,
     set_rejected,
+    set_seen,
     set_star,
 )
 from bootleg.db.reels import (
@@ -363,6 +364,22 @@ def api_reviewed(rally_id: str, request: Request):
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)
     mark_reviewed(conn, rally_id)
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/seen")
+def api_seen(rally_id: str, request: Request):
+    """What persist.ts's skip case calls on a plain right-arrow -- see
+    set_seen's docstring for why this must not be mark_reviewed. Same shape
+    as api_reviewed (no body, same response), refresh_session_review_status
+    included even though seen_at cannot move it: session status is still
+    computed from reviewed_at alone, so this call is a no-op for that
+    column, but every other review route reports session_status and a
+    caller should not have to special-case this one.
+    """
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    set_seen(conn, rally_id)
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 

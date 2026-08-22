@@ -53,13 +53,13 @@
   // from under it. `untrack` tells svelte-check this one-time read is
   // intentional rather than an accidental non-reactive reference.
   const queue = new QueueController(untrack(() => detail.rallies))
-  // A fresh controller opens on the first rally whose reviewed_at is null,
+  // A fresh controller opens on the first rally whose seen_at is null,
   // which is the right resume point for a new session and the wrong one for
   // a remount. Returning from the timeline forces a remount (Session bumps
   // rallyRevision -- the only way a trimmed rally's new bounds reach the
-  // queue at all), and reviewed_at is stamped by star/reject alone, never by
-  // a bounds edit, so trimming rally 40 of 61 and pressing esc would drop
-  // the user back at whichever rally they had not yet judged.
+  // queue at all), and seen_at is stamped by star/point/reject/skip alone,
+  // never by a bounds edit, so trimming rally 40 of 61 and pressing esc
+  // would drop the user back at whichever rally they had not yet seen.
   //
   // jumpTo silently does nothing for an id it cannot find, which is exactly
   // right for the other remount trigger: a re-segment rebuilds every rally

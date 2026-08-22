@@ -5,9 +5,10 @@ import type { Rally, SessionDetail } from '../src/lib/types'
 // Leaving TimelineMode remounts QueueMode (Session bumps `rallyRevision`, and
 // a fresh QueueController is the only way a trimmed rally's new bounds reach
 // the queue). A remounted controller starts at the first rally whose
-// `reviewed_at` is null -- and `reviewed_at` is stamped only by star/reject,
-// never by a bounds edit. So trimming rally 3 and pressing Escape used to
-// land the user back on rally 1, having lost their place in a 60-rally pass.
+// `seen_at` is null -- and `seen_at` is stamped only by star/point/reject/
+// skip, never by a bounds edit. So trimming rally 3 and pressing Escape used
+// to land the user back on rally 1, having lost their place in a 60-rally
+// pass.
 
 const mockApi = {
   listSessions: vi.fn(),
@@ -15,6 +16,7 @@ const mockApi = {
   star: vi.fn().mockResolvedValue({ ok: true }),
   reject: vi.fn().mockResolvedValue({ ok: true }),
   reviewed: vi.fn().mockResolvedValue({ ok: true }),
+  seen: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   label: vi.fn().mockResolvedValue({ ok: true }),
@@ -56,6 +58,7 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
     rejected: 0,
     point: 0,
     reviewed_at: null,
+    seen_at: null,
     note: '',
     ...overrides,
   }
@@ -178,9 +181,9 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     // want to open it.
     mockApi.getSession.mockResolvedValue(
       detailWith([
-        rally('r1', 1, { reviewed_at: '2026-08-19T11:00:00Z' }),
-        rally('r2', 2, { reviewed_at: '2026-08-19T11:01:00Z' }),
-        rally('r3', 3, { reviewed_at: '2026-08-19T11:02:00Z' }),
+        rally('r1', 1, { seen_at: '2026-08-19T11:00:00Z' }),
+        rally('r2', 2, { seen_at: '2026-08-19T11:01:00Z' }),
+        rally('r3', 3, { seen_at: '2026-08-19T11:02:00Z' }),
       ]),
     )
 
@@ -220,13 +223,13 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     await vi.waitFor(() => expect(target.textContent).toMatch(/3 \/ 3 · 0 labelled/))
   })
 
-  it('still opens on the first unreviewed rally when the timeline was never used', async () => {
+  it('still opens on the first unseen rally when the timeline was never used', async () => {
     // The restore must not defeat the normal resume behaviour: with rallies
-    // 1 and 2 already judged, a fresh session opens on rally 3.
+    // 1 and 2 already seen, a fresh session opens on rally 3.
     mockApi.getSession.mockResolvedValue(
       detailWith([
-        rally('r1', 1, { reviewed_at: '2026-08-19T11:00:00Z' }),
-        rally('r2', 2, { reviewed_at: '2026-08-19T11:01:00Z' }),
+        rally('r1', 1, { seen_at: '2026-08-19T11:00:00Z' }),
+        rally('r2', 2, { seen_at: '2026-08-19T11:01:00Z' }),
         rally('r3', 3),
       ]),
     )
