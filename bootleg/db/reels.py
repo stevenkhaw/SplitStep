@@ -212,15 +212,31 @@ def mark_dirty(conn: sqlite3.Connection, reel_id: str) -> None:
     conn.commit()
 
 
-def mark_rendered(conn: sqlite3.Connection, reel_id: str, rendered_path: str) -> None:
-    """Record a successful render and clear dirty.
+def mark_rendered(
+    conn: sqlite3.Connection, reel_id: str, rendered_path: str, membership: set[Span]
+) -> None:
+    """Record a successful render, and clear dirty only if `membership` --
+    what was ACTUALLY rendered -- still matches the reel's current items.
 
     rendered_path is library-relative, like rallies.clip_path: the drive
     mounts at a different point on each machine, so an absolute path stored
     here would be wrong the first time the library moves.
+
+    handle_reel resolves items once, at the top of a run that can take
+    minutes on a re-encode fallback. An add_items / remove_item / set_order
+    landing in that window sets dirty = 1 for a reason that is still true
+    when this runs: the file just written does not contain what the reel
+    now holds. Clearing dirty unconditionally -- what this did before --
+    would silently discard that signal, and the UI would read "rendered"
+    for a file already stale by the time the render finished. Recovery from
+    a wrongly-set dirty flag is one re-render; recovery from a wrongly-CLEARED
+    one is a user trusting a file that lied, so leaving dirty SET on any
+    mismatch is the honest failure mode, not a cleverer reconciliation.
     """
     conn.execute(
-        "UPDATE reels SET rendered_path = ?, rendered_at = ?, dirty = 0 WHERE id = ?",
+        "UPDATE reels SET rendered_path = ?, rendered_at = ? WHERE id = ?",
         (rendered_path, _now(), reel_id),
     )
+    if _keys(conn, reel_id) == membership:
+        conn.execute("UPDATE reels SET dirty = 0 WHERE id = ?", (reel_id,))
     conn.commit()

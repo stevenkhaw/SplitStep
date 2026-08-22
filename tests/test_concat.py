@@ -227,6 +227,43 @@ def test_a_short_copy_falls_back_to_a_reencode(tmp_path, monkeypatch):
     assert abs(probe(dst).duration_ms - total) <= tolerance_ms(3) * 4
 
 
+def test_a_reencode_that_still_comes_out_wrong_is_refused(tmp_path, monkeypatch):
+    """The fallback runs through the same concat demuxer as -c copy, on
+    inputs the pre-flight has already declared abnormal -- so it can drop a
+    later input exactly as the copy can. Before this fix nothing measured
+    the fallback's own output, so a reel could reach mark_rendered while
+    silently missing its last clip.
+
+    Simulated the same way test_a_short_copy_falls_back_to_a_reencode
+    simulates a short copy: a real SAR divergence sends concat_clips
+    straight to the reencode branch (never through -c copy at all), and
+    THAT call -- identified by "-c:v", the flag only _reencode_args passes
+    -- is intercepted to write just the first input.
+    """
+    import bootleg.media.concat as concat_mod
+
+    parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", sar="2/1")]
+    dst = tmp_path / "reel.mp4"
+    real_run = concat_mod.run_ffmpeg
+
+    def fake_run(args, timeout=None, on_progress=None, total_ms=None):
+        if "-c:v" in args:
+            real_run(["-i", str(parts[0]), "-c", "copy", args[-1]])
+            return
+        real_run(args, on_progress=on_progress, total_ms=total_ms)
+
+    monkeypatch.setattr(concat_mod, "run_ffmpeg", fake_run)
+
+    with pytest.raises(concat_mod.ConcatError):
+        concat_clips(parts, dst)
+
+    # Refused loudly, never marked rendered with a short file: no dst, and
+    # no temp left behind either -- the same discipline
+    # test_a_failed_copy_leaves_no_partial_output pins for the copy path.
+    assert not dst.exists()
+    assert list(tmp_path.glob(".*")) == []
+
+
 def test_a_failed_copy_leaves_no_partial_output(tmp_path, monkeypatch):
     import bootleg.media.concat as concat_mod
 

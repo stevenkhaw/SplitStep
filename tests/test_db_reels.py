@@ -178,7 +178,7 @@ def test_set_order_refuses_a_list_that_is_not_the_membership(conn, seeded):
 
 def test_mark_rendered_then_dirty(conn):
     reel = create_reel(conn, "r")
-    mark_rendered(conn, reel["id"], "reels/r.mp4")
+    mark_rendered(conn, reel["id"], "reels/r.mp4", set())
     row = get_reel(conn, reel["id"])
     assert row["dirty"] == 0
     assert row["rendered_path"] == "reels/r.mp4"
@@ -191,6 +191,42 @@ def test_mark_rendered_then_dirty(conn):
     # it is merely out of date. Clearing it would make "re-render" and
     # "never rendered" indistinguishable in the list.
     assert row["rendered_path"] == "reels/r.mp4"
+
+
+def test_mark_rendered_clears_dirty_when_membership_still_matches(conn, seeded):
+    reel = create_reel(conn, "r")
+    src = seeded["source_id"]
+    add_items(conn, reel["id"], [(src, 1000, 2000)])
+
+    mark_rendered(conn, reel["id"], "reels/r.mp4", {(src, 1000, 2000)})
+
+    assert get_reel(conn, reel["id"])["dirty"] == 0
+
+
+def test_mark_rendered_leaves_dirty_set_if_membership_changed_mid_render(conn, seeded):
+    """The window Finding 4 exists for: handle_reel resolves items, then
+    spends up to minutes concatenating them. An add_items landing in that
+    window sets dirty = 1 for a reason still true when mark_rendered runs --
+    the file on disk does not contain what the reel now holds -- and that
+    must survive the call, not be clobbered by it.
+    """
+    reel = create_reel(conn, "r")
+    src = seeded["source_id"]
+    add_items(conn, reel["id"], [(src, 1000, 2000)])
+    rendered_membership = {(src, 1000, 2000)}
+
+    # The concurrent edit: lands after the render's membership was captured,
+    # before mark_rendered is called.
+    add_items(conn, reel["id"], [(src, 3000, 4000)])
+
+    mark_rendered(conn, reel["id"], "reels/r.mp4", rendered_membership)
+
+    row = get_reel(conn, reel["id"])
+    assert row["dirty"] == 1
+    # The render itself still succeeded and is still recorded -- only the
+    # dirty bit records that it is already stale.
+    assert row["rendered_path"] == "reels/r.mp4"
+    assert row["rendered_at"] is not None
 
 
 def test_list_reels_carries_an_item_count(conn, seeded):

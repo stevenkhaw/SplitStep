@@ -72,6 +72,33 @@ def test_no_two_migrations_share_a_number():
     assert not duplicates, f"migrations share these numbers: {duplicates}"
 
 
+def test_migrate_refuses_before_applying_anything_if_two_files_share_a_number(
+    tmp_path, monkeypatch
+):
+    """The structural guard, not just the authoring-time assertion above.
+    test_no_two_migrations_share_a_number only protects a run that happens
+    to include it; this is the same check run inside migrate() itself, so a
+    real database cannot get partway migrated with the collision still live
+    -- 001 (no collision at all) must NOT have applied either.
+    """
+    import bootleg.db.schema as schema_mod
+
+    fake_migrations = tmp_path / "migrations"
+    fake_migrations.mkdir()
+    (fake_migrations / "001_first.sql").write_text("CREATE TABLE a (id INTEGER);")
+    (fake_migrations / "002_second.sql").write_text("CREATE TABLE b (id INTEGER);")
+    (fake_migrations / "002_second_too.sql").write_text("CREATE TABLE c (id INTEGER);")
+    monkeypatch.setattr(schema_mod, "MIGRATIONS", fake_migrations)
+
+    conn = connect(tmp_path / "collision.db")
+    with pytest.raises(RuntimeError, match=r"\[2\]"):
+        schema_mod.migrate(conn)
+
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "a" not in tables
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+
+
 def test_every_migration_applies_to_a_fresh_database(tmp_path):
     """A fresh database really carries the effect of EVERY migration.
 

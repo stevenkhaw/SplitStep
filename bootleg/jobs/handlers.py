@@ -436,7 +436,16 @@ def handle_reel(library: Library, payload: dict,
         # line is what ties it to a reel by name in the same log.
         log.warning("reel %s fell back to a re-encode", reel["slug"])
 
-    mark_rendered(conn, reel["id"], str(dst.relative_to(library.root)))
+    # The membership `items` was resolved against, captured up front --
+    # NOT re-queried here. A render can take minutes, and mark_rendered
+    # compares this against the reel's membership AT THIS MOMENT to decide
+    # whether dirty may be cleared; re-deriving it here would just re-read
+    # the same possibly-changed-mid-render rows and always agree with
+    # itself, defeating the check.
+    rendered_membership = {(i.source_id, i.start_ms, i.end_ms) for i in items}
+    mark_rendered(
+        conn, reel["id"], str(dst.relative_to(library.root)), rendered_membership
+    )
 
 
 HANDLERS: dict[str, Handler] = {

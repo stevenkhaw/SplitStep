@@ -32,17 +32,23 @@ class ConcatError(Exception):
 # 1.5-4.0s). A per-input term is kept anyway: that 21ms is measured on one
 # ffmpeg build (9.0.1), and a build that genuinely does drift per input
 # would need it, not just a flat pad. The cap exists because the per-input
-# term alone made tolerance_ms(n) >= 1500ms from n=35, and 1.5s
-# (min_duration_s in bootleg/detect/segment.py) is the shortest clip the
-# segmenter can produce -- past n=35 a reel silently missing exactly its
-# shortest clip would land inside that window and pass. 750ms keeps the cap
-# well under that floor at any n.
+# term alone made tolerance_ms(n) >= 1500ms from n=35, which is long enough
+# to hide a dropped clip.
 _TOLERANCE_BASE_MS = 100
 _TOLERANCE_PER_INPUT_MS = 40
+# Fallback cap when tolerance_ms is called with no reel-specific durations
+# (existing callers, existing tests). NOT anchored to
+# bootleg/detect/segment.py's min_duration_s: that floor is the segmenter's
+# own, and nothing else in the app enforces it on a span a reel can hold --
+# web's MIN_RALLY_MS is 100ms, and the bounds route validates only
+# end_ms > start_ms. A hand-trimmed clip well under 1.5s is a real reel
+# input the segmenter's floor says nothing about, so a cap justified by it
+# would let a copy that dropped exactly that clip pass. See the
+# `shortest_ms` argument below for the real check.
 _TOLERANCE_CAP_MS = 750
 
 
-def tolerance_ms(n_inputs: int) -> int:
+def tolerance_ms(n_inputs: int, shortest_ms: int | None = None) -> int:
     """How far the concatenated duration may sit from the sum of its inputs.
 
     Deliberately generous, and capped: the failure this catches is a reel
@@ -50,10 +56,22 @@ def tolerance_ms(n_inputs: int) -> int:
     rounding remainder, so a tight bound would only buy false re-encodes on
     well-formed output. Being wrong the other way is cheap: the fallback
     costs a re-encode, and it is logged.
+
+    `shortest_ms`, when given, is THIS reel's own shortest input duration --
+    concat_clips has already probed every input by the time it calls this,
+    so passing it in costs nothing further. The cap is halved against it: a
+    copy that silently dropped the shortest clip outright must land outside
+    the window whatever that clip's own duration is, not merely outside a
+    module constant borrowed from a different validator that this app does
+    not otherwise enforce. Omitted, the cap falls back to `_TOLERANCE_CAP_MS`
+    for callers with no reel in hand (this module's own tests, mainly).
     """
+    cap = _TOLERANCE_CAP_MS
+    if shortest_ms is not None:
+        cap = min(cap, shortest_ms // 2)
     return min(
         _TOLERANCE_BASE_MS + _TOLERANCE_PER_INPUT_MS * max(0, n_inputs),
-        _TOLERANCE_CAP_MS,
+        cap,
     )
 
 
@@ -278,8 +296,13 @@ def concat_clips(
        SUCCEED and yield a wrong-shaped, wrong-matrix, or audio-truncated
        reel with a perfectly correct duration.
     2. AFTER: the output's duration is measured against the sum of the
-       inputs, because a copy can also drop later inputs outright. That one
-       IS visible in the duration, and this is the check that sees it.
+       inputs, whichever branch produced it. Both `-c copy` AND the
+       re-encode fallback run through the same concat demuxer, which can
+       drop a later input outright -- and the re-encode runs it on inputs
+       the pre-flight has already declared abnormal, so it is not obviously
+       safer. A reel that still comes out wrong after the fallback raises
+       `ConcatError` rather than reaching `mark_rendered`: a reel recorded
+       as "rendered" has to actually contain what it claims to.
 
     `on_progress` is threaded to the re-encode only. The copy is effectively
     instantaneous; the fallback is minutes on a real reel, and it is the one
@@ -296,6 +319,10 @@ def concat_clips(
     # the divergence check further down -- see _probe_clip.
     probed = [_probe_clip(p) for p in paths]
     expected_ms = sum(duration for _, duration in probed)
+    # This reel's own shortest input, not the segmenter's floor -- see
+    # tolerance_ms's docstring for why anchoring to segment.py's
+    # min_duration_s would miss a hand-trimmed clip shorter than it.
+    tolerance = tolerance_ms(len(paths), min(duration for _, duration in probed))
 
     # Both temps are dot-prefixed siblings of dst: same directory, hence same
     # filesystem, so the os.replace() below is atomic and can never straddle
@@ -324,7 +351,7 @@ def concat_clips(
             run_ffmpeg([*base, "-c", "copy", "-movflags", "+faststart", str(tmp)])
             actual_ms = probe(tmp).duration_ms
             mode = "copy"
-            if abs(actual_ms - expected_ms) > tolerance_ms(len(paths)):
+            if abs(actual_ms - expected_ms) > tolerance:
                 log.warning(
                     "concat -c copy produced %dms from %d clips totalling %dms; "
                     "re-encoding %s",
@@ -337,6 +364,19 @@ def concat_clips(
                 _reencode_args(base, tmp),
                 on_progress=on_progress, total_ms=expected_ms,
             )
+            # The fallback runs through the SAME concat demuxer as -c copy,
+            # on inputs the pre-flight has already flagged as abnormal --
+            # _reencode_args' own docstring concedes the demuxer imposes the
+            # first input's frame on the rest either way. Nothing measured
+            # this branch's own output before, so a fallback that ALSO
+            # dropped a later input still reached mark_rendered and the UI
+            # read "rendered" for a reel silently missing its last points.
+            actual_ms = probe(tmp).duration_ms
+            if abs(actual_ms - expected_ms) > tolerance:
+                raise ConcatError(
+                    f"re-encoded {dst.name} came out {actual_ms}ms from {len(paths)} "
+                    f"clip(s) totalling {expected_ms}ms -- refusing to mark it rendered"
+                )
 
         os.replace(tmp, dst)
         return mode
