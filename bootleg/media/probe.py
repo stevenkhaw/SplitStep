@@ -21,6 +21,10 @@ class MediaInfo:
     codec_name: str                     # e.g. "h264", "hevc" -- ffprobe's video stream codec_name
     rotation_deg: int                   # clockwise degrees to apply to the coded frame
     sar: float                          # sample (pixel) aspect ratio; 1.0 for square pixels
+    color_range: str | None             # ffprobe's spelling, e.g. "tv"; None when absent
+    color_space: str | None             # matrix coefficients, e.g. "bt2020nc"
+    color_primaries: str | None         # e.g. "bt2020"
+    color_transfer: str | None          # e.g. "arib-std-b67" (HLG)
 
 
 def _pick_fps(*rates: str | None) -> float:
@@ -61,6 +65,27 @@ def _sar(video: dict) -> float:
     except (ZeroDivisionError, ValueError):
         return 1.0
     return float(frac) if frac > 0 else 1.0
+
+
+def _color_tag(video: dict, key: str) -> str | None:
+    """One of ffprobe's colour fields, with both spellings of "missing" as None.
+
+    ffprobe has two: its CSV writer prints the literal string "unknown" for a
+    stream carrying no colour metadata, and its JSON writer -- the one this
+    module reads -- omits the key outright. A third case, a value ffprobe
+    does not recognise, also arrives as "unknown".
+
+    All three mean the same thing to `make_clip`: this source's colour is not
+    the locked profile's, and a clip cut from it could not be concatenated
+    with the ones already cut. Collapsing them here is what lets that check
+    stay a plain equality test instead of a special-case ladder -- None
+    matches no pinned string, so an untagged source refuses exactly as a
+    mislabelled one does.
+    """
+    value = video.get(key)
+    if not value or value == "unknown":
+        return None
+    return str(value)
 
 
 def _display_rotation(video: dict) -> int:
@@ -183,4 +208,8 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
         codec_name=video.get("codec_name", ""),
         rotation_deg=_display_rotation(video),
         sar=_sar(video),
+        color_range=_color_tag(video, "color_range"),
+        color_space=_color_tag(video, "color_space"),
+        color_primaries=_color_tag(video, "color_primaries"),
+        color_transfer=_color_tag(video, "color_transfer"),
     )

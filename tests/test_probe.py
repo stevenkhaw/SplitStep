@@ -216,3 +216,49 @@ def test_probe_reports_an_unknown_sample_aspect_ratio_as_square(tmp_path, monkey
         check=True, capture_output=True,
     )
     assert probe(src).sar == 1.0
+
+
+# --- colour metadata -------------------------------------------------------
+
+
+@pytest.fixture
+def hlg_video(tmp_path):
+    """A source tagged exactly as the locked clip profile is.
+
+    `setparams` rather than the -color_* output flags: with a lavfi input
+    those flags write the matrix and the range and silently drop primaries
+    and transfer, so a fixture built with them would carry `unknown` in two
+    of the four fields while looking correct in the command line.
+    """
+    out = tmp_path / "hlg.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=1",
+         "-vf", ("setparams=color_primaries=bt2020:color_trc=arib-std-b67"
+                 ":colorspace=bt2020nc:range=tv"),
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_probe_reads_colour_metadata(hlg_video):
+    info = probe(hlg_video)
+    assert info.color_range == "tv"
+    assert info.color_space == "bt2020nc"
+    assert info.color_transfer == "arib-std-b67"
+    assert info.color_primaries == "bt2020"
+
+
+def test_probe_reads_absent_colour_metadata_as_none(sample_video):
+    """The case that matters more than a mislabelled source, because it is
+    far commoner: a file carrying no colour metadata at all. ffprobe's CSV
+    writer prints the literal "unknown" for these and its JSON writer -- the
+    one probe() reads -- omits the keys entirely. Both have to arrive as
+    None, because make_clip's check is a plain equality test and None is
+    what makes "no tags" fail it.
+    """
+    info = probe(sample_video)
+    assert info.color_range is None
+    assert info.color_space is None
+    assert info.color_transfer is None
+    assert info.color_primaries is None
