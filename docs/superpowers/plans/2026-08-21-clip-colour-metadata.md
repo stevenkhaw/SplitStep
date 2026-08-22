@@ -12,7 +12,9 @@
 
 ## Global Constraints
 
-- Python is the `bootleg` conda env and is **not** the shell default. Invoke by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
+- Python is the `bootleg` conda env and is **not** the shell default. Invoke by path.
+- **In this worktree, run pytest as a module: `~/miniconda3/envs/bootleg/bin/python -m pytest`, never the bare `pytest` entry point.** The env editable-installs `bootleg` via a finder pinned to `/Users/stevenkhaw/Documents/GitHub/BootlegVision/bootleg` — the MAIN checkout, on `master`. The console script does not put the cwd on `sys.path`, so from here `import bootleg` silently resolves to master's code and every test in this plan passes or fails against the wrong package. `-m` prepends the cwd, which wins. CLAUDE.md documents the bare form because it is correct in the main checkout; it is wrong in a worktree.
+- `~/miniconda3/envs/bootleg/bin/ruff check bootleg tests` for lint (ruff reads paths, not imports, so the bare entry point is fine).
 - ruff line-length is **100**.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
 - ffmpeg must be on PATH. YOLO is never run in tests.
@@ -100,7 +102,7 @@ def test_probe_reads_absent_colour_metadata_as_none(sample_video):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_probe.py -q -k colour
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_probe.py -q -k colour
 ```
 
 Expected: FAIL, `AttributeError: 'MediaInfo' object has no attribute 'color_range'`.
@@ -155,7 +157,7 @@ Extend `probe()`'s return statement:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_probe.py -q
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_probe.py -q
 ```
 
 Expected: PASS, whole file.
@@ -313,7 +315,7 @@ In `test_handle_clip_cuts_from_the_proxy_when_the_original_is_reclaimed`, add `h
 - [ ] **Step 6: Run the affected files**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -q
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -q
 ```
 
 Expected: PASS. Nothing has changed behaviourally yet — this step is confirming the retagged fixtures still encode and still exercise what they did before.
@@ -406,7 +408,7 @@ drift rather than in a test someone forgets -- is met by both.
 - [ ] **Step 2: Run to verify it fails**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q -k "colour or always_been"
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q -k "colour or always_been"
 ```
 
 Expected: FAIL at collection, `ImportError: cannot import name 'CLIP_COLOR_PRIMARIES' from 'bootleg.media.transcode'`.
@@ -463,7 +465,7 @@ In `make_clip`'s `run_ffmpeg([...])` list, directly after `"-pix_fmt", "yuv420p"
 - [ ] **Step 5: Run to verify it passes**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q
 ```
 
 Expected: PASS, whole file.
@@ -570,7 +572,7 @@ def test_make_clip_refusal_names_both_sets_of_tags(tmp_path):
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q -k "refuse or refusal"
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q -k "refuse or refusal"
 ```
 
 Expected: FAIL — `DID NOT RAISE <class 'TranscodeError'>` on all three, because `make_clip` currently cuts these happily.
@@ -638,7 +640,7 @@ Call it in `make_clip`, directly after the existing `info = probe(src)`:
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q
+~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q
 ```
 
 Expected: PASS, whole file — including the existing tests, which Task 2 already tagged.
@@ -664,7 +666,7 @@ git commit -m "feat(clips): refuse a source whose colour is not the locked profi
 - [ ] **Step 1: Run the whole suite**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q
+~/miniconda3/envs/bootleg/bin/python -m pytest -q
 ```
 
 Expected: PASS. The count was 471 before this plan; it should be 471 plus the six tests added here (two in Task 1, one in Task 3, three in Task 4). If anything outside `tests/test_clips.py`, `tests/test_probe.py`, `tests/test_handler_clip.py` fails, it is a source fixture Task 2 missed — find it with `grep -rn "lavfi" tests/` and tag it the same way rather than loosening the check.
