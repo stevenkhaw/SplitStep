@@ -14,7 +14,6 @@ const mockApi = {
   getSession: vi.fn(),
   star: vi.fn().mockResolvedValue({ ok: true }),
   reject: vi.fn().mockResolvedValue({ ok: true }),
-  reviewed: vi.fn().mockResolvedValue({ ok: true }),
   seen: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   setNote: vi.fn().mockResolvedValue({ ok: true }),
@@ -173,7 +172,8 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     // triggered (star/reject/skip/undo/replay) actually fired.
     expect(mockApi.star).not.toHaveBeenCalled()
     expect(mockApi.reject).not.toHaveBeenCalled()
-    expect(mockApi.reviewed).not.toHaveBeenCalled()
+    // A skip persists nothing, so there is no call to assert it did not make;
+    // the unchanged cursor below is what proves ArrowRight/skip never fired.
     // 'r' didn't replay -- HTMLMediaElement.play is also called by normal
     // autoplay, so assert on the queue's own visible position instead:
     // undo ('u') would have thrown queue.index off (there was nothing to
@@ -199,7 +199,6 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     // -- the slider's own native nudge never happened, and the visible
     // rally silently advanced.
     expect(arrowNotPrevented).toBe(true)
-    expect(mockApi.reviewed).not.toHaveBeenCalled()
     expect(mockApi.star).not.toHaveBeenCalled()
     expect(mockApi.reject).not.toHaveBeenCalled()
     expect(target.textContent).toMatch(/rally 1 \/ 2/)
@@ -216,11 +215,10 @@ describe('typing into a co-mounted field does not fire queue keybindings (Findin
     flushSync()
 
     // The cursor moving IS the proof the key landed. This used to assert on
-    // `mockApi.reviewed`, but a skip no longer persists anything (only star
-    // and reject mark a rally reviewed), so that call is not a signal any
-    // more -- it would pass whether or not the key was handled.
+    // `mockApi.reviewed`, but a skip persists nothing -- the endpoint behind
+    // that call is gone entirely -- so it was not a signal any more: it would
+    // have passed whether or not the key was handled.
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally 2 \/ 2/))
-    expect(mockApi.reviewed).not.toHaveBeenCalled()
   })
 
   it('lets a note with spaces be typed after N without starring/skipping/undoing', async () => {

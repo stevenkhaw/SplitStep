@@ -8,7 +8,6 @@ function api(overrides: Partial<PersistApi> = {}): PersistApi {
     star: vi.fn().mockResolvedValue(undefined),
     reject: vi.fn().mockResolvedValue(undefined),
     point: vi.fn().mockResolvedValue(undefined),
-    reviewed: vi.fn().mockResolvedValue(undefined),
     seen: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -119,16 +118,17 @@ describe('persistAction', () => {
     expect(outcome).toEqual({ ok: false, revert: rejectAction })
   })
 
-  it('calls api.seen, not api.star/reject/reviewed, for a skip action', async () => {
+  it('calls api.seen, not api.star/reject, for a skip action', async () => {
     // A skip stamps seen_at (via api.seen), deliberately NOT reviewed_at --
-    // see persist.ts's skip case. star/reject/reviewed must not be touched
-    // by a plain right-arrow.
+    // see persist.ts's skip case. Master's version of this test asserted a
+    // skip "cannot fail because it reaches the network at all"; it reaches
+    // the network again now, and the failure path it was guarding against
+    // has its own test directly below.
     const a = api()
     const outcome = await persistAction(skipAction, a)
     expect(a.seen).toHaveBeenCalledWith('r3')
     expect(a.star).not.toHaveBeenCalled()
     expect(a.reject).not.toHaveBeenCalled()
-    expect(a.reviewed).not.toHaveBeenCalled()
     expect(outcome).toEqual({ ok: true })
   })
 
@@ -181,17 +181,19 @@ describe('persistAction — skip stamps seen_at, never reviewed_at', () => {
 
   it('calls only api.seen and reports success', async () => {
     // `→` is pressed on every clip, so persisting it as "reviewed" would
-    // mark a whole session reviewed just for walking through it. Only S and
-    // X stamp reviewed_at (via set_star/set_rejected/set_point's own
-    // COALESCE) -- skip stamps the separate seen_at column instead, which
-    // is what the queue's resume position reads (QueueController's
-    // firstUnseen) without being able to move session status.
+    // mark a whole session reviewed just for walking through it -- still
+    // true, and still why only S/X/P stamp reviewed_at. Skip stamps the
+    // separate seen_at column, which is what the queue resumes from
+    // (QueueController's firstUnseen). It does move session status, since
+    // status reads seen_at now: skimming a pass end to end finishes it.
     const a = api()
     const out = await persistAction(skipAction, a)
     expect(out).toEqual({ ok: true })
     expect(a.seen).toHaveBeenCalledWith('r3')
-    expect(a.reviewed).not.toHaveBeenCalled()
+    // The three that DO stamp reviewed_at, and the whole point of the split:
+    // a plain right-arrow must reach none of them.
     expect(a.star).not.toHaveBeenCalled()
     expect(a.reject).not.toHaveBeenCalled()
+    expect(a.point).not.toHaveBeenCalled()
   })
 })

@@ -5,7 +5,6 @@ export interface PersistApi {
   star: (id: string, starred: boolean) => Promise<unknown>
   reject: (id: string, rejected: boolean) => Promise<unknown>
   point: (id: string, point: boolean) => Promise<unknown>
-  reviewed: (id: string) => Promise<unknown>
   seen: (id: string) => Promise<unknown>
 }
 
@@ -39,18 +38,20 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         break
       case 'skip':
         // Stamps seen_at, deliberately NOT reviewed_at. The right arrow is
-        // pressed on every clip just to move through the pass, so marking
-        // each one *reviewed* would flip a whole session to 'reviewed'
-        // without a single judgement being made -- that reasoning still
-        // holds exactly as before, and is the reason seen_at and
-        // reviewed_at are now two separate columns rather than one
-        // overloaded one. Only star/point/reject stamp reviewed_at (via
-        // their own COALESCE), and session status is still computed from
-        // reviewed_at alone (refresh_session_review_status). seen_at exists
-        // so the queue has an honest "has a human looked at this" signal to
-        // resume from -- QueueController.firstUnseen reads it -- which
-        // reviewed_at could never provide for a rally that was arrowed past
-        // but never judged.
+        // pressed on every clip just to move through the pass, so calling
+        // each one *judged* would be a lie -- that reasoning (review-UX
+        // 2.4) still holds exactly, and is why seen_at and reviewed_at are
+        // two columns now instead of one doing both jobs. Only star, point
+        // and reject stamp reviewed_at, via their own COALESCE.
+        //
+        // What this DOES do is finish a session: since migration 008
+        // refresh_session_review_status reads seen_at, so skimming a pass
+        // end to end marks it reviewed without judging anything. That is
+        // deliberate -- a pass you looked all the way through is a pass you
+        // finished. It is also what the queue resumes from
+        // (QueueController's firstUnseen), which is the whole reason the
+        // column exists: reviewed_at could never answer "did a human look
+        // at this" for a rally arrowed past but never ruled on.
         await api.seen(action.rallyId)
         break
       case 'undo':

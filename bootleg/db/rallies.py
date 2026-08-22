@@ -307,25 +307,6 @@ def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
     conn.commit()
 
 
-def mark_reviewed(conn: sqlite3.Connection, rally_id: str) -> None:
-    """Stamps seen_at alongside reviewed_at, like every other writer that
-    records a human dealing with a rally.
-
-    A ruling cannot be made on a rally nobody looked at, so a reviewed_at
-    without a seen_at is a state that should not exist -- and since
-    migration 008 it is session status that reads seen_at, so leaving it
-    unstamped here would mean a session every one of whose rallies is
-    reviewed still could not reach 'reviewed'.
-    """
-    now = _now()
-    conn.execute(
-        "UPDATE rallies SET reviewed_at = COALESCE(reviewed_at, ?),"
-        " seen_at = COALESCE(seen_at, ?) WHERE id = ?",
-        (now, now, rally_id),
-    )
-    conn.commit()
-
-
 def set_bounds(conn: sqlite3.Connection, rally_id: str,
                start_ms: int, end_ms: int) -> None:
     """Update working bounds only. det_* columns are immutable training data."""

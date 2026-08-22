@@ -10,6 +10,8 @@
   import {
     REEL_POLL_INTERVAL_MS,
     canWatchRendered,
+    deleteConfirmationText,
+    normalizedReelName,
     reelMembershipKey,
     renderBlockedReason,
     shouldPollReel,
@@ -28,6 +30,20 @@
   let showPreview = $state(false)
   let showWatch = $state(false)
   let busy = $state(false)
+  let editingName = $state(false)
+  let nameBuffer = $state('')
+  // Two-step, inline: the first press only reveals what pressing it again
+  // destroys (deleteConfirmationText below, rendered where confirmingDelete
+  // gates the markup), never a browser confirm() -- a native dialog cannot
+  // show that formatted a reel name plus a byte count, and its default
+  // button can be fired by a stray Enter the user didn't mean for this.
+  // No reset wired to the fetch/revision effect below: a successful delete
+  // navigates away before it would matter, and a failed one leaves the
+  // reel as it was -- re-showing the confirmation on refetch would be
+  // wrong regardless, and confirmDelete already collapses this back to
+  // false as soon as the confirming click fires, before the mutation
+  // itself even starts.
+  let confirmingDelete = $state(false)
   const toaster = createToaster()
 
   // Bumped after every successful mutation to force a refetch. The server is
@@ -207,13 +223,101 @@
       )
     }, "Couldn't render")
   }
+
+  function startRename(): void {
+    if (!detail) return
+    nameBuffer = detail.reel.name
+    editingName = true
+  }
+
+  function cancelRename(): void {
+    editingName = false
+  }
+
+  function saveName(): void {
+    const name = normalizedReelName(nameBuffer)
+    if (name === null) return
+    // Closed immediately, like commitNote in QueueMode.svelte -- the field
+    // is gone before the round trip starts, not after it succeeds. There is
+    // deliberately no `onblur` on the input that could re-fire this: Enter
+    // and Escape already close the field themselves, and removing a focused
+    // element fires a trailing blur afterwards. A blur-commit would re-save
+    // whatever text was last typed even after Escape discarded it -- see
+    // commitNote's comment for the full failure mode, which jsdom cannot
+    // catch (it does not fire blur-on-removal), so this shape is avoided
+    // entirely rather than guarded against.
+    editingName = false
+    mutate(() => api.renameReel(slug, name), "Couldn't rename this reel")
+  }
+
+  function onNameKey(e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      saveName()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      // Cancel, not commit: nameBuffer is simply dropped.
+      editingName = false
+    }
+  }
+
+  function confirmDelete(): void {
+    confirmingDelete = false
+    // Routed through `mutate` like every other action on this page, so a
+    // fast double-click on "Yes, delete" can't fire two DELETEs -- harmless
+    // server-side (the second just 404s), but the first press already
+    // disables the button via `busy`, same as everywhere else.
+    mutate(async () => {
+      await api.deleteReel(slug)
+      // No toast: the page itself is about to disappear, and a toast on a
+      // page nobody is looking at any more would be pointless.
+      navigate('/reels')
+    }, "Couldn't delete this reel")
+  }
 </script>
 
 <header class="mb-6 flex items-baseline justify-between">
   <div>
     <button class="font-mono text-xs text-neutral-400 hover:text-neutral-200"
             onclick={() => navigate('/reels')}>← Reels</button>
-    <h1 class="mt-1 text-xl font-semibold">{detail?.reel.name ?? slug}</h1>
+    {#if editingName}
+      <div class="mt-1 flex items-center gap-2">
+        <input
+          data-rename-input
+          class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-lg
+                 font-semibold"
+          bind:value={nameBuffer}
+          onkeydown={onNameKey}
+          aria-label="Reel name"
+        />
+        <!-- No onblur here at all -- see saveName's comment. Save and
+             Cancel are the only ways this field closes besides the keys
+             onNameKey already handles. -->
+        <button
+          data-rename-save
+          class="rounded border border-neutral-700 px-2 py-1 font-mono text-xs
+                 text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed
+                 disabled:opacity-40"
+          disabled={busy || normalizedReelName(nameBuffer) === null}
+          onclick={saveName}
+        >Save</button>
+        <button
+          class="font-mono text-xs text-neutral-400 hover:text-neutral-200"
+          onclick={cancelRename}
+        >Cancel</button>
+      </div>
+    {:else}
+      <h1 class="mt-1 flex items-center gap-2 text-xl font-semibold">
+        {detail?.reel.name ?? slug}
+        {#if detail}
+          <button
+            data-rename
+            class="font-mono text-xs font-normal text-neutral-400 hover:text-neutral-200"
+            onclick={startRename}
+          >rename</button>
+        {/if}
+      </h1>
+    {/if}
   </div>
   <JobsBadge />
 </header>
@@ -275,6 +379,36 @@
       title={blocked ?? ''}
       onclick={render}
     >{busy ? 'Working…' : blocked ? `Render — ${blocked}` : 'Render'}</button>
+
+    {#if confirmingDelete}
+      <!-- Inline, not a browser confirm(): the confirming press must name
+           what it destroys, which a confirm() dialog cannot show with any
+           formatting, and a stray Enter on the page cannot dismiss and
+           accidentally confirm it the way a native dialog's default button
+           could. -->
+      <span data-delete-confirm class="flex items-center gap-2 font-mono text-xs text-red-300">
+        {deleteConfirmationText(detail.reel.name, detail.reel.rendered_bytes)}
+        <button
+          data-delete-confirm-yes
+          class="rounded border border-red-800 px-2 py-1 text-red-200 hover:bg-red-900/40
+                 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={busy}
+          onclick={confirmDelete}
+        >Yes, delete</button>
+        <button
+          class="text-neutral-400 hover:text-neutral-200"
+          onclick={() => (confirmingDelete = false)}
+        >Cancel</button>
+      </span>
+    {:else}
+      <button
+        data-delete
+        class="rounded border border-red-900/60 px-3 py-1.5 font-mono text-xs text-red-300
+               hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={busy}
+        onclick={() => (confirmingDelete = true)}
+      >Delete reel</button>
+    {/if}
 
     <span class="ml-auto font-mono text-xs text-neutral-500">
       {items.length} clips{detail.reel.rendered_path && !detail.reel.dirty

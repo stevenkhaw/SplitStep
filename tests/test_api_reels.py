@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
+from bootleg.db.jobs import enqueue
 from bootleg.db.rallies import replace_rallies, set_point, set_star
 from bootleg.db.reels import create_reel, get_reel_by_slug, mark_rendered
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
@@ -384,3 +385,234 @@ def test_reel_media_is_still_servable_while_the_reel_is_dirty(client, conn, libr
     conn.commit()
 
     assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 200
+
+
+def test_rename_updates_the_name_and_leaves_everything_else(client, conn):
+    reel = client.post("/api/reels", json={"name": "old name"}).json()
+    mark_rendered(conn, reel["id"], f"reels/{reel['slug']}.mp4", set())
+    before = dict(get_reel_by_slug(conn, reel["slug"]))
+
+    body = client.post(f"/api/reels/{reel['slug']}/rename", json={"name": "  new name  "}).json()
+
+    # Stripped like ReelCreateBody -- the shared validator's job.
+    assert body["name"] == "new name"
+    assert body["slug"] == before["slug"]
+    after = dict(get_reel_by_slug(conn, reel["slug"]))
+    assert after["name"] == "new name"
+    assert after["slug"] == before["slug"]
+    assert after["dirty"] == before["dirty"]
+    assert after["rendered_path"] == before["rendered_path"]
+    assert after["rendered_at"] == before["rendered_at"]
+
+
+def test_rename_reports_the_same_shape_as_create(client, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    body = client.post(f"/api/reels/{reel['slug']}/rename", json={"name": "renamed"}).json()
+
+    assert body["item_count"] == 1
+
+
+def test_rename_rejects_a_blank_name(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    assert client.post(
+        f"/api/reels/{reel['slug']}/rename", json={"name": "   "}
+    ).status_code == 422
+
+
+def test_rename_404s_for_an_unknown_slug(client):
+    assert client.post("/api/reels/nope/rename", json={"name": "x"}).status_code == 404
+
+
+def test_delete_removes_the_row_and_cascades_its_items(client, conn, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+    assert conn.execute("SELECT COUNT(*) c FROM reel_items").fetchone()["c"] == 0
+
+
+def test_delete_unlinks_the_rendered_file(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": True}
+    assert not dst.exists()
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+
+
+def test_delete_reports_no_file_removed_when_never_rendered(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    assert client.delete(f"/api/reels/{reel['slug']}").json() == {
+        "deleted": True, "removed_file": False,
+    }
+
+
+# Finding: reel is rendered -> user clicks Render again -> the worker is
+# minutes into concat_clips -> user clicks Delete. Without this refusal the
+# OLD file is unlinked and the row is gone before the NEW render's
+# os.replace() lands, leaving a file in reels/ that nothing lists, nothing
+# references, and nothing in this codebase (Reclaim Space is Plan 3) can
+# reclaim.
+def test_delete_refuses_while_a_render_is_queued(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+    enqueue(conn, "reel", {"reel_id": reel["id"]})
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 409
+    # Neither half of the file-then-row delete ran -- refusing must be a
+    # true no-op, not a partial delete that merely stops short of the row.
+    assert dst.exists()
+    assert get_reel_by_slug(conn, reel["slug"]) is not None
+
+
+def test_delete_refuses_while_a_render_is_running(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+    job_id = enqueue(conn, "reel", {"reel_id": reel["id"]})
+    conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
+    conn.commit()
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 409
+    assert dst.exists()
+    assert get_reel_by_slug(conn, reel["slug"]) is not None
+
+
+def test_delete_succeeds_once_the_render_job_is_no_longer_pending(client, conn, library):
+    # A finished (or failed) job must not keep blocking Delete forever --
+    # only 'queued'/'running' count as in flight.
+    reel, dst = _rendered_reel(conn, library, "r")
+    job_id = enqueue(conn, "reel", {"reel_id": reel["id"]})
+    conn.execute("UPDATE jobs SET status = 'done' WHERE id = ?", (job_id,))
+    conn.commit()
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "removed_file": True}
+    assert not dst.exists()
+
+
+def test_delete_refusal_does_not_confuse_two_reels(client, conn, library):
+    # A render in flight for ONE reel must not block deleting a different,
+    # unrelated reel -- same json_extract match pending_reel_job relies on.
+    busy, _busy_dst = _rendered_reel(conn, library, "busy")
+    enqueue(conn, "reel", {"reel_id": busy["id"]})
+    idle, idle_dst = _rendered_reel(conn, library, "idle")
+
+    res = client.delete(f"/api/reels/{idle['slug']}")
+
+    assert res.status_code == 200
+    assert not idle_dst.exists()
+    assert get_reel_by_slug(conn, idle["slug"]) is None
+
+
+def test_delete_404s_for_an_unknown_slug(client):
+    assert client.delete("/api/reels/nope").status_code == 404
+
+
+def test_delete_does_not_unlink_an_absolute_rendered_path_outside_reels(
+    client, conn, tmp_path_factory
+):
+    # A rendered_path escaping `reels/` must never reach unlink(), whatever
+    # bad state put it there (hand edit, a bug in a future second writer).
+    outside = tmp_path_factory.mktemp("outside") / "secret.mp4"
+    outside.write_bytes(b"top secret contents")
+    reel = create_reel(conn, "leaky-absolute")
+    mark_rendered(conn, reel["id"], str(outside), set())
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert outside.exists()
+
+
+def test_delete_does_not_unlink_a_relative_rendered_path_escaping_reels(
+    client, conn, library, tmp_path
+):
+    outside = tmp_path.parent / f"outside-secret-{library.root.name}.mp4"
+    outside.write_bytes(b"other top secret contents")
+    reel = create_reel(conn, "leaky-relative")
+    mark_rendered(conn, reel["id"], f"reels/../../{outside.name}", set())
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert outside.exists()
+
+
+# Finding: rendered_file used to hand back a Path without checking it was
+# still a real file. api_get_reel's rendered.stat().st_size then raised
+# FileNotFoundError -> 500 on every GET the moment a rendered_path's file
+# was deleted out from under it (the user freeing space in Finder, this
+# feature's whole motivation) -- and Reel.svelte renders {#if error} ahead
+# of {:else if detail}, so that 500 hid the toolbar and its Delete button
+# too, leaving the reel permanently stuck.
+def test_reel_detail_is_still_servable_when_the_rendered_file_is_gone(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+    dst.unlink()
+
+    res = client.get(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json()["reel"]["rendered_bytes"] is None
+
+
+def test_delete_succeeds_when_the_rendered_file_is_already_gone(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+    dst.unlink()
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+
+
+# Finding 6: rendered_path = "reels" itself (or a directory inside it)
+# passes the containment check cleanly -- a path is relative to itself --
+# and used to reach unlink(), which raises IsADirectoryError/PermissionError
+# on a directory instead of removing anything. That 500 fired before
+# delete_reel ran, so the row was stuck with no way to remove it through the
+# app. rendered_file's is_file() check closes it before unlink() is called.
+def test_delete_does_not_500_on_a_directory_rendered_path(client, conn, library):
+    reel = create_reel(conn, "leaky-dir")
+    mark_rendered(conn, reel["id"], "reels", set())
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert library.reels_dir.is_dir()
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+
+
+def test_reel_detail_reports_rendered_bytes(client, conn, library):
+    reel, _dst = _rendered_reel(conn, library, "r", data=b"0123456789")
+
+    body = client.get(f"/api/reels/{reel['slug']}").json()
+
+    assert body["reel"]["rendered_bytes"] == 10
+
+
+def test_reel_detail_rendered_bytes_is_none_when_unrendered(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    body = client.get(f"/api/reels/{reel['slug']}").json()
+    assert body["reel"]["rendered_bytes"] is None
+
+
+def test_reel_list_does_not_report_rendered_bytes(client, conn, library):
+    # The list route must not stat() every reel on every page load -- see
+    # api_get_reel's comment. Key absent entirely, not present-and-null,
+    # confirming list_reels was never touched by this change.
+    _rendered_reel(conn, library, "r")
+    listed = client.get("/api/reels").json()
+    assert "rendered_bytes" not in listed[0]

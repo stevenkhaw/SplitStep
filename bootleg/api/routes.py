@@ -25,7 +25,6 @@ from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     NOTE_MAX_CHARS,
     list_rallies,
-    mark_reviewed,
     replace_rallies,
     set_bounds,
     set_note,
@@ -37,10 +36,13 @@ from bootleg.db.rallies import (
 from bootleg.db.reels import (
     add_items,
     create_reel,
+    delete_reel,
     find_reel_by_name,
+    get_reel,
     get_reel_by_slug,
     list_reels,
     remove_item,
+    rename_reel,
     set_order,
 )
 from bootleg.db.sessions import (
@@ -59,7 +61,13 @@ from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError, rotation_filter
-from bootleg.reels import missing_clip_count, plan_reel_export, resolve_items
+from bootleg.reels import (
+    delete_rendered_file,
+    missing_clip_count,
+    plan_reel_export,
+    rendered_file,
+    resolve_items,
+)
 from bootleg.setup import queue_setup
 
 from .media import range_response
@@ -176,19 +184,34 @@ class ExportBody(BaseModel):
         return v
 
 
-class ReelCreateBody(BaseModel):
+class _ReelNameBody(BaseModel):
+    """`name` validation shared by create and rename, so the two can never
+    drift apart: a name of pure whitespace must be refused identically in
+    both places rather than reimplemented -- and forgotten -- in one of them.
+    """
+
     name: str
 
     @field_validator("name")
     @classmethod
     def check_name(cls, v: str) -> str:
-        # Stripped here rather than at the call site so the slug and the
-        # displayed name are derived from the same string -- a name of pure
-        # whitespace would otherwise slug to "reel" and render as blank.
+        # Stripped here rather than at the call site: create derives the
+        # slug from this same string, so pure whitespace must not slip
+        # through and slug to the generic "reel" fallback. Rename has no
+        # slug at stake, but must refuse the same input for the same
+        # reason -- a blank-looking name nobody actually chose.
         name = v.strip()
         if not name:
             raise ValueError("a reel needs a name")
         return name
+
+
+class ReelCreateBody(_ReelNameBody):
+    pass
+
+
+class ReelRenameBody(_ReelNameBody):
+    pass
 
 
 class SpanBody(BaseModel):
@@ -359,26 +382,18 @@ def api_note(rally_id: str, body: NoteBody, request: Request):
     return {"ok": True}
 
 
-@router.post("/api/rallies/{rally_id}/reviewed")
-def api_reviewed(rally_id: str, request: Request):
-    conn = _conn(request)
-    session_id = _session_id_for_rally(conn, rally_id)
-    mark_reviewed(conn, rally_id)
-    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
-
-
 @router.post("/api/rallies/{rally_id}/seen")
 def api_seen(rally_id: str, request: Request):
-    """What persist.ts's skip case calls on a plain right-arrow -- see
-    set_seen's docstring for why this must not be mark_reviewed.
+    """What persist.ts's skip case calls on a plain right-arrow: "a human
+    looked at this", never "a human ruled on this". See set_seen.
 
     Refreshes session status like star/reject/point do, and unlike the note
     route -- because since migration 008 the status is computed from
     `seen_at`, which is exactly the column this route writes. Skipping the
-    last unseen rally in a session is a perfectly ordinary way to finish a
-    pass, and it is the ONLY way to finish one without ruling on every
-    rally, so omitting the refresh here would leave a fully-skimmed session
-    stuck on 'ready' with nothing left to click that would ever move it.
+    last unseen rally is an ordinary way to finish a pass, and the only way
+    to finish one without ruling on anything, so omitting the refresh would
+    leave a fully-skimmed session stuck on 'ready' with nothing left to
+    click that could ever move it.
     """
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)
@@ -942,8 +957,13 @@ def api_create_reel(body: ReelCreateBody, request: Request):
 @router.get("/api/reels/{slug}")
 def api_get_reel(slug: str, request: Request):
     conn = _conn(request)
+    library = _library(request)
     reel = _reel_or_404(conn, slug)
-    items = resolve_items(_library(request), conn, reel["id"])
+    items = resolve_items(library, conn, reel["id"])
+    # rendered_bytes on the DETAIL route only, never the list one: it needs
+    # a stat() per reel, and the list page renders every reel on every page
+    # load -- fine for one row here, a needless syscall storm there.
+    rendered = rendered_file(library, reel)
     return {
         # item_count so a single reel has the SAME shape as a listed one.
         # The frontend shares one `Reel` type across both routes, so a
@@ -951,9 +971,66 @@ def api_get_reel(slug: str, request: Request):
         # promised a number -- silent until something rendered it. Taken
         # from the already-resolved items rather than a second COUNT(*), so
         # the two can never disagree.
-        "reel": {**dict(reel), "item_count": len(items)},
+        "reel": {
+            **dict(reel),
+            "item_count": len(items),
+            "rendered_bytes": rendered.stat().st_size if rendered is not None else None,
+        },
         "items": [_item_json(i) for i in items],
     }
+
+
+@router.post("/api/reels/{slug}/rename")
+def api_rename_reel(slug: str, body: ReelRenameBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    rename_reel(conn, reel["id"], body.name)
+    updated = get_reel(conn, reel["id"])
+    # Same single-reel shape as api_create_reel: item_count from the
+    # already-resolved items, no second COUNT(*).
+    return {
+        **dict(updated),
+        "item_count": len(resolve_items(_library(request), conn, reel["id"])),
+    }
+
+
+@router.delete("/api/reels/{slug}")
+def api_delete_reel(slug: str, request: Request):
+    """Delete a reel and, if it has one, its rendered file -- file first.
+
+    A crash between the two steps leaves either a stray file with no row
+    pointing at it, or a stray row whose rendered_path points at a file
+    that is already gone. Only one of those is recoverable through this
+    app: a stray row is still visible in the reel list and Delete can
+    simply be pressed again (delete_rendered_file already tolerates a
+    rendered_path with nothing behind it, returning removed_file=False).
+    A stray file has no row left to find it by, and nothing in this codebase
+    scans `reels/` for orphans -- that is Reclaim Space, deferred to Plan 3
+    (see CLAUDE.md). Deleting the row first would trade a recoverable leftover
+    for an invisible one, silently defeating the whole point of this feature:
+    the space it exists to give back.
+
+    Refuses (409) while a render is queued or running for this reel. Without
+    this, render -> render again -> delete reaches a state where the file
+    this call unlinks is the OLD render, not the one `concat_clips` is still
+    minutes into writing: the row is gone by the time that job's
+    `os.replace()` lands the new file, `mark_rendered`'s UPDATE then matches
+    zero rows (correctly -- it must not resurrect a deleted reel), and the
+    file it just wrote sits in `reels/` with no row pointing at it and no
+    scanner (Reclaim Space, Plan 3) able to find it. Checking first is the
+    same idiom `api_render_reel` already uses for its own precondition (the
+    "N clips not cut yet" 409); this is that idiom applied to a second one.
+    """
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    if jobq.pending_reel_job(conn, reel["id"]) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A render is in progress for this reel. Wait for it to finish, then delete.",
+        )
+    removed_file = delete_rendered_file(_library(request), reel)
+    delete_reel(conn, reel["id"])
+    return {"deleted": True, "removed_file": removed_file}
 
 
 @router.post("/api/reels/{slug}/items")
@@ -1058,27 +1135,24 @@ def api_reel_media(slug: str, request: Request, range: str | None = Header(defau
     (there is no filesystem path built out of client input to sanitize), and
     it gives the right 404s for free: an unrendered reel has rendered_path
     IS NULL, so it 404s the same way an unknown slug does, with no special
-    case needed here. range_response itself 404s a rendered_path whose file
-    has since been deleted, so that case needs no separate check either.
+    case needed here. A rendered_path whose file has since been deleted (or
+    that names a directory) 404s the same way too, now that `rendered_file`
+    itself requires `is_file()` -- this route's own `path is None` branch
+    catches that case before `range_response` would ever get a chance to.
+
+    The containment check itself -- resolve, then compare, because
+    `Path.__truediv__` silently discards the left operand when the right is
+    absolute (`library_root / "/etc/passwd"` is just `Path("/etc/passwd")`)
+    -- lives in `rendered_file`, not here. `delete_rendered_file` needs the
+    exact same question answered before it unlinks anything, and two copies
+    of a security-relevant check is how they drift; see `rendered_file`'s
+    docstring for the full reasoning.
     """
     reel = get_reel_by_slug(_conn(request), slug)
-    if reel is None or reel["rendered_path"] is None:
+    if reel is None:
         raise HTTPException(status_code=404, detail="Reel not found")
-    library_root = _library(request).root.resolve()
-    path = (library_root / reel["rendered_path"]).resolve()
-    # `Path.__truediv__` silently discards the left operand when the right is
-    # absolute -- library_root / "/etc/passwd" is just Path("/etc/passwd") --
-    # so a `rendered_path` that is ever absolute, or relative but escaping via
-    # "..", turns into arbitrary file disclosure with no traversal-looking
-    # input on this request at all. Today that can't happen: mark_rendered is
-    # the only writer of rendered_path in the whole tree, and it always stores
-    # a library-relative path derived from slugify(). But that's a guarantee
-    # held by one write site's good behaviour, not by anything at the site
-    # that actually opens the file -- a second writer, a bug in mark_rendered,
-    # or a hand-edited row would defeat it silently. resolve() before the
-    # comparison collapses ".." segments and follows symlinks, so both the
-    # absolute and the escaping-relative cases are caught the same way.
-    if not path.is_relative_to(library_root):
+    path = rendered_file(_library(request), reel)
+    if path is None:
         raise HTTPException(status_code=404, detail="Reel not found")
     return range_response(path, range)
 

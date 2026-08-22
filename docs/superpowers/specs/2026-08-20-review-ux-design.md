@@ -62,6 +62,18 @@ so `S` and `X` stamp it server-side today. The fix is to make `persistAction`'s
 persists nothing. Because it can no longer fail, its revert path is unreachable —
 `revert()` reads `previousStarred`/`previousRejected` and is unaffected.
 
+**Superseded in part, 2026-08-22.** The `reviewed_at` half of this section
+stands: `skip` still never marks a rally judged, and only `S`/`X`/`P` stamp
+`reviewed_at`. The *session-status* half does not. With one column doing both
+jobs there was no way to say "walked through" without also saying "judged", so
+2.4 had to refuse both together. Migration 008 split them: `skip` now stamps a
+separate `seen_at`, the review queue resumes from it (`QueueController`'s
+`firstUnseen`, which is what stopped a skipped-but-unjudged rally being
+returned to on every open), and `refresh_session_review_status` reads it — so
+skimming a pass end to end does now finish the session, with nothing judged.
+That is deliberate: a pass you looked all the way through is a pass you
+finished. `POST /api/rallies/{id}/seen` is the endpoint behind it.
+
 ### 2.5 A finished clip replays instead of advancing
 
 `onended={() => apply(queue.skip())}` becomes `deck.replay()`. Advancing stays

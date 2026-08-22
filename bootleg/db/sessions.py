@@ -155,17 +155,23 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
 
 
 def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> str:
-    """Flip a session to 'reviewed' once no rally in it is unseen, without
-    disturbing a status this pass does not own.
+    """Flip a session to 'reviewed' once every rally in it has been ruled on,
+    without disturbing a status this pass does not own.
 
-    Spec 6: every exit path from a rally counts as seen -- starring,
-    rejecting, skipping, and auto-advance alike. That is `seen_at`, not
-    `reviewed_at`, and this used to read the wrong one. The two were a
-    single column until migration 008 split them, and once persist.ts
-    stopped writing anything on a plain right-arrow, a session could no
-    longer reach 'reviewed' by being fully skimmed -- only by having every
-    rally explicitly ruled on, which is not what this is for. Judging is
-    what `reviewed_at` records; having looked is what closes out a pass.
+    Spec 6 counted every exit path from a rally as seen -- starring,
+    rejecting, skipping, auto-advance. Review-UX 2.4 then narrowed it,
+    because `->` is pressed on every clip merely to walk the pass and
+    stamping `reviewed_at` there would call a session reviewed with no
+    judgement in it. Correct, and still true: only a ruling stamps
+    reviewed_at (set_star/set_point/set_rejected, each through the same
+    COALESCE so the first wins; set_note and labelling abstain).
+
+    What that narrowing had no way to express, with one column doing both
+    jobs, is that walking a pass end to end IS finishing it. Migration 008
+    split the column, and this now reads `seen_at`: a session is done when
+    it has been looked through, whether or not anything in it was worth
+    starring. Superseding 2.4's session-status half is deliberate
+    (2026-08-22); its reviewed_at half stands untouched.
 
     This is one guarded UPDATE, not a read-then-write. Every HTTP request
     runs on its own thread with its own connection (see

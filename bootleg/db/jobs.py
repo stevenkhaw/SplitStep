@@ -61,6 +61,27 @@ def has_pending_clip(
     return row is not None
 
 
+def pending_reel_job(conn: sqlite3.Connection, reel_id: str) -> sqlite3.Row | None:
+    """The queued or running 'reel' job for `reel_id`, if there is one.
+
+    Two callers, one query. `enqueue_reel_once` needs the row (for its
+    `job_id`) to make a second render click return the in-flight job rather
+    than queue a duplicate; `api_delete_reel` needs only to know one exists,
+    to refuse a delete that would otherwise race `concat_clips` and orphan
+    the file it is about to `os.replace()` into place (`mark_rendered`'s
+    UPDATE would match zero rows once the row is gone -- correctly not
+    resurrecting a deleted reel, but leaving that file with nothing
+    referencing it). Extracted rather than inlined a second time: this
+    project already removed one duplicate of this exact query once, back
+    when `enqueue_reel_once` was its only caller.
+    """
+    return conn.execute(
+        "SELECT id FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
+        " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
+        (reel_id,),
+    ).fetchone()
+
+
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     # BEGIN IMMEDIATE takes the write lock before the SELECT runs. A bare `with
     # conn:` does not: legacy sqlite3 isolation defers BEGIN until the first DML
@@ -109,11 +130,7 @@ def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool
     """
     conn.execute("BEGIN IMMEDIATE")
     try:
-        existing = conn.execute(
-            "SELECT id FROM jobs WHERE type = 'reel' AND status IN ('queued', 'running')"
-            " AND json_extract(payload, '$.reel_id') = ? LIMIT 1",
-            (reel_id,),
-        ).fetchone()
+        existing = pending_reel_job(conn, reel_id)
         if existing is not None:
             conn.commit()
             return existing["id"], True

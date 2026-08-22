@@ -4,6 +4,7 @@ import type {
   LabelRecord,
   Preset,
   Reel,
+  ReelDeleteResult,
   ReelDetail,
   ReelMergeResult,
   RenderResult,
@@ -48,6 +49,10 @@ export const api = {
   createReel: (name: string) =>
     req<Reel>('/api/reels', { method: 'POST', body: JSON.stringify({ name }) }),
   getReel: (slug: string) => req<ReelDetail>(`/api/reels/${slug}`),
+  renameReel: (slug: string, name: string) =>
+    req<Reel>(`/api/reels/${slug}/rename`, { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteReel: (slug: string) =>
+    req<ReelDeleteResult>(`/api/reels/${slug}`, { method: 'DELETE' }),
   addReelItems: (slug: string, items: SpanRef[]) =>
     req<ReelMergeResult>(`/api/reels/${slug}/items`, {
       method: 'POST',
@@ -79,9 +84,7 @@ export const api = {
   reject: (id: string, rejected: boolean) => post(`/api/rallies/${id}/reject`, { rejected }),
   point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
   setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
-  reviewed: (id: string) => post(`/api/rallies/${id}/reviewed`),
   // Called on every plain right-arrow (see persist.ts's skip case) --
-  // "a human looked at this", independent of reviewed_at's "a human ruled
   // on this". See bootleg/db/rallies.py::set_seen.
   seen: (id: string) => post(`/api/rallies/${id}/seen`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>

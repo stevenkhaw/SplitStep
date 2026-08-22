@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
-from bootleg.db.rallies import list_rallies, mark_reviewed, replace_rallies
+from bootleg.db.rallies import list_rallies, replace_rallies, set_star
 from bootleg.db.schema import connect, migrate
 from bootleg.db.sessions import (
     add_source,
@@ -52,23 +52,20 @@ def seeded(conn):
     return {"session_id": session_id, "source_id": source_id, "idx": idx}
 
 
-def test_reviewed_endpoint_sets_reviewed_at(client, conn, seeded):
-    rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
-    r = client.post(f"/api/rallies/{rally_id}/reviewed")
-    assert r.status_code == 200
-    assert list_rallies(conn, seeded["session_id"])[0]["reviewed_at"] is not None
-
-
-def test_session_stays_unreviewed_until_every_rally_is_seen(client, conn, seeded):
+def test_session_stays_unreviewed_until_every_rally_is_ruled_on(client, conn, seeded):
     rallies = list_rallies(conn, seeded["session_id"])
-    r = client.post(f"/api/rallies/{rallies[0]['id']}/reviewed")
+    r = client.post(f"/api/rallies/{rallies[0]['id']}/star", json={"starred": True})
     assert r.json()["session_status"] != "reviewed"
     assert get_session(conn, seeded["session_id"])["status"] != "reviewed"
 
 
-def test_session_becomes_reviewed_when_all_rallies_seen(client, conn, seeded):
+def test_marking_every_rally_a_point_reviews_the_session(client, conn, seeded):
+    """point is a ruling like star and reject, so a reviewer who marks every
+    point of a tiebreaker and stars none must still end with a reviewed
+    session -- see set_point.
+    """
     for rally in list_rallies(conn, seeded["session_id"]):
-        r = client.post(f"/api/rallies/{rally['id']}/reviewed")
+        r = client.post(f"/api/rallies/{rally['id']}/point", json={"point": True})
     assert r.json()["session_status"] == "reviewed"
     assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
 
@@ -87,15 +84,11 @@ def test_rejected_rallies_do_not_block_reviewed_status(client, conn, seeded):
     assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
 
 
-def test_reviewed_on_unknown_rally_is_404(client):
-    assert client.post("/api/rallies/nope/reviewed").status_code == 404
-
-
 def test_seen_endpoint_sets_seen_at_but_not_reviewed_at(client, conn, seeded):
     """The route persist.ts's skip case calls on every plain right-arrow.
-    Modeled on api_reviewed but must NOT be a ruling -- reviewed_at is what
-    session status is computed from, and marking every skip a ruling is
-    exactly the bug this endpoint exists to avoid re-introducing.
+    It must never be a ruling: reviewed_at is what a star/reject/point
+    means, and treating every right-arrow as one is exactly the bug the
+    seen_at/reviewed_at split exists to prevent.
     """
     rally_id = list_rallies(conn, seeded["session_id"])[0]["id"]
     r = client.post(f"/api/rallies/{rally_id}/seen")
@@ -155,12 +148,12 @@ def test_detecting_session_is_not_touched_by_review_actions(client, conn, seeded
 
     r = None
     for rally in list_rallies(conn, seeded["session_id"]):
-        r = client.post(f"/api/rallies/{rally['id']}/reviewed")
+        r = client.post(f"/api/rallies/{rally['id']}/star", json={"starred": True})
     assert r.json()["session_status"] == "detecting"
     assert get_session(conn, seeded["session_id"])["status"] == "detecting"
 
 
-def test_failed_session_survives_star_reject_and_reviewed(client, conn, seeded):
+def test_failed_session_survives_star_reject_and_point(client, conn, seeded):
     """A review action must never mask a source that failed to process."""
     set_session_status(conn, seeded["session_id"], "failed")
     rallies = list_rallies(conn, seeded["session_id"])
@@ -173,7 +166,7 @@ def test_failed_session_survives_star_reject_and_reviewed(client, conn, seeded):
     assert r2.json()["session_status"] == "failed"
     assert get_session(conn, seeded["session_id"])["status"] == "failed"
 
-    r3 = client.post(f"/api/rallies/{rallies[0]['id']}/reviewed")
+    r3 = client.post(f"/api/rallies/{rallies[0]['id']}/point", json={"point": True})
     assert r3.json()["session_status"] == "failed"
     assert get_session(conn, seeded["session_id"])["status"] == "failed"
 
@@ -182,7 +175,7 @@ def test_unstarring_a_reviewed_session_stays_reviewed(client, conn, seeded):
     """Un-starring does not un-see a rally."""
     rallies = list_rallies(conn, seeded["session_id"])
     client.post(f"/api/rallies/{rallies[0]['id']}/star", json={"starred": True})
-    client.post(f"/api/rallies/{rallies[1]['id']}/reviewed")
+    client.post(f"/api/rallies/{rallies[1]['id']}/reject", json={"rejected": True})
     assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
 
     r = client.post(f"/api/rallies/{rallies[0]['id']}/star", json={"starred": False})
@@ -213,7 +206,7 @@ def test_refresh_uses_a_single_atomic_write(conn, seeded):
     computed and applied in exactly one write statement.
     """
     for rally in list_rallies(conn, seeded["session_id"]):
-        mark_reviewed(conn, rally["id"])
+        set_star(conn, rally["id"], True)
 
     statements = []
     conn.set_trace_callback(statements.append)
@@ -338,7 +331,7 @@ def test_resegment_drops_a_reviewed_session_back_to_ready(client, conn, library,
     """
     _write_features(library, seeded["session_id"], seeded["idx"], n=40)
     for rally in list_rallies(conn, seeded["session_id"]):
-        mark_reviewed(conn, rally["id"])
+        set_star(conn, rally["id"], True)
     refresh_session_review_status(conn, seeded["session_id"])
     assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
 
@@ -358,7 +351,7 @@ def test_resegment_producing_zero_intervals_also_leaves_the_session_ready(
     """
     _write_features(library, seeded["session_id"], seeded["idx"], n=40)
     for rally in list_rallies(conn, seeded["session_id"]):
-        mark_reviewed(conn, rally["id"])
+        set_star(conn, rally["id"], True)
     refresh_session_review_status(conn, seeded["session_id"])
     assert get_session(conn, seeded["session_id"])["status"] == "reviewed"
 

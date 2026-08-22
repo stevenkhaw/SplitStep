@@ -111,3 +111,58 @@ export function reelStateLabel(reel: Reel): string {
 export function canWatchRendered(reel: Reel): boolean {
   return reel.rendered_path !== null
 }
+
+/**
+ * A byte count as a human-readable size, e.g. `725 MB`.
+ *
+ * Binary units (1024, not 1000): that is what `du`/Finder/Explorer report,
+ * and this number exists to be compared against what the user already sees
+ * on disk -- disagreeing with that by using decimal units would make the
+ * delete confirmation look wrong even when it is technically correct.
+ *
+ * One decimal place below 10 of a unit, none above: `1.4 GB` carries a
+ * decision-relevant digit (is this the big reel or the small one?), while
+ * `725.4 MB` does not -- the confirmation is read once, under a second,
+ * before a destructive click.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value)
+  return `${rounded} ${units[unit]}`
+}
+
+/**
+ * What the inline delete confirmation names -- the reel by name, and its
+ * render's size when there is one to reclaim.
+ *
+ * `renderedBytes === null` covers both "never rendered" and "rendered_path
+ * pointed outside reels/ and rendered_file refused it" (see bootleg/reels.py):
+ * both mean the same thing to a reviewer deciding whether to press the
+ * button -- there is no file this delete will reclaim -- so the wording
+ * collapses them rather than trying to explain a distinction that only
+ * matters server-side.
+ */
+export function deleteConfirmationText(name: string, renderedBytes: number | null): string {
+  const target = renderedBytes === null ? '' : ` and its ${formatBytes(renderedBytes)} render`
+  return `Delete "${name}"${target}? This cannot be undone.`
+}
+
+/**
+ * A rename input, trimmed -- or null if there is nothing worth saving.
+ *
+ * Mirrors the server's own validator (`_ReelNameBody.check_name` in
+ * bootleg/api/routes.py) so the Save button is disabled for exactly the
+ * input the POST would otherwise reject with 422, rather than letting a
+ * click round-trip to the server just to learn that.
+ */
+export function normalizedReelName(input: string): string | null {
+  const trimmed = input.trim()
+  return trimmed === '' ? null : trimmed
+}
