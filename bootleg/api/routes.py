@@ -989,9 +989,25 @@ def api_delete_reel(slug: str, request: Request):
     (see CLAUDE.md). Deleting the row first would trade a recoverable leftover
     for an invisible one, silently defeating the whole point of this feature:
     the space it exists to give back.
+
+    Refuses (409) while a render is queued or running for this reel. Without
+    this, render -> render again -> delete reaches a state where the file
+    this call unlinks is the OLD render, not the one `concat_clips` is still
+    minutes into writing: the row is gone by the time that job's
+    `os.replace()` lands the new file, `mark_rendered`'s UPDATE then matches
+    zero rows (correctly -- it must not resurrect a deleted reel), and the
+    file it just wrote sits in `reels/` with no row pointing at it and no
+    scanner (Reclaim Space, Plan 3) able to find it. Checking first is the
+    same idiom `api_render_reel` already uses for its own precondition (the
+    "N clips not cut yet" 409); this is that idiom applied to a second one.
     """
     conn = _conn(request)
     reel = _reel_or_404(conn, slug)
+    if jobq.pending_reel_job(conn, reel["id"]) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A render is in progress for this reel. Wait for it to finish, then delete.",
+        )
     removed_file = delete_rendered_file(_library(request), reel)
     delete_reel(conn, reel["id"])
     return {"deleted": True, "removed_file": removed_file}
@@ -1099,8 +1115,10 @@ def api_reel_media(slug: str, request: Request, range: str | None = Header(defau
     (there is no filesystem path built out of client input to sanitize), and
     it gives the right 404s for free: an unrendered reel has rendered_path
     IS NULL, so it 404s the same way an unknown slug does, with no special
-    case needed here. range_response itself 404s a rendered_path whose file
-    has since been deleted, so that case needs no separate check either.
+    case needed here. A rendered_path whose file has since been deleted (or
+    that names a directory) 404s the same way too, now that `rendered_file`
+    itself requires `is_file()` -- this route's own `path is None` branch
+    catches that case before `range_response` would ever get a chance to.
 
     The containment check itself -- resolve, then compare, because
     `Path.__truediv__` silently discards the left operand when the right is

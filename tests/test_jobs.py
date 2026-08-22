@@ -12,6 +12,7 @@ from bootleg.db.jobs import (
     finish,
     has_pending_job,
     heartbeat,
+    pending_reel_job,
     reclaim_stale,
     set_progress,
 )
@@ -277,6 +278,36 @@ def test_enqueue_reel_once_ignores_a_finished_render(conn):
     new_id, already_running = enqueue_reel_once(conn, "reel-1")
     assert new_id != job_id
     assert already_running is False
+
+
+def test_pending_reel_job_is_none_when_nothing_queued(conn):
+    assert pending_reel_job(conn, "reel-1") is None
+
+
+def test_pending_reel_job_finds_a_queued_job(conn):
+    job_id, _ = enqueue_reel_once(conn, "reel-1")
+    assert pending_reel_job(conn, "reel-1")["id"] == job_id
+
+
+def test_pending_reel_job_finds_a_running_job(conn):
+    job_id, _ = enqueue_reel_once(conn, "reel-1")
+    conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
+    conn.commit()
+    assert pending_reel_job(conn, "reel-1")["id"] == job_id
+
+
+def test_pending_reel_job_ignores_a_finished_job(conn):
+    job_id, _ = enqueue_reel_once(conn, "reel-1")
+    finish(conn, job_id)
+    assert pending_reel_job(conn, "reel-1") is None
+
+
+def test_pending_reel_job_does_not_confuse_two_reels(conn):
+    # Matched via json_extract, same as enqueue_reel_once's own check --
+    # api_delete_reel must not refuse deleting reel-2 because reel-1 has a
+    # render in flight.
+    enqueue_reel_once(conn, "reel-1")
+    assert pending_reel_job(conn, "reel-2") is None
 
 
 def _enqueue_reel_once_after_barrier(db_path, idx, barrier, results):

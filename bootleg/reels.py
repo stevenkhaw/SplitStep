@@ -118,11 +118,30 @@ def rendered_file(library: Library, reel: sqlite3.Row) -> Path | None:
     check here, rather than re-inlining it at api_reel_media and again at
     delete_rendered_file, is what keeps a read path and a delete path from
     drifting on a security-relevant check.
+
+    Also requires `is_file()`. Two rows this rejects that containment alone
+    would pass through: a `rendered_path` whose file was deleted out from
+    under it (the user freeing space in Finder -- this feature's whole
+    reason to exist), and one naming a directory under `reels/` (`reels/`
+    itself, say) -- a path is relative to itself, so containment alone
+    cannot catch that. The first used to reach `api_get_reel`'s
+    `rendered.stat().st_size`, which raises `FileNotFoundError` -- a 500
+    on every subsequent GET, with no Delete button in the UI's error state
+    to remove the row by (see Reel.svelte). The second used to reach
+    `delete_rendered_file`'s `unlink()`, which raises
+    `IsADirectoryError`/`PermissionError` instead -- a 500 that fires before
+    `delete_reel`, leaving THAT row stuck too. Checking here instead means
+    every caller sees a plain None for "nothing real to serve or delete",
+    exactly as if the reel had never been rendered: `api_get_reel` folds it
+    into `rendered_bytes: None`, and `api_reel_media`'s existing
+    `path is None` branch 404s it without needing a special case of its own.
     """
     if reel["rendered_path"] is None:
         return None
     path = (library.root / reel["rendered_path"]).resolve()
     if not path.is_relative_to(library.reels_dir.resolve()):
+        return None
+    if not path.is_file():
         return None
     return path
 

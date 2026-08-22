@@ -250,6 +250,42 @@ def test_rendered_file_rejects_an_escaping_relative_path(library, conn, tmp_path
     assert rendered_file(library, reel) is None
 
 
+# Finding: rendered_file returned a Path without checking the file was
+# still there, so api_get_reel's rendered.stat().st_size raised
+# FileNotFoundError -> 500 the moment a rendered_path's file was deleted out
+# from under it -- the user freeing space in Finder, this feature's whole
+# motivation.
+def test_rendered_file_rejects_a_file_deleted_out_from_under_it(library, conn):
+    reel = create_reel(conn, "r")
+    reel, dst = _render(library, conn, reel)
+    dst.unlink()
+
+    assert rendered_file(library, reel) is None
+
+
+# Finding 6: a directory passes the containment check cleanly -- a path is
+# relative to itself -- and used to reach delete_rendered_file's unlink(),
+# which raises IsADirectoryError/PermissionError on a directory rather than
+# removing anything. That 500 fired before delete_reel ran, leaving the row
+# stuck with no way to remove it through the app.
+def test_rendered_file_rejects_a_directory(library, conn):
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], "reels", set())
+    reel = get_reel(conn, reel["id"])
+
+    assert rendered_file(library, reel) is None
+    assert library.reels_dir.is_dir()
+
+
+def test_delete_rendered_file_leaves_a_directory_untouched(library, conn):
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], "reels", set())
+    reel = get_reel(conn, reel["id"])
+
+    assert delete_rendered_file(library, reel) is False
+    assert library.reels_dir.is_dir()
+
+
 def test_delete_rendered_file_removes_a_contained_render(library, conn):
     reel = create_reel(conn, "r")
     reel, dst = _render(library, conn, reel)
