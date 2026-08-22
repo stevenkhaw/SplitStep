@@ -268,14 +268,6 @@ def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
     conn.commit()
 
 
-def mark_reviewed(conn: sqlite3.Connection, rally_id: str) -> None:
-    conn.execute(
-        "UPDATE rallies SET reviewed_at = COALESCE(reviewed_at, ?) WHERE id = ?",
-        (_now(), rally_id),
-    )
-    conn.commit()
-
-
 def set_bounds(conn: sqlite3.Connection, rally_id: str,
                start_ms: int, end_ms: int) -> None:
     """Update working bounds only. det_* columns are immutable training data."""

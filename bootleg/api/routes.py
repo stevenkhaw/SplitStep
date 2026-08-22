@@ -25,7 +25,6 @@ from bootleg.db.presets import create_preset, get_preset, list_presets
 from bootleg.db.rallies import (
     NOTE_MAX_CHARS,
     list_rallies,
-    mark_reviewed,
     replace_rallies,
     set_bounds,
     set_note,
@@ -356,14 +355,6 @@ def api_note(rally_id: str, body: NoteBody, request: Request):
     # the session's review status. Same reasoning the label route follows.
     set_note(conn, rally_id, body.note)
     return {"ok": True}
-
-
-@router.post("/api/rallies/{rally_id}/reviewed")
-def api_reviewed(rally_id: str, request: Request):
-    conn = _conn(request)
-    session_id = _session_id_for_rally(conn, rally_id)
-    mark_reviewed(conn, rally_id)
-    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 
 @router.post("/api/rallies/{rally_id}/bounds")

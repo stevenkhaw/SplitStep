@@ -8,7 +8,6 @@ function api(overrides: Partial<PersistApi> = {}): PersistApi {
     star: vi.fn().mockResolvedValue(undefined),
     reject: vi.fn().mockResolvedValue(undefined),
     point: vi.fn().mockResolvedValue(undefined),
-    reviewed: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -125,7 +124,6 @@ describe('persistAction', () => {
     const a = api({
       star: vi.fn().mockRejectedValue(new Error('network down')),
       reject: vi.fn().mockRejectedValue(new Error('network down')),
-      reviewed: vi.fn().mockRejectedValue(new Error('network down')),
     })
     const outcome = await persistAction(skipAction, a)
     expect(outcome).toEqual({ ok: true })
@@ -174,14 +172,17 @@ describe('persistAction — skip no longer marks a rally reviewed', () => {
 
   it('calls nothing and reports success', async () => {
     // `→` is now pressed on every clip, so persisting it as "reviewed" would
-    // mark a whole session reviewed just for walking through it. Only S and X
-    // count -- and the server already stamps reviewed_at inside set_star and
-    // set_rejected, so nothing is lost by dropping this call.
+    // mark a whole session reviewed just for walking through it. Only S, X and
+    // P count, and the server stamps reviewed_at inside set_star/set_rejected/
+    // set_point, so nothing is lost by dropping the call. It used to also
+    // assert `a.reviewed` was untouched; PersistApi has no such member now
+    // (the endpoint behind it was deleted), so the three below ARE every
+    // request a skip could possibly make -- "calls nothing" is exact.
     const a = api()
     const out = await persistAction(skipAction, a)
     expect(out).toEqual({ ok: true })
-    expect(a.reviewed).not.toHaveBeenCalled()
     expect(a.star).not.toHaveBeenCalled()
     expect(a.reject).not.toHaveBeenCalled()
+    expect(a.point).not.toHaveBeenCalled()
   })
 })

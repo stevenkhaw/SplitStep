@@ -155,11 +155,15 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
 
 
 def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> str:
-    """Flip a session to 'reviewed' once no rally in it is unseen, without
-    disturbing a status this pass does not own.
+    """Flip a session to 'reviewed' once every rally in it has been ruled on,
+    without disturbing a status this pass does not own.
 
-    Spec 6: every exit path from a rally sets reviewed_at -- starring,
-    rejecting, skipping, and auto-advance all count as seen.
+    Only a ruling stamps reviewed_at: set_star, set_point and set_rejected,
+    each through the same COALESCE so the first one wins. The original spec
+    counted skipping and auto-advance too, but review-UX 2.4 narrowed it --
+    `->` is now pressed on every clip merely to walk the pass, so counting it
+    would flip a whole session to 'reviewed' without a single judgement. A
+    note (set_note) and a label likewise abstain, for the same reason.
 
     This is one guarded UPDATE, not a read-then-write. Every HTTP request
     runs on its own thread with its own connection (see

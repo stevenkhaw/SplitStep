@@ -5,7 +5,6 @@ export interface PersistApi {
   star: (id: string, starred: boolean) => Promise<unknown>
   reject: (id: string, rejected: boolean) => Promise<unknown>
   point: (id: string, point: boolean) => Promise<unknown>
-  reviewed: (id: string) => Promise<unknown>
 }
 
 export type PersistOutcome = { ok: true } | { ok: false; revert: PersistableAction | null }
@@ -40,9 +39,13 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         // Persists nothing. The right arrow is now pressed on every clip just
         // to move through the pass, so marking each one reviewed would flip a
         // whole session to 'reviewed' without a single judgement being made.
-        // Only star and reject count -- and the server already stamps
-        // reviewed_at inside set_star/set_rejected (COALESCE, so the first
-        // one wins), which is why dropping this call loses nothing.
+        // Only star, reject and point count, and the server stamps reviewed_at
+        // inside those three (COALESCE, so the first one wins) -- so this case
+        // has nothing left to send. There is deliberately no endpoint behind
+        // it either: POST /api/rallies/{id}/reviewed existed only to serve
+        // this call and was deleted with it, so a future "resume where I left
+        // off" needs its own seen_at column rather than this one. reviewed_at
+        // means judged, not seen, and the two must not be conflated again.
         break
       case 'undo':
         // Undo can restore any of the three flags (or all of them back to

@@ -13,7 +13,6 @@ const mockApi = {
   getSession: vi.fn(),
   star: vi.fn(),
   reject: vi.fn(),
-  reviewed: vi.fn(),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   scores: vi.fn().mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [] }),

@@ -14,7 +14,6 @@ const mockApi = {
   getSession: vi.fn(),
   star: vi.fn().mockResolvedValue({ ok: true }),
   reject: vi.fn().mockResolvedValue({ ok: true }),
-  reviewed: vi.fn().mockResolvedValue({ ok: true }),
   setBounds: vi.fn().mockResolvedValue({ ok: true }),
   resegment: vi.fn(),
   label: vi.fn().mockResolvedValue({ ok: true }),
