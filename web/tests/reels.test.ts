@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   canWatchRendered,
+  deleteConfirmationText,
+  formatBytes,
   missingClipCount,
+  normalizedReelName,
   reelMembershipKey,
   reelStateLabel,
   renderBlockedReason,
@@ -164,5 +167,58 @@ describe('canWatchRendered', () => {
     expect(canWatchRendered(reel({
       rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 1,
     }))).toBe(true)
+  })
+})
+
+describe('formatBytes', () => {
+  it('reads plain bytes below 1 KB', () => {
+    expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(999)).toBe('999 B')
+  })
+
+  it('switches to KB at 1024 bytes', () => {
+    expect(formatBytes(1024)).toBe('1 KB')
+    expect(formatBytes(1536)).toBe('1.5 KB')
+  })
+
+  it('switches to MB, matching the user\'s real reel size from the spec', () => {
+    expect(formatBytes(725 * 1024 * 1024)).toBe('725 MB')
+  })
+
+  it('switches to GB and keeps one decimal below 10', () => {
+    expect(formatBytes(1024 * 1024 * 1024)).toBe('1 GB')
+    expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe('2.5 GB')
+  })
+
+  it('drops the decimal at 10 units and above', () => {
+    expect(formatBytes(10 * 1024 * 1024)).toBe('10 MB')
+    expect(formatBytes(123 * 1024 * 1024)).toBe('123 MB')
+  })
+})
+
+describe('deleteConfirmationText', () => {
+  it('names the reel alone when there is no render to reclaim', () => {
+    expect(deleteConfirmationText('Best of July', null))
+      .toBe('Delete "Best of July"? This cannot be undone.')
+  })
+
+  it('names the render size too when there is one', () => {
+    expect(deleteConfirmationText('Best of July', 725 * 1024 * 1024))
+      .toBe('Delete "Best of July" and its 725 MB render? This cannot be undone.')
+  })
+})
+
+describe('normalizedReelName', () => {
+  it('trims surrounding whitespace', () => {
+    expect(normalizedReelName('  Best of July  ')).toBe('Best of July')
+  })
+
+  it('is null for a blank or whitespace-only input', () => {
+    expect(normalizedReelName('')).toBeNull()
+    expect(normalizedReelName('   ')).toBeNull()
+  })
+
+  it('is null for pure whitespace even with tabs and newlines', () => {
+    expect(normalizedReelName('\t\n ')).toBeNull()
   })
 })

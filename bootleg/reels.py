@@ -96,6 +96,52 @@ def missing_clip_count(items: list[ReelItem]) -> int:
     return sum(1 for i in items if not i.clip_ready)
 
 
+def rendered_file(library: Library, reel: sqlite3.Row) -> Path | None:
+    """The reel's rendered file, or None if there isn't one -- or if
+    `rendered_path` does not resolve inside `library.reels_dir`.
+
+    Stricter than the read-time check api_reel_media used to inline against
+    `library.root`: a reel's render always lives in `reels/`, and this value
+    is about to be handed to `unlink()` by delete_rendered_file, so "somewhere
+    in the library" is not tight enough for that caller. `Path.__truediv__`
+    silently discards the left operand when the right is absolute --
+    `library.root / "/etc/passwd"` is just `Path("/etc/passwd")` -- so
+    `rendered_path` must be resolved before the containment check runs, not
+    just joined and trusted: an absolute value, or a relative one escaping
+    via "..", has to fail `is_relative_to` rather than slip through.
+
+    Today only mark_rendered writes this column, and it always stores a
+    library-relative `reels/<slug>.mp4`. But that is a guarantee held by one
+    write site's good behaviour, not by anything at a site that opens (or
+    deletes) the file -- a second writer, a bug in mark_rendered, or a
+    hand-edited row would defeat it silently otherwise. Centralizing the
+    check here, rather than re-inlining it at api_reel_media and again at
+    delete_rendered_file, is what keeps a read path and a delete path from
+    drifting on a security-relevant check.
+    """
+    if reel["rendered_path"] is None:
+        return None
+    path = (library.root / reel["rendered_path"]).resolve()
+    if not path.is_relative_to(library.reels_dir.resolve()):
+        return None
+    return path
+
+
+def delete_rendered_file(library: Library, reel: sqlite3.Row) -> bool:
+    """Unlink the reel's rendered file, if it has one that passes
+    `rendered_file`'s containment check. Returns whether a file was removed.
+
+    A `rendered_path` that fails containment is left exactly alone, never
+    unlinked: a bad row must not become grounds to delete a file outside
+    `reels/`. See `rendered_file` for how that could happen at all.
+    """
+    path = rendered_file(library, reel)
+    if path is None or not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
 def clip_paths(library: Library, items: list[ReelItem]) -> list[Path]:
     """Absolute clip paths in reel order -- the concat demuxer's input list."""
     return [library.clips_dir(i.session_id) / i.clip_relpath for i in items]

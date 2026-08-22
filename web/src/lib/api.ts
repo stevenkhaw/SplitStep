@@ -4,6 +4,7 @@ import type {
   LabelRecord,
   Preset,
   Reel,
+  ReelDeleteResult,
   ReelDetail,
   ReelMergeResult,
   RenderResult,
@@ -48,6 +49,10 @@ export const api = {
   createReel: (name: string) =>
     req<Reel>('/api/reels', { method: 'POST', body: JSON.stringify({ name }) }),
   getReel: (slug: string) => req<ReelDetail>(`/api/reels/${slug}`),
+  renameReel: (slug: string, name: string) =>
+    req<Reel>(`/api/reels/${slug}/rename`, { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteReel: (slug: string) =>
+    req<ReelDeleteResult>(`/api/reels/${slug}`, { method: 'DELETE' }),
   addReelItems: (slug: string, items: SpanRef[]) =>
     req<ReelMergeResult>(`/api/reels/${slug}/items`, {
       method: 'POST',

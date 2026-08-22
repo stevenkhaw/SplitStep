@@ -202,6 +202,39 @@ def set_order(conn: sqlite3.Connection, reel_id: str, spans: list[Span]) -> None
     conn.commit()
 
 
+def rename_reel(conn: sqlite3.Connection, reel_id: str, name: str) -> None:
+    """Change the display name only -- never the slug.
+
+    The slug is baked into the reel's URL and names the rendered file on
+    disk (`reels/<slug>.mp4`); keeping it stable across a rename means an
+    already-open URL stays valid and the file on disk keeps matching this
+    row, with nothing to re-link or orphan. Renaming to "Best of August" and
+    having the URL still read `2026-08-18-points` is the deliberate result,
+    not a bug -- slugify()/unique_slug are create_reel's job, not this one's.
+
+    Also does not touch dirty, rendered_path or rendered_at: a rename
+    changes nothing about what was rendered, so marking the reel dirty here
+    would falsely demand a re-encode nobody asked for.
+    """
+    conn.execute("UPDATE reels SET name = ? WHERE id = ?", (name, reel_id))
+    conn.commit()
+
+
+def delete_reel(conn: sqlite3.Connection, reel_id: str) -> None:
+    """Delete the row. reel_items cascades on reel_id (ON DELETE CASCADE,
+    see 007_reel_items_by_span.sql) -- covered by test rather than assumed,
+    the same caution that put rally_labels' *missing* foreign key comment in
+    003: a cascade in the wrong place silently empties a table, and getting
+    that backwards is exactly the class of bug this project has hit before.
+
+    Never touches the rendered file on disk -- that needs a Library to
+    resolve a path, not just a connection, so it lives as
+    `bootleg.reels.delete_rendered_file` instead. The route calls both.
+    """
+    conn.execute("DELETE FROM reels WHERE id = ?", (reel_id,))
+    conn.commit()
+
+
 def _mark_dirty(conn: sqlite3.Connection, reel_id: str) -> None:
     """Set dirty WITHOUT committing -- for callers already inside a transaction."""
     conn.execute("UPDATE reels SET dirty = 1 WHERE id = ?", (reel_id,))

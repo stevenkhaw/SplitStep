@@ -384,3 +384,127 @@ def test_reel_media_is_still_servable_while_the_reel_is_dirty(client, conn, libr
     conn.commit()
 
     assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 200
+
+
+def test_rename_updates_the_name_and_leaves_everything_else(client, conn):
+    reel = client.post("/api/reels", json={"name": "old name"}).json()
+    mark_rendered(conn, reel["id"], f"reels/{reel['slug']}.mp4", set())
+    before = dict(get_reel_by_slug(conn, reel["slug"]))
+
+    body = client.post(f"/api/reels/{reel['slug']}/rename", json={"name": "  new name  "}).json()
+
+    # Stripped like ReelCreateBody -- the shared validator's job.
+    assert body["name"] == "new name"
+    assert body["slug"] == before["slug"]
+    after = dict(get_reel_by_slug(conn, reel["slug"]))
+    assert after["name"] == "new name"
+    assert after["slug"] == before["slug"]
+    assert after["dirty"] == before["dirty"]
+    assert after["rendered_path"] == before["rendered_path"]
+    assert after["rendered_at"] == before["rendered_at"]
+
+
+def test_rename_reports_the_same_shape_as_create(client, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    body = client.post(f"/api/reels/{reel['slug']}/rename", json={"name": "renamed"}).json()
+
+    assert body["item_count"] == 1
+
+
+def test_rename_rejects_a_blank_name(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    assert client.post(
+        f"/api/reels/{reel['slug']}/rename", json={"name": "   "}
+    ).status_code == 422
+
+
+def test_rename_404s_for_an_unknown_slug(client):
+    assert client.post("/api/reels/nope/rename", json={"name": "x"}).status_code == 404
+
+
+def test_delete_removes_the_row_and_cascades_its_items(client, conn, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+    assert conn.execute("SELECT COUNT(*) c FROM reel_items").fetchone()["c"] == 0
+
+
+def test_delete_unlinks_the_rendered_file(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": True}
+    assert not dst.exists()
+    assert get_reel_by_slug(conn, reel["slug"]) is None
+
+
+def test_delete_reports_no_file_removed_when_never_rendered(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    assert client.delete(f"/api/reels/{reel['slug']}").json() == {
+        "deleted": True, "removed_file": False,
+    }
+
+
+def test_delete_404s_for_an_unknown_slug(client):
+    assert client.delete("/api/reels/nope").status_code == 404
+
+
+def test_delete_does_not_unlink_an_absolute_rendered_path_outside_reels(
+    client, conn, tmp_path_factory
+):
+    # A rendered_path escaping `reels/` must never reach unlink(), whatever
+    # bad state put it there (hand edit, a bug in a future second writer).
+    outside = tmp_path_factory.mktemp("outside") / "secret.mp4"
+    outside.write_bytes(b"top secret contents")
+    reel = create_reel(conn, "leaky-absolute")
+    mark_rendered(conn, reel["id"], str(outside), set())
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert outside.exists()
+
+
+def test_delete_does_not_unlink_a_relative_rendered_path_escaping_reels(
+    client, conn, library, tmp_path
+):
+    outside = tmp_path.parent / f"outside-secret-{library.root.name}.mp4"
+    outside.write_bytes(b"other top secret contents")
+    reel = create_reel(conn, "leaky-relative")
+    mark_rendered(conn, reel["id"], f"reels/../../{outside.name}", set())
+
+    res = client.delete(f"/api/reels/{reel['slug']}")
+
+    assert res.json() == {"deleted": True, "removed_file": False}
+    assert outside.exists()
+
+
+def test_reel_detail_reports_rendered_bytes(client, conn, library):
+    reel, _dst = _rendered_reel(conn, library, "r", data=b"0123456789")
+
+    body = client.get(f"/api/reels/{reel['slug']}").json()
+
+    assert body["reel"]["rendered_bytes"] == 10
+
+
+def test_reel_detail_rendered_bytes_is_none_when_unrendered(client):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    body = client.get(f"/api/reels/{reel['slug']}").json()
+    assert body["reel"]["rendered_bytes"] is None
+
+
+def test_reel_list_does_not_report_rendered_bytes(client, conn, library):
+    # The list route must not stat() every reel on every page load -- see
+    # api_get_reel's comment. Key absent entirely, not present-and-null,
+    # confirming list_reels was never touched by this change.
+    _rendered_reel(conn, library, "r")
+    listed = client.get("/api/reels").json()
+    assert "rendered_bytes" not in listed[0]

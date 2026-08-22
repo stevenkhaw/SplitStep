@@ -18,12 +18,18 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
   }
 }
 
-function detail(items: ReelItem[], dirty = 1, renderedPath: string | null = null): ReelDetail {
+function detail(
+  items: ReelItem[],
+  dirty = 1,
+  renderedPath: string | null = null,
+  renderedBytes: number | null = null,
+): ReelDetail {
   return {
     reel: {
       id: 'r1', name: '2026-08-18 points', slug: '2026-08-18-points',
       rendered_path: renderedPath, rendered_at: renderedPath ? '2026-08-21T10:00:00Z' : null, dirty,
       created_at: '2026-08-21T10:00:00Z', item_count: items.length,
+      rendered_bytes: renderedBytes,
     },
     items,
   }
@@ -31,6 +37,8 @@ function detail(items: ReelItem[], dirty = 1, renderedPath: string | null = null
 
 const mockApi = {
   getReel: vi.fn(),
+  renameReel: vi.fn(),
+  deleteReel: vi.fn().mockResolvedValue({ deleted: true, removed_file: false }),
   addReelItems: vi.fn().mockResolvedValue({ added: 1, existing: 0, total: 1 }),
   removeReelItem: vi.fn().mockResolvedValue({ removed: true, total: 0 }),
   setReelOrder: vi.fn().mockResolvedValue({ ok: true }),
@@ -46,6 +54,12 @@ const mockApi = {
   reelUrl: () => 'about:blank',
 }
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
+
+const navigate = vi.fn()
+vi.mock('../src/lib/router.svelte', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  navigate,
+}))
 
 HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined)
 HTMLMediaElement.prototype.pause = vi.fn()
@@ -284,6 +298,139 @@ describe('Reel builder', () => {
     watchToggle()!.click()
     flushSync()
     expect(host.querySelector('video')).toBeNull()
+  })
+})
+
+const renameButton = () => host.querySelector('[data-rename]') as HTMLButtonElement | null
+const renameInput = () => host.querySelector('[data-rename-input]') as HTMLInputElement | null
+const renameSave = () => host.querySelector('[data-rename-save]') as HTMLButtonElement | null
+
+function typeInto(input: HTMLInputElement, value: string): void {
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+describe('Reel rename', () => {
+  it('opens pre-filled with the current name', async () => {
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    expect(renameInput()!.value).toBe('2026-08-18 points')
+  })
+
+  it('commits the trimmed name on an explicit Save', async () => {
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    typeInto(renameInput()!, '  Best of August  ')
+    flushSync()
+    renameSave()!.click()
+    flushSync()
+    expect(mockApi.renameReel).toHaveBeenCalledWith('2026-08-18-points', 'Best of August')
+  })
+
+  it('commits the trimmed name on Enter', async () => {
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    const input = renameInput()!
+    typeInto(input, 'Best of August')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    flushSync()
+    expect(mockApi.renameReel).toHaveBeenCalledWith('2026-08-18-points', 'Best of August')
+  })
+
+  it('cancels on Escape without calling the API', async () => {
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    const input = renameInput()!
+    typeInto(input, 'Discarded name')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))
+    flushSync()
+
+    expect(mockApi.renameReel).not.toHaveBeenCalled()
+    // Escape closed the field: the input is gone, the original name shows.
+    expect(renameInput()).toBeNull()
+    expect(host.textContent).toContain('2026-08-18 points')
+  })
+
+  it('does not commit on a blur -- there is no handler wired to fire one', async () => {
+    // The exact hazard commitNote's docstring (QueueMode.svelte) describes:
+    // removing a focused element fires a trailing blur after Enter/Escape
+    // has already closed the field. jsdom does not reproduce that trailing
+    // blur on its own, so this fires one explicitly at the last live
+    // reference to the (now-removed) input, proving no blur handler is
+    // listening at all rather than merely that jsdom didn't trigger one.
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    const input = renameInput()!
+    typeInto(input, 'Discarded name')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))
+    flushSync()
+
+    input.dispatchEvent(new Event('blur'))
+    flushSync()
+    expect(mockApi.renameReel).not.toHaveBeenCalled()
+  })
+
+  it('disables Save for a blank name', async () => {
+    await open(detail([item(1000)]))
+    renameButton()!.click()
+    flushSync()
+    typeInto(renameInput()!, '   ')
+    flushSync()
+    expect(renameSave()!.disabled).toBe(true)
+  })
+})
+
+const deleteButton = () => host.querySelector('[data-delete]') as HTMLButtonElement | null
+const deleteConfirm = () => host.querySelector('[data-delete-confirm]') as HTMLElement | null
+const deleteConfirmYes = () =>
+  host.querySelector('[data-delete-confirm-yes]') as HTMLButtonElement | null
+
+describe('Reel delete', () => {
+  it('requires a second, confirming press before calling the API', async () => {
+    await open(detail([item(1000)]))
+    deleteButton()!.click()
+    flushSync()
+
+    expect(mockApi.deleteReel).not.toHaveBeenCalled()
+    expect(deleteConfirm()).not.toBeNull()
+
+    deleteConfirmYes()!.click()
+    flushSync()
+    expect(mockApi.deleteReel).toHaveBeenCalledWith('2026-08-18-points')
+  })
+
+  it('names the reel and its render size in the confirming step', async () => {
+    await open(detail([item(1000)], 0, 'reels/2026-08-18-points.mp4', 725 * 1024 * 1024))
+    deleteButton()!.click()
+    flushSync()
+    expect(deleteConfirm()!.textContent).toContain('2026-08-18 points')
+    expect(deleteConfirm()!.textContent).toContain('725 MB')
+  })
+
+  it('cancel on the confirming step calls neither the API nor navigate', async () => {
+    await open(detail([item(1000)]))
+    deleteButton()!.click()
+    flushSync()
+    ;(host.querySelector('[data-delete-confirm] button:last-of-type') as HTMLElement).click()
+    flushSync()
+
+    expect(mockApi.deleteReel).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(deleteButton()).not.toBeNull()
+  })
+
+  it('navigates to /reels on a successful delete', async () => {
+    await open(detail([item(1000)]))
+    deleteButton()!.click()
+    flushSync()
+    deleteConfirmYes()!.click()
+    await settle()
+    expect(navigate).toHaveBeenCalledWith('/reels')
   })
 })
 

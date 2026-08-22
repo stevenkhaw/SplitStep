@@ -4,6 +4,7 @@ from bootleg.db.rallies import replace_rallies
 from bootleg.db.reels import (
     add_items,
     create_reel,
+    delete_reel,
     find_reel_by_name,
     get_reel,
     get_reel_by_slug,
@@ -12,6 +13,7 @@ from bootleg.db.reels import (
     mark_dirty,
     mark_rendered,
     remove_item,
+    rename_reel,
     set_order,
     slugify,
     unique_slug,
@@ -243,3 +245,34 @@ def test_lookup_helpers(conn):
     assert get_reel_by_slug(conn, "nope") is None
     assert find_reel_by_name(conn, "2026-08-18 points")["id"] == reel["id"]
     assert find_reel_by_name(conn, "nope") is None
+
+
+def test_rename_reel_updates_the_name_only(conn):
+    reel = create_reel(conn, "old name")
+    mark_rendered(conn, reel["id"], "reels/old-name.mp4", set())
+    conn.execute("UPDATE reels SET dirty = 0 WHERE id = ?", (reel["id"],))
+    conn.commit()
+    before = get_reel(conn, reel["id"])
+
+    rename_reel(conn, reel["id"], "new name")
+
+    after = get_reel(conn, reel["id"])
+    assert after["name"] == "new name"
+    # The slug, dirty, rendered_path and rendered_at are untouched -- see
+    # rename_reel's docstring for why each one matters.
+    assert after["slug"] == before["slug"]
+    assert after["dirty"] == before["dirty"]
+    assert after["rendered_path"] == before["rendered_path"]
+    assert after["rendered_at"] == before["rendered_at"]
+
+
+def test_delete_reel_removes_the_row_and_cascades_its_items(conn, seeded):
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 2000)])
+
+    delete_reel(conn, reel["id"])
+
+    assert get_reel(conn, reel["id"]) is None
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM reel_items WHERE reel_id = ?", (reel["id"],)
+    ).fetchone()["c"] == 0

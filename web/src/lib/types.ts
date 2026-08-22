@@ -133,8 +133,18 @@ export interface SpanRef {
 }
 
 export interface ReelDetail {
-  reel: Reel
+  // rendered_bytes lives ONLY here, not on Reel itself: the list route
+  // deliberately never stat()s every reel's render on every page load (see
+  // api_get_reel's comment in bootleg/api/routes.py), so a listed Reel truly
+  // does not carry this field -- widening it onto Reel would let TypeScript
+  // promise a number the list response never sends.
+  reel: Reel & { rendered_bytes: number | null }
   items: ReelItem[]
+}
+
+export interface ReelDeleteResult {
+  deleted: boolean
+  removed_file: boolean
 }
 
 export interface ReelMergeResult {

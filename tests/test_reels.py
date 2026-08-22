@@ -2,14 +2,16 @@ import pytest
 
 from bootleg.db.jobs import enqueue
 from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import add_items, create_reel
+from bootleg.db.reels import add_items, create_reel, get_reel, mark_rendered
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
 from bootleg.media.clips import clip_relpath
 from bootleg.reels import (
     clip_paths,
+    delete_rendered_file,
     missing_clip_count,
     plan_reel_export,
+    rendered_file,
     resolve_items,
 )
 
@@ -201,3 +203,96 @@ def test_plan_reel_export_omits_rally_id_for_an_orphan(library, conn, seeded):
     assert (payload["source_id"], payload["start_ms"], payload["end_ms"]) == (
         seeded["source_id"], 1000, 5000,
     )
+
+
+def _render(library, conn, reel, data=b"fake mp4 bytes"):
+    """A reel whose rendered_path points at a real file under reels/, the
+    way handle_reel leaves one after a successful render."""
+    rel = f"reels/{reel['slug']}.mp4"
+    dst = library.root / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    mark_rendered(conn, reel["id"], rel, set())
+    return get_reel(conn, reel["id"]), dst
+
+
+def test_rendered_file_is_none_when_never_rendered(library, conn):
+    reel = create_reel(conn, "r")
+    assert rendered_file(library, reel) is None
+
+
+def test_rendered_file_resolves_a_contained_render(library, conn):
+    reel = create_reel(conn, "r")
+    reel, dst = _render(library, conn, reel)
+    assert rendered_file(library, reel) == dst.resolve()
+
+
+def test_rendered_file_rejects_an_absolute_path(library, conn, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "secret.mp4"
+    outside.write_bytes(b"top secret")
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], str(outside), set())
+    reel = get_reel(conn, reel["id"])
+
+    assert rendered_file(library, reel) is None
+
+
+def test_rendered_file_rejects_an_escaping_relative_path(library, conn, tmp_path):
+    # library.root IS tmp_path here (the `library` fixture builds it there),
+    # so this constructs a path that escapes the library root via ".." while
+    # still being nominally "relative".
+    outside = tmp_path.parent / f"outside-{library.root.name}.mp4"
+    outside.write_bytes(b"top secret")
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], f"reels/../../{outside.name}", set())
+    reel = get_reel(conn, reel["id"])
+
+    assert rendered_file(library, reel) is None
+
+
+def test_delete_rendered_file_removes_a_contained_render(library, conn):
+    reel = create_reel(conn, "r")
+    reel, dst = _render(library, conn, reel)
+
+    assert delete_rendered_file(library, reel) is True
+    assert not dst.exists()
+
+
+def test_delete_rendered_file_reports_false_when_never_rendered(library, conn):
+    reel = create_reel(conn, "r")
+    assert delete_rendered_file(library, reel) is False
+
+
+def test_delete_rendered_file_reports_false_when_the_file_is_already_gone(library, conn):
+    # A `rendered_path` can outlive its file (a hand-deleted render, or a
+    # prior partial cleanup) -- delete must report this honestly rather than
+    # raising on a missing file.
+    reel = create_reel(conn, "r")
+    reel, dst = _render(library, conn, reel)
+    dst.unlink()
+
+    assert delete_rendered_file(library, reel) is False
+
+
+def test_delete_rendered_file_leaves_an_absolute_escape_untouched(
+    library, conn, tmp_path_factory
+):
+    outside = tmp_path_factory.mktemp("outside") / "secret.mp4"
+    outside.write_bytes(b"top secret")
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], str(outside), set())
+    reel = get_reel(conn, reel["id"])
+
+    assert delete_rendered_file(library, reel) is False
+    assert outside.exists()
+
+
+def test_delete_rendered_file_leaves_a_relative_escape_untouched(library, conn, tmp_path):
+    outside = tmp_path.parent / f"outside-{library.root.name}.mp4"
+    outside.write_bytes(b"top secret")
+    reel = create_reel(conn, "r")
+    mark_rendered(conn, reel["id"], f"reels/../../{outside.name}", set())
+    reel = get_reel(conn, reel["id"])
+
+    assert delete_rendered_file(library, reel) is False
+    assert outside.exists()

@@ -35,10 +35,13 @@ from bootleg.db.rallies import (
 from bootleg.db.reels import (
     add_items,
     create_reel,
+    delete_reel,
     find_reel_by_name,
+    get_reel,
     get_reel_by_slug,
     list_reels,
     remove_item,
+    rename_reel,
     set_order,
 )
 from bootleg.db.sessions import (
@@ -57,7 +60,13 @@ from bootleg.media.files import find_original
 from bootleg.media.frames import extract_frame
 from bootleg.media.probe import ProbeError
 from bootleg.media.transcode import TranscodeError, rotation_filter
-from bootleg.reels import missing_clip_count, plan_reel_export, resolve_items
+from bootleg.reels import (
+    delete_rendered_file,
+    missing_clip_count,
+    plan_reel_export,
+    rendered_file,
+    resolve_items,
+)
 from bootleg.setup import queue_setup
 
 from .media import range_response
@@ -174,19 +183,34 @@ class ExportBody(BaseModel):
         return v
 
 
-class ReelCreateBody(BaseModel):
+class _ReelNameBody(BaseModel):
+    """`name` validation shared by create and rename, so the two can never
+    drift apart: a name of pure whitespace must be refused identically in
+    both places rather than reimplemented -- and forgotten -- in one of them.
+    """
+
     name: str
 
     @field_validator("name")
     @classmethod
     def check_name(cls, v: str) -> str:
-        # Stripped here rather than at the call site so the slug and the
-        # displayed name are derived from the same string -- a name of pure
-        # whitespace would otherwise slug to "reel" and render as blank.
+        # Stripped here rather than at the call site: create derives the
+        # slug from this same string, so pure whitespace must not slip
+        # through and slug to the generic "reel" fallback. Rename has no
+        # slug at stake, but must refuse the same input for the same
+        # reason -- a blank-looking name nobody actually chose.
         name = v.strip()
         if not name:
             raise ValueError("a reel needs a name")
         return name
+
+
+class ReelCreateBody(_ReelNameBody):
+    pass
+
+
+class ReelRenameBody(_ReelNameBody):
+    pass
 
 
 class SpanBody(BaseModel):
@@ -913,8 +937,13 @@ def api_create_reel(body: ReelCreateBody, request: Request):
 @router.get("/api/reels/{slug}")
 def api_get_reel(slug: str, request: Request):
     conn = _conn(request)
+    library = _library(request)
     reel = _reel_or_404(conn, slug)
-    items = resolve_items(_library(request), conn, reel["id"])
+    items = resolve_items(library, conn, reel["id"])
+    # rendered_bytes on the DETAIL route only, never the list one: it needs
+    # a stat() per reel, and the list page renders every reel on every page
+    # load -- fine for one row here, a needless syscall storm there.
+    rendered = rendered_file(library, reel)
     return {
         # item_count so a single reel has the SAME shape as a listed one.
         # The frontend shares one `Reel` type across both routes, so a
@@ -922,9 +951,50 @@ def api_get_reel(slug: str, request: Request):
         # promised a number -- silent until something rendered it. Taken
         # from the already-resolved items rather than a second COUNT(*), so
         # the two can never disagree.
-        "reel": {**dict(reel), "item_count": len(items)},
+        "reel": {
+            **dict(reel),
+            "item_count": len(items),
+            "rendered_bytes": rendered.stat().st_size if rendered is not None else None,
+        },
         "items": [_item_json(i) for i in items],
     }
+
+
+@router.post("/api/reels/{slug}/rename")
+def api_rename_reel(slug: str, body: ReelRenameBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    rename_reel(conn, reel["id"], body.name)
+    updated = get_reel(conn, reel["id"])
+    # Same single-reel shape as api_create_reel: item_count from the
+    # already-resolved items, no second COUNT(*).
+    return {
+        **dict(updated),
+        "item_count": len(resolve_items(_library(request), conn, reel["id"])),
+    }
+
+
+@router.delete("/api/reels/{slug}")
+def api_delete_reel(slug: str, request: Request):
+    """Delete a reel and, if it has one, its rendered file -- file first.
+
+    A crash between the two steps leaves either a stray file with no row
+    pointing at it, or a stray row whose rendered_path points at a file
+    that is already gone. Only one of those is recoverable through this
+    app: a stray row is still visible in the reel list and Delete can
+    simply be pressed again (delete_rendered_file already tolerates a
+    rendered_path with nothing behind it, returning removed_file=False).
+    A stray file has no row left to find it by, and nothing in this codebase
+    scans `reels/` for orphans -- that is Reclaim Space, deferred to Plan 3
+    (see CLAUDE.md). Deleting the row first would trade a recoverable leftover
+    for an invisible one, silently defeating the whole point of this feature:
+    the space it exists to give back.
+    """
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    removed_file = delete_rendered_file(_library(request), reel)
+    delete_reel(conn, reel["id"])
+    return {"deleted": True, "removed_file": removed_file}
 
 
 @router.post("/api/reels/{slug}/items")
@@ -1031,25 +1101,20 @@ def api_reel_media(slug: str, request: Request, range: str | None = Header(defau
     IS NULL, so it 404s the same way an unknown slug does, with no special
     case needed here. range_response itself 404s a rendered_path whose file
     has since been deleted, so that case needs no separate check either.
+
+    The containment check itself -- resolve, then compare, because
+    `Path.__truediv__` silently discards the left operand when the right is
+    absolute (`library_root / "/etc/passwd"` is just `Path("/etc/passwd")`)
+    -- lives in `rendered_file`, not here. `delete_rendered_file` needs the
+    exact same question answered before it unlinks anything, and two copies
+    of a security-relevant check is how they drift; see `rendered_file`'s
+    docstring for the full reasoning.
     """
     reel = get_reel_by_slug(_conn(request), slug)
-    if reel is None or reel["rendered_path"] is None:
+    if reel is None:
         raise HTTPException(status_code=404, detail="Reel not found")
-    library_root = _library(request).root.resolve()
-    path = (library_root / reel["rendered_path"]).resolve()
-    # `Path.__truediv__` silently discards the left operand when the right is
-    # absolute -- library_root / "/etc/passwd" is just Path("/etc/passwd") --
-    # so a `rendered_path` that is ever absolute, or relative but escaping via
-    # "..", turns into arbitrary file disclosure with no traversal-looking
-    # input on this request at all. Today that can't happen: mark_rendered is
-    # the only writer of rendered_path in the whole tree, and it always stores
-    # a library-relative path derived from slugify(). But that's a guarantee
-    # held by one write site's good behaviour, not by anything at the site
-    # that actually opens the file -- a second writer, a bug in mark_rendered,
-    # or a hand-edited row would defeat it silently. resolve() before the
-    # comparison collapses ".." segments and follows symlinks, so both the
-    # absolute and the escaping-relative cases are caught the same way.
-    if not path.is_relative_to(library_root):
+    path = rendered_file(_library(request), reel)
+    if path is None:
         raise HTTPException(status_code=404, detail="Reel not found")
     return range_response(path, range)
 
