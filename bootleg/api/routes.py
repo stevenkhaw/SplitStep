@@ -1044,7 +1044,22 @@ def api_reel_media(slug: str, request: Request, range: str | None = Header(defau
     reel = get_reel_by_slug(_conn(request), slug)
     if reel is None or reel["rendered_path"] is None:
         raise HTTPException(status_code=404, detail="Reel not found")
-    path = _library(request).root / reel["rendered_path"]
+    library_root = _library(request).root.resolve()
+    path = (library_root / reel["rendered_path"]).resolve()
+    # `Path.__truediv__` silently discards the left operand when the right is
+    # absolute -- library_root / "/etc/passwd" is just Path("/etc/passwd") --
+    # so a `rendered_path` that is ever absolute, or relative but escaping via
+    # "..", turns into arbitrary file disclosure with no traversal-looking
+    # input on this request at all. Today that can't happen: mark_rendered is
+    # the only writer of rendered_path in the whole tree, and it always stores
+    # a library-relative path derived from slugify(). But that's a guarantee
+    # held by one write site's good behaviour, not by anything at the site
+    # that actually opens the file -- a second writer, a bug in mark_rendered,
+    # or a hand-edited row would defeat it silently. resolve() before the
+    # comparison collapses ".." segments and follows symlinks, so both the
+    # absolute and the escaping-relative cases are caught the same way.
+    if not path.is_relative_to(library_root):
+        raise HTTPException(status_code=404, detail="Reel not found")
     return range_response(path, range)
 
 

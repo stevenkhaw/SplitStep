@@ -342,6 +342,39 @@ def test_reel_media_404s_when_the_file_has_since_been_deleted(client, conn, libr
     assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 404
 
 
+def test_reel_media_404s_for_an_absolute_rendered_path(client, conn, tmp_path_factory):
+    # A hand-edited row, or a bug in a future second writer, could leave
+    # rendered_path absolute. library.root / rendered_path would silently
+    # discard the library root in that case (Path.__truediv__ drops the left
+    # operand when the right is absolute), and nothing about this row looks
+    # like a traversal attempt -- the containment check at the read site has
+    # to catch it anyway.
+    outside = tmp_path_factory.mktemp("outside") / "secret.txt"
+    outside.write_bytes(b"top secret contents")
+    reel = create_reel(conn, "leaky-absolute")
+    mark_rendered(conn, reel["id"], str(outside), set())
+
+    res = client.get(f"/media/reels/{reel['slug']}.mp4")
+
+    assert res.status_code == 404
+    assert b"top secret" not in res.content
+
+
+def test_reel_media_404s_for_an_escaping_relative_rendered_path(client, conn, library, tmp_path):
+    # Same failure mode by a relative path with ".." segments instead of an
+    # absolute one -- still resolves outside the library, still must not be
+    # served.
+    outside = tmp_path.parent / f"outside-secret-{library.root.name}.txt"
+    outside.write_bytes(b"other top secret contents")
+    reel = create_reel(conn, "leaky-relative")
+    mark_rendered(conn, reel["id"], f"reels/../../{outside.name}", set())
+
+    res = client.get(f"/media/reels/{reel['slug']}.mp4")
+
+    assert res.status_code == 404
+    assert b"other top secret" not in res.content
+
+
 def test_reel_media_is_still_servable_while_the_reel_is_dirty(client, conn, library):
     # mark_rendered leaves rendered_path set even when a later add/remove
     # marks the reel dirty again -- the file on disk is still the last
