@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from bootleg.accel import Accel, detect_accel
-from bootleg.media.probe import probe
+from bootleg.media.probe import MediaInfo, probe
 
 
 class TranscodeError(Exception):
@@ -238,6 +238,46 @@ CLIP_COLOR_PRIMARIES = "bt2020"
 CLIP_COLOR_TRC = "arib-std-b67"
 
 
+def _require_locked_color(info: MediaInfo, src: Path) -> None:
+    """Refuse a source whose colour metadata is not the locked profile's.
+
+    Strict equality on all four fields, and `None` -- an untagged source --
+    fails it exactly as a bt709 one does. That is deliberate: untagged pixels
+    are not HLG pixels, so applying the profile's tags to them would be a
+    relabel without a conversion, which produces a file that looks correct
+    while being wrong. Harder to find later than an honest mismatch.
+
+    Refused rather than converted because this ffmpeg cannot convert:
+    measured on 9.0.1 with neither libzimg nor libplacebo, `zscale` is absent
+    so no linear-light stage exists to feed `tonemap`, and the built-in
+    `colorspace` filter's transfer list contains no arib-std-b67 at all --
+    it takes HLG neither in nor out. Both directions are blocked, not just
+    the one.
+
+    There is deliberately no override. An override is a way to write a
+    permanently wrong clip, and the clip is the artifact that has to stay
+    concat-compatible for years; the reviewer is the part that can be
+    corrected later.
+    """
+    actual = (info.color_range, info.color_space, info.color_transfer, info.color_primaries)
+    wanted = (CLIP_COLOR_RANGE, CLIP_COLOR_SPACE, CLIP_COLOR_TRC, CLIP_COLOR_PRIMARIES)
+    if actual == wanted:
+        return
+
+    shown = tuple(field or "unset" for field in actual)
+    raise TranscodeError(
+        f"{src.name} does not carry the locked profile's colour metadata, so a clip "
+        f"cut from it could not be concatenated with the ones already cut.\n"
+        f"  source:  range={shown[0]} space={shown[1]} transfer={shown[2]} primaries={shown[3]}\n"
+        f"  profile: range={wanted[0]} space={wanted[1]} transfer={wanted[2]} "
+        f"primaries={wanted[3]}\n"
+        f"No conversion was attempted: relabelling one as the other makes the file look "
+        f"correct while being wrong, and this ffmpeg has no working tonemap in either "
+        f"direction. If this came from the usual iPhone, check Settings > Camera > "
+        f"Record Video -- HDR Video turned off records bt709 SDR."
+    )
+
+
 def make_clip(
     src: Path,
     dst: Path,
@@ -268,6 +308,11 @@ def make_clip(
         raise ValueError(f"clip needs a positive duration, got {duration_ms}ms")
 
     info = probe(src)
+
+    # Before anything is written, and before the minutes of encoding: colour
+    # is the one profile property that cannot be conformed here, only
+    # checked. See _require_locked_color.
+    _require_locked_color(info, src)
 
     # A non-square SAR is a property of the source, and the locked profile
     # never pinned it: libx264 writes the sample aspect ratio into the SPS

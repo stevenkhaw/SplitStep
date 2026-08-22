@@ -570,3 +570,80 @@ def test_clips_from_mismatched_sources_concat_with_c_copy(source_4k, tmp_path, h
         f"reel audio is {audio_s:.2f}s against {video_s:.2f}s of video: "
         "a clip contributed no audio and the track stops early"
     )
+
+
+def test_make_clip_refuses_an_sdr_source(tmp_path, hlg_setparams):
+    """The whole point of the pin. An SDR source cut into this library would
+    produce a clip differing from the 24 already on the drive in colour tags
+    alone -- and the concat demuxer does not refuse that, it reads every
+    input through the first clip's parameters and renders part of the reel
+    with the wrong colour, silently.
+
+    Refused rather than converted: this ffmpeg has no libzimg and no
+    libplacebo, so there is no correct tonemap available in either
+    direction, and tagging bt709 pixels as HLG (or the reverse) makes the
+    file look correct while being wrong. A refusal is instant and
+    recoverable; a mislabelled clip is permanent and costs a re-cut.
+    """
+    src = tmp_path / "sdr.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-vf", "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    assert _stream_field(src, "v:0", "color_space") == "bt709", "fixture is not SDR"
+
+    dst = tmp_path / "clip.mp4"
+    with pytest.raises(TranscodeError, match="colour"):
+        make_clip(src, dst, start_ms=0, end_ms=2000)
+    assert not dst.exists()
+    # The check must precede the encode, so nothing was ever written: no
+    # finished clip, and no in-flight .part sibling either.
+    assert [p for p in tmp_path.iterdir() if ".part." in p.name] == []
+
+
+def test_make_clip_refuses_an_untagged_source(tmp_path):
+    """The likelier case in practice than a mislabelled one: a file carrying
+    no colour metadata at all -- a screen recording, a re-mux, anything from
+    a camera that does not tag. Untagged pixels are not HLG pixels, so
+    writing the profile's tags onto them would be precisely the
+    relabel-without-converting this design exists to avoid.
+
+    Deliberately no hlg_setparams here: lavfi output carries no colour
+    metadata unless something puts it there.
+    """
+    src = tmp_path / "untagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    dst = tmp_path / "clip.mp4"
+    with pytest.raises(TranscodeError, match="colour"):
+        make_clip(src, dst, start_ms=0, end_ms=2000)
+    assert not dst.exists()
+
+
+def test_make_clip_refusal_names_both_sets_of_tags(tmp_path):
+    """The message is the whole remediation path: there is no override flag,
+    so it has to say what it saw, what it wanted, that it did not convert,
+    and -- for the one cause that will realistically occur -- where the
+    setting is."""
+    src = tmp_path / "untagged.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=1920x1080:rate=30:duration=3",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    with pytest.raises(TranscodeError) as exc:
+        make_clip(src, tmp_path / "clip.mp4", start_ms=0, end_ms=2000)
+    message = str(exc.value)
+    assert "untagged.mp4" in message
+    assert "unset" in message                 # how a None field is rendered
+    assert "arib-std-b67" in message          # what the profile wanted
+    assert "No conversion was attempted" in message
+    assert "HDR Video" in message             # the iPhone setting
