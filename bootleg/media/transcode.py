@@ -216,6 +216,27 @@ CLIP_HEIGHT = 2160
 CLIP_FPS = 30
 CLIP_CRF = 20
 
+# Colour is the fifth property of a source the profile relied on and never
+# stated -- after the frame, the rate, the sample aspect and the audio track.
+# `-pix_fmt yuv420p` was pinned and the colour tags were not, so every clip
+# inherited them from whatever it was cut from. It happens to agree today:
+# all 24 clips on the drive, and the proxies, are tv/bt2020nc/arib-std-b67
+# /bt2020, inherited from a 10-bit HLG iPhone source. That agreement was an
+# accident, and the first source that disagreed would have broken it
+# silently -- the concat demuxer reads every input through the FIRST clip's
+# parameters, so a mixed reel gets wrong colour on part of its footage with
+# no error anywhere.
+#
+# Pinned to what the library already contains rather than converted to
+# anything: this ffmpeg has neither libzimg nor libplacebo, so no correct
+# tonemap exists here in either direction, and writing bt709 tags onto HLG
+# pixels would make the file look right while being wrong. A source that
+# does not match is refused instead -- see _require_locked_color.
+CLIP_COLOR_RANGE = "tv"
+CLIP_COLOR_SPACE = "bt2020nc"
+CLIP_COLOR_PRIMARIES = "bt2020"
+CLIP_COLOR_TRC = "arib-std-b67"
+
 
 def make_clip(
     src: Path,
@@ -358,6 +379,18 @@ def make_clip(
             "-c:v", "libx264",
             "-profile:v", "high",
             "-pix_fmt", "yuv420p",
+            # Written explicitly rather than left to ffmpeg's copy-forward of
+            # the input's properties, which is all that has ever put them
+            # there. These are output flags rather than a `setparams` in the
+            # filter chain because the input is always a real file here, and
+            # measured on ffmpeg 9.0.1 the flags stick for a file input --
+            # they do NOT for a lavfi one, where primaries and transfer are
+            # silently dropped, which is why the test fixtures tag with
+            # setparams instead.
+            "-color_range", CLIP_COLOR_RANGE,
+            "-colorspace", CLIP_COLOR_SPACE,
+            "-color_primaries", CLIP_COLOR_PRIMARIES,
+            "-color_trc", CLIP_COLOR_TRC,
             "-crf", str(CLIP_CRF),
             "-preset", "medium",
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",

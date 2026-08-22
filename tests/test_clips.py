@@ -6,6 +6,10 @@ import pytest
 from bootleg.media.clips import clip_relpath, parse_clip_name
 from bootleg.media.probe import probe
 from bootleg.media.transcode import (
+    CLIP_COLOR_PRIMARIES,
+    CLIP_COLOR_RANGE,
+    CLIP_COLOR_SPACE,
+    CLIP_COLOR_TRC,
     CLIP_CRF,
     CLIP_FPS,
     CLIP_HEIGHT,
@@ -52,6 +56,32 @@ def test_the_locked_profile_constants_are_what_they_have_always_been():
     mirror of the code.
     """
     assert (CLIP_WIDTH, CLIP_HEIGHT, CLIP_FPS, CLIP_CRF) == (3840, 2160, 30, 20)
+    # Colour is the fifth property -- see the colour-metadata spec. The 24
+    # clips already on the drive carry exactly these, inherited by accident
+    # from a 10-bit HLG iPhone source; pinning them is what makes the
+    # agreement deliberate. Changing any of them breaks -c copy against
+    # every one of those clips.
+    assert (CLIP_COLOR_RANGE, CLIP_COLOR_SPACE, CLIP_COLOR_TRC, CLIP_COLOR_PRIMARIES) == (
+        "tv", "bt2020nc", "arib-std-b67", "bt2020"
+    )
+
+
+def test_make_clip_writes_the_locked_colour_metadata(source_4k, tmp_path):
+    """Colour is the fifth property `-c copy` assumes every clip shares, after
+    the frame, the rate, the sample aspect and the audio track.
+
+    This assertion holds today even with the flags removed, because ffmpeg
+    copies an input's colour properties forward and every source that gets
+    this far is already tagged as the profile (make_clip refuses the ones
+    that are not). That is exactly why it is worth pinning AND asserting:
+    the agreement is currently an accident of ffmpeg's defaults, and this
+    test is what notices if a future version stops propagating them.
+    """
+    dst = tmp_path / "clip.mp4"
+    make_clip(source_4k, dst, start_ms=1000, end_ms=3000)
+    assert _stream_field(
+        dst, "v:0", "color_range,color_space,color_transfer,color_primaries"
+    ) == f"{CLIP_COLOR_RANGE},{CLIP_COLOR_SPACE},{CLIP_COLOR_TRC},{CLIP_COLOR_PRIMARIES}"
 
 
 def test_clip_relpath_is_derived_from_the_span(tmp_path):
