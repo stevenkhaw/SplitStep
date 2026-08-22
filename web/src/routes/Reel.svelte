@@ -9,6 +9,7 @@
   import { startPolling } from '../lib/polling'
   import {
     REEL_POLL_INTERVAL_MS,
+    canWatchRendered,
     reelMembershipKey,
     renderBlockedReason,
     shouldPollReel,
@@ -25,6 +26,7 @@
   let loading = $state(true)
   let showPicker = $state(false)
   let showPreview = $state(false)
+  let showWatch = $state(false)
   let busy = $state(false)
   const toaster = createToaster()
 
@@ -59,6 +61,7 @@
   const items = $derived(detail?.items ?? [])
   const blocked = $derived(renderBlockedReason(items))
   const existing = $derived<SpanRef[]>(items.map(spanRef))
+  const canWatch = $derived(detail ? canWatchRendered(detail.reel) : false)
 
   // Whether there is still something worth polling for. Read through a
   // `$derived` (not `shouldPollReel(items)` inlined in the effect below) so
@@ -235,6 +238,20 @@
       onclick={() => (showPreview = !showPreview)}
     >{showPreview ? 'Hide preview' : 'Preview'}</button>
 
+    {#if canWatch}
+      <!-- Only offered once rendered_path is set, dirty or not: the file on
+           disk from the last render is still watchable regardless of
+           whether the current membership still matches it (canWatchRendered
+           in lib/reels.ts). Absent rather than merely disabled -- there is
+           nothing behind the button before a first render. -->
+      <button
+        data-watch
+        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
+               hover:bg-neutral-800"
+        onclick={() => (showWatch = !showWatch)}
+      >{showWatch ? 'Hide watch' : 'Watch'}</button>
+    {/if}
+
     <!-- Cutting is the ONLY action here that starts an encode. Render never
          enqueues clips: a button labelled "render" must not silently launch
          half an hour of work. Both are also disabled while `busy`: they now
@@ -293,6 +310,46 @@
       {#key reelMembershipKey(items)}
         <ReelPreview {items} onclose={() => (showPreview = false)} />
       {/key}
+    </div>
+  {/if}
+
+  {#if showWatch && canWatch && detail.reel.rendered_path}
+    <div class="mb-4 rounded-lg border border-neutral-800 p-4">
+      <div class="mb-3 flex items-baseline justify-between">
+        <h2 class="text-sm font-semibold">Watch</h2>
+        <div class="flex items-center gap-4 font-mono text-xs text-neutral-400">
+          <!-- Preview above seeks the 1080p proxy to each span in order --
+               it shows TIMING, and by design cannot reveal a -c copy
+               artifact (a mismatched profile that -c copy stitched without
+               re-encoding). This plays the actual rendered 4K file, the
+               only way to see one. When dirty, say so plainly rather than
+               silently showing a file that may no longer match the reel's
+               current membership -- mark_rendered leaves rendered_path set
+               across a membership change on purpose (see its docstring). -->
+          <span>
+            {detail.reel.dirty
+              ? 'rendered 4K · last render, not current membership'
+              : 'rendered 4K file'}
+          </span>
+          <button class="hover:text-neutral-200" onclick={() => (showWatch = false)}>
+            close
+          </button>
+        </div>
+      </div>
+      <!-- No <track kind="captions">: this is unscripted rally footage with
+           no dialogue and no caption source to author one from, so there is
+           nothing honest a <track> could contain. `muted={false}` is not a
+           lint workaround bolted on top -- it is the same explicit,
+           accurate statement of playback state VideoDeck.svelte already
+           makes for this exact class of content, and it is what tells
+           svelte-check's a11y-media-has-caption check this was a deliberate
+           call rather than an oversight, without a blanket ignore comment. -->
+      <video
+        controls
+        muted={false}
+        class="aspect-video w-full rounded bg-black"
+        src={api.reelUrl(detail.reel.slug)}
+      ></video>
     </div>
   {/if}
 

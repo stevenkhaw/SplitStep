@@ -1028,6 +1028,26 @@ def api_render_reel(slug: str, request: Request):
     return {"job_id": job_id, "already_running": already_running}
 
 
+@router.get("/media/reels/{slug}.mp4")
+def api_reel_media(slug: str, request: Request, range: str | None = Header(default=None)):
+    """Serve a rendered reel's mp4 with 206 range support, so <video> can seek.
+
+    `slug` is used ONLY to look the reel up -- the path served comes from
+    `rendered_path` in the database, never from a join against the URL. That
+    makes traversal structurally impossible rather than filtered-against
+    (there is no filesystem path built out of client input to sanitize), and
+    it gives the right 404s for free: an unrendered reel has rendered_path
+    IS NULL, so it 404s the same way an unknown slug does, with no special
+    case needed here. range_response itself 404s a rendered_path whose file
+    has since been deleted, so that case needs no separate check either.
+    """
+    reel = get_reel_by_slug(_conn(request), slug)
+    if reel is None or reel["rendered_path"] is None:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    path = _library(request).root / reel["rendered_path"]
+    return range_response(path, range)
+
+
 @router.post("/api/sessions/{session_id}/reels")
 def api_session_reel(session_id: str, body: SessionReelBody, request: Request):
     """Create (or additively merge into) the reel for a session's point or

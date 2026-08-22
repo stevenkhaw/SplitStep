@@ -97,3 +97,17 @@ export function reelStateLabel(reel: Reel): string {
   if (!reel.rendered_path) return 'not rendered'
   return reel.dirty ? 'needs re-render' : 'rendered'
 }
+
+/**
+ * Whether the builder should offer a Watch control for this reel.
+ *
+ * True even while `dirty`: mark_rendered deliberately leaves `rendered_path`
+ * set across a membership change (see its docstring) because the file on
+ * disk is unchanged and still watchable, only possibly out of sync with the
+ * reel's current items. Hiding Watch on dirty would throw away a playable
+ * file for no reason; the caller's job is to LABEL a dirty watch as the
+ * last render rather than the current membership, not to hide it.
+ */
+export function canWatchRendered(reel: Reel): boolean {
+  return reel.rendered_path !== null
+}

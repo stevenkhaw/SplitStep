@@ -108,6 +108,10 @@ export const api = {
   proxyUrl: (sessionId: string, idx: number) => `/media/${sessionId}/${idx}/proxy.mp4`,
   frameUrl: (sessionId: string, idx: number, atMs = 0) =>
     `/media/${sessionId}/${idx}/frame.jpg?at_ms=${atMs}`,
+  // The rendered 4K file, not the 1080p proxy `proxyUrl` points at -- the
+  // server resolves `slug` to a path itself, so this is a lookup key, not a
+  // filesystem path (see api_reel_media).
+  reelUrl: (slug: string) => `/media/reels/${slug}.mp4`,
 
   getSource: (id: string) => req<Source>(`/api/sources/${id}`),
   setup: (id: string, rotation_deg: number, preset_id: string) =>

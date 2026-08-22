@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from bootleg.api.app import create_app
 from bootleg.db.rallies import replace_rallies, set_point, set_star
-from bootleg.db.reels import create_reel, get_reel_by_slug
+from bootleg.db.reels import create_reel, get_reel_by_slug, mark_rendered
 from bootleg.db.sessions import add_source, find_or_create_session_for_date
 from bootleg.detect.segment import Interval
 from bootleg.media.clips import clip_relpath
@@ -292,3 +292,62 @@ def test_a_generated_slug_yields_to_one_already_taken(client, conn, session):
                        json={"which": "points"}).json()
 
     assert body["slug"] == "2026-08-18-points-2"
+
+
+def _rendered_reel(conn, library, name, data=b"0123456789fake-mp4-bytes"):
+    """A reel whose `rendered_path` points at a real file on disk, the way
+    `handle_reel` leaves one after a successful render."""
+    reel = create_reel(conn, name)
+    rel = f"reels/{reel['slug']}.mp4"
+    dst = library.root / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    mark_rendered(conn, reel["id"], rel, set())
+    return reel, dst
+
+
+def test_reel_media_serves_the_rendered_file(client, conn, library):
+    reel, _dst = _rendered_reel(conn, library, "r")
+
+    res = client.get(f"/media/reels/{reel['slug']}.mp4")
+
+    assert res.status_code == 200
+    assert res.headers["accept-ranges"] == "bytes"
+    assert res.content == b"0123456789fake-mp4-bytes"
+
+
+def test_reel_media_honours_a_range_header(client, conn, library):
+    reel, _dst = _rendered_reel(conn, library, "r")
+
+    res = client.get(f"/media/reels/{reel['slug']}.mp4", headers={"Range": "bytes=0-3"})
+
+    assert res.status_code == 206
+    assert res.content == b"0123"
+    assert res.headers["content-range"] == "bytes 0-3/24"
+
+
+def test_reel_media_404s_for_an_unknown_slug(client):
+    assert client.get("/media/reels/nope.mp4").status_code == 404
+
+
+def test_reel_media_404s_for_a_reel_that_was_never_rendered(client, conn):
+    reel = create_reel(conn, "never rendered")
+    assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 404
+
+
+def test_reel_media_404s_when_the_file_has_since_been_deleted(client, conn, library):
+    reel, dst = _rendered_reel(conn, library, "r")
+    dst.unlink()
+
+    assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 404
+
+
+def test_reel_media_is_still_servable_while_the_reel_is_dirty(client, conn, library):
+    # mark_rendered leaves rendered_path set even when a later add/remove
+    # marks the reel dirty again -- the file on disk is still the last
+    # successful render and still watchable, just possibly stale membership.
+    reel, _dst = _rendered_reel(conn, library, "r")
+    conn.execute("UPDATE reels SET dirty = 1 WHERE id = ?", (reel["id"],))
+    conn.commit()
+
+    assert client.get(f"/media/reels/{reel['slug']}.mp4").status_code == 200

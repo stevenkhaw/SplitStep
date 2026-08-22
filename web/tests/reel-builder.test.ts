@@ -18,11 +18,11 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
   }
 }
 
-function detail(items: ReelItem[], dirty = 1): ReelDetail {
+function detail(items: ReelItem[], dirty = 1, renderedPath: string | null = null): ReelDetail {
   return {
     reel: {
       id: 'r1', name: '2026-08-18 points', slug: '2026-08-18-points',
-      rendered_path: null, rendered_at: null, dirty,
+      rendered_path: renderedPath, rendered_at: renderedPath ? '2026-08-21T10:00:00Z' : null, dirty,
       created_at: '2026-08-21T10:00:00Z', item_count: items.length,
     },
     items,
@@ -43,6 +43,7 @@ const mockApi = {
   jobs: vi.fn().mockResolvedValue([]),
   frameUrl: () => 'about:blank',
   proxyUrl: () => 'about:blank',
+  reelUrl: () => 'about:blank',
 }
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
 
@@ -83,6 +84,7 @@ const cut = () => host.querySelector('[data-cut]') as HTMLButtonElement
 const previewToggle = () => host.querySelector('[data-preview]') as HTMLButtonElement
 const previewHeading = () =>
   [...host.querySelectorAll('h2')].find((h) => h.textContent === 'Preview') ?? null
+const watchToggle = () => host.querySelector('[data-watch]') as HTMLButtonElement | null
 
 async function settle(): Promise<void> {
   await Promise.resolve()
@@ -257,6 +259,31 @@ describe('Reel builder', () => {
     await afterRefetch(1)
 
     expect(previewHeading()).not.toBe(before)
+  })
+
+  it('offers no Watch control before the reel has ever been rendered', async () => {
+    await open(detail([item(1000)]))
+    expect(watchToggle()).toBeNull()
+  })
+
+  it('offers Watch once a rendered file exists, even while the reel is dirty', async () => {
+    // dirty defaults to 1 in `detail()` -- this is exactly the "last render,
+    // not current membership" case §5 requires Watch to stay available for.
+    await open(detail([item(1000)], 1, 'reels/2026-08-18-points.mp4'))
+    expect(watchToggle()).not.toBeNull()
+  })
+
+  it('reveals the rendered video on toggle and hides it again', async () => {
+    await open(detail([item(1000)], 0, 'reels/2026-08-18-points.mp4'))
+    expect(host.querySelector('video')).toBeNull()
+
+    watchToggle()!.click()
+    flushSync()
+    expect(host.querySelector('video')).not.toBeNull()
+
+    watchToggle()!.click()
+    flushSync()
+    expect(host.querySelector('video')).toBeNull()
   })
 })
 

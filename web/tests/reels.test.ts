@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canWatchRendered,
   missingClipCount,
   reelMembershipKey,
   reelStateLabel,
@@ -145,5 +146,23 @@ describe('reelStateLabel', () => {
     expect(reelStateLabel(reel({
       rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 0,
     }))).toBe('rendered')
+  })
+})
+
+describe('canWatchRendered', () => {
+  it('is false before the first render -- there is no file yet', () => {
+    expect(canWatchRendered(reel())).toBe(false)
+  })
+
+  it('is true once rendered', () => {
+    expect(canWatchRendered(reel({
+      rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 0,
+    }))).toBe(true)
+  })
+
+  it('stays true while dirty -- the last render is still on disk and still playable', () => {
+    expect(canWatchRendered(reel({
+      rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 1,
+    }))).toBe(true)
   })
 })
