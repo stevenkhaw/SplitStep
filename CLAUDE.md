@@ -231,6 +231,16 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   `-noautorotate` and applies the stored `rotation_deg`. Autorotate once scaled
   a 4K clip to 608x1080 and destroyed every detection. `rotation_filter()` is
   the single validator for the angle.
+- **The clip profile pins colour, and `make_clip` refuses a source that
+  disagrees.** `tv / bt2020nc / arib-std-b67 / bt2020` — HLG, what an iPhone
+  records and what every existing clip carries. Strict equality, untagged
+  included, and no override: this ffmpeg has neither libzimg nor libplacebo,
+  so there is no correct tonemap in either direction and a relabel would make
+  a file look right while being wrong. `probe.color_tag` is the one place
+  ffprobe's two spellings of "missing" collapse to `None`, and `concat`'s
+  pre-flight shares it so the two layers cannot disagree. Synthetic test
+  sources must be tagged via the `hlg_setparams` fixture — with a lavfi input
+  the `-color_*` output flags silently drop primaries and transfer.
 - **Migrations** are numbered `.sql` files in `bootleg/db/migrations/`, applied
   by `PRAGMA user_version`. Add a file; never edit an applied one.
 - **`replace_rallies`** runs as one transaction and carries starred/rejected

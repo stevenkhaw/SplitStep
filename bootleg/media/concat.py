@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from bootleg.media.probe import ffprobe_json, probe
+from bootleg.media.probe import color_tag, ffprobe_json, probe
 
 # Tests monkeypatch bootleg.media.concat.run_ffmpeg -- the name concat_clips
 # actually calls -- so it has to live in this module's namespace, not just
@@ -110,9 +110,15 @@ class ClipParams:
     # fast WRONG one, and the wrongness stays invisible until someone
     # watches the reel. The real library's clips are HLG HDR
     # (color_range=tv, color_space=bt2020nc, color_primaries=bt2020,
-    # color_transfer=arib-std-b67), inherited from source with nothing
-    # pinned by make_clip, so an SDR source mixed into the same reel is the
-    # likeliest mismatch to actually occur.
+    # color_transfer=arib-std-b67), and make_clip now pins exactly those and
+    # refuses a source carrying anything else -- so for clips this app cut
+    # these four can no longer diverge. They stay compared because a clip is
+    # a file on a disk: one cut before the pin landed, or dropped into
+    # clips/ from outside, still reaches concat.
+    #
+    # Read through probe.color_tag, NOT video.get, so "unknown" and an absent
+    # key both arrive as None. Raw reads would make two identically untagged
+    # clips compare unequal and cost a needless re-encode.
     color_range: str | None
     color_space: str | None
     color_primaries: str | None
@@ -156,10 +162,10 @@ def _parse_clip_params(data: dict, path: Path) -> ClipParams:
         # None means "ffprobe didn't tag it" and stays None -- see the field
         # comment on ClipParams for why guessing here would be the wrong
         # direction to be wrong.
-        color_range=video.get("color_range"),
-        color_space=video.get("color_space"),
-        color_primaries=video.get("color_primaries"),
-        color_transfer=video.get("color_transfer"),
+        color_range=color_tag(video, "color_range"),
+        color_space=color_tag(video, "color_space"),
+        color_primaries=color_tag(video, "color_primaries"),
+        color_transfer=color_tag(video, "color_transfer"),
         audio_codec=None if audio is None else audio.get("codec_name"),
         audio_sample_rate=None if audio is None else audio.get("sample_rate"),
         audio_channels=None if audio is None else int(audio["channels"]),

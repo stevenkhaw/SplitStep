@@ -67,7 +67,7 @@ def _sar(video: dict) -> float:
     return float(frac) if frac > 0 else 1.0
 
 
-def _color_tag(video: dict, key: str) -> str | None:
+def color_tag(video: dict, key: str) -> str | None:
     """One of ffprobe's colour fields, with both spellings of "missing" as None.
 
     ffprobe has two: its CSV writer prints the literal string "unknown" for a
@@ -77,7 +77,14 @@ def _color_tag(video: dict, key: str) -> str | None:
 
     All three mean the same thing to `make_clip`: this source's colour is not
     the locked profile's, and a clip cut from it could not be concatenated
-    with the ones already cut. Collapsing them here is what lets that check
+    with the ones already cut.
+
+    Public, and shared with `concat._parse_clip_params`, for the same reason
+    `ffprobe_json` is: the two layers must agree on what "missing" means.
+    Reading these keys raw there and normalized here would make an absent tag
+    and an "unknown" one compare UNEQUAL between two clips that are in fact
+    identically untagged -- a divergence that costs a full re-encode of a reel
+    that could have been copied. Collapsing them here is what lets that check
     stay a plain equality test instead of a special-case ladder -- None
     matches no pinned string, so an untagged source refuses exactly as a
     mislabelled one does.
@@ -221,8 +228,8 @@ def probe(path: Path, timeout: float | None = None) -> MediaInfo:
         codec_name=video.get("codec_name", ""),
         rotation_deg=_display_rotation(video),
         sar=_sar(video),
-        color_range=_color_tag(video, "color_range"),
-        color_space=_color_tag(video, "color_space"),
-        color_primaries=_color_tag(video, "color_primaries"),
-        color_transfer=_color_tag(video, "color_transfer"),
+        color_range=color_tag(video, "color_range"),
+        color_space=color_tag(video, "color_space"),
+        color_primaries=color_tag(video, "color_primaries"),
+        color_transfer=color_tag(video, "color_transfer"),
     )

@@ -282,14 +282,26 @@ matches how the parent spec already tests the encode profile.
 
 ## 8. Merge note: `feat/reels`
 
-`feat/reels` is **not merged into master** as of this spec. It refactors
-`probe.py` (splitting out a public `ffprobe_json()`) and adds `ClipParams` in
-`concat.py` carrying exactly these four fields, with a comment explaining that
-`MediaInfo` "deliberately does not carry" stream-level codec parameters
-"because only the concat demuxer cares about them".
+**Resolved 2026-08-21.** `feat/reels` has since merged to master, and master
+merged into this branch cleanly — no conflict in `probe.py`, exactly as
+predicted. The reconciliation it called for turned out to be a real defect
+rather than a comment fix, and was made as part of this work.
 
-After this lands that sentence is false — `make_clip` cares too. Textually the
-conflict is nil: `feat/reels` touched only the `probe()` / `ffprobe_json()`
-split, not the `MediaInfo` dataclass and not its return statement. On merge,
-either point `_parse_clip_params` at `MediaInfo` or rewrite that comment. They
-read the same ffprobe document, so there is no runtime cost either way.
+`concat._parse_clip_params` read the four colour keys with raw `video.get(...)`
+while `make_clip` reads them through the normalizer that folds ffprobe's
+`"unknown"` into `None`. Two layers disagreeing about what "missing" means is
+not cosmetic: an untagged clip whose keys are absent and one reporting
+`"unknown"` compare UNEQUAL in `divergences()`, sending a reel down the full
+re-encode path that `-c copy` exists to avoid. The normalizer is therefore now
+public as `probe.color_tag` and shared by both — the same move master made for
+`ffprobe_json`, for the same reason.
+
+`ClipParams` keeps its own four fields rather than borrowing `MediaInfo`'s.
+They answer different questions — `MediaInfo` describes a source, `ClipParams`
+describes what the concat demuxer will silently assume — and they now agree on
+the one thing that has to match, which is how a missing tag is spelled.
+
+The pre-flight comparison stays regardless, as §1 says. What changed is that
+for clips this app cuts, those four can no longer diverge; the comparison
+remains because a clip is a file on a disk, and one cut before this pin landed,
+or dropped into `clips/` from outside, still reaches concat.
