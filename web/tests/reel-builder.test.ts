@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { REEL_POLL_INTERVAL_MS } from '../src/lib/reels'
 import type { ReelDetail, ReelItem } from '../src/lib/types'
 
 function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
@@ -256,5 +257,83 @@ describe('Reel builder', () => {
     await afterRefetch(1)
 
     expect(previewHeading()).not.toBe(before)
+  })
+})
+
+// Same fake-timer idiom as tests/polling.test.ts: `startPolling` schedules
+// its own tick via `setTimeout`, so real timers would make these tests
+// either slow (waiting out a real 15s interval) or racy (a fixed number of
+// microtask ticks guessing when that timer fires).
+describe('Reel builder polling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('polls a reel with a missing clip and enables Render once it lands, without any user action', async () => {
+    // Three responses, not two: `startPolling` fires its first tick
+    // immediately (see its own docstring), so the moment the initial fetch
+    // (below, call 0) reveals a missing clip, the poll effect's own first
+    // tick (call 1) fires right behind it -- both drained by the same
+    // `advanceTimersByTimeAsync(0)`, before REEL_POLL_INTERVAL_MS has
+    // elapsed at all. The clip only actually finishes cutting on the tick
+    // that comes after a real interval (call 2), which is what the second
+    // `advanceTimersByTimeAsync` below exercises.
+    mockApi.getReel
+      .mockResolvedValueOnce(detail([item(1000, { clip_ready: false })]))
+      .mockResolvedValueOnce(detail([item(1000, { clip_ready: false })]))
+      .mockResolvedValueOnce(detail([item(1000)]))
+    component = mount(Reel, { target: host, props: { slug: '2026-08-18-points' } })
+    flushSync()
+    await vi.advanceTimersByTimeAsync(0)
+    flushSync()
+    expect(mockApi.getReel).toHaveBeenCalledTimes(2)
+    expect(render().disabled).toBe(true)
+
+    // No click anywhere in this test -- the encode "finishing" is entirely
+    // the third mocked response landing on the poll's next scheduled tick.
+    await vi.advanceTimersByTimeAsync(REEL_POLL_INTERVAL_MS)
+    flushSync()
+    expect(mockApi.getReel).toHaveBeenCalledTimes(3)
+    expect(render().disabled).toBe(false)
+  })
+
+  it('does not keep polling a reel with every clip already ready', async () => {
+    mockApi.getReel.mockResolvedValue(detail([item(1000), item(9000)]))
+    component = mount(Reel, { target: host, props: { slug: '2026-08-18-points' } })
+    flushSync()
+    await vi.advanceTimersByTimeAsync(0)
+    flushSync()
+    expect(mockApi.getReel).toHaveBeenCalledTimes(1)
+
+    // Several intervals' worth of time, not just one -- a single skipped
+    // tick could just as easily mean a poller that fires once and stops on
+    // its own for the wrong reason.
+    await vi.advanceTimersByTimeAsync(REEL_POLL_INTERVAL_MS * 3)
+    flushSync()
+    expect(mockApi.getReel).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops polling once the component unmounts', async () => {
+    // Every response leaves a clip missing, so nothing here ever stops the
+    // poller on its own -- only the unmount below does.
+    mockApi.getReel.mockResolvedValue(detail([item(1000, { clip_ready: false })]))
+    component = mount(Reel, { target: host, props: { slug: '2026-08-18-points' } })
+    flushSync()
+    await vi.advanceTimersByTimeAsync(0)
+    flushSync()
+    // The initial fetch (call 0) plus the poll effect's own immediate first
+    // tick (call 1) -- see the comment in the test above.
+    const callsBeforeUnmount = mockApi.getReel.mock.calls.length
+    expect(callsBeforeUnmount).toBeGreaterThan(0)
+
+    unmount(component)
+    component = null
+
+    await vi.advanceTimersByTimeAsync(REEL_POLL_INTERVAL_MS * 3)
+    expect(mockApi.getReel).toHaveBeenCalledTimes(callsBeforeUnmount)
   })
 })

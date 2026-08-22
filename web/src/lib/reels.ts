@@ -42,6 +42,34 @@ export function missingClipCount(items: ReelItem[]): number {
 }
 
 /**
+ * Whether the builder page should still be polling this reel.
+ *
+ * A thin wrapper over `missingClipCount`, but named for the decision it
+ * answers rather than the count it happens to use, so the "is there
+ * anything left to wait for" check has one place and one test instead of
+ * being reconstructed at the call site. `Reel.svelte` reads this through a
+ * `$derived` so a poll's own refetch -- a fresh `items` array every time,
+ * same as any other fetch -- only retriggers the polling effect on a
+ * genuine true-to-false flip, never on the refetch itself.
+ */
+export function shouldPollReel(items: ReelItem[]): boolean {
+  return missingClipCount(items) > 0
+}
+
+/**
+ * How often the builder page polls a reel with clips still being cut.
+ *
+ * `bootleg`'s job worker is single-threaded and each cut is a full ffmpeg
+ * encode -- minutes, not seconds -- so there is nothing to gain from a
+ * tight loop, only load on a server that shares its worker pool with media
+ * serving. 15s means "Render — N clips not cut yet" is never stale by more
+ * than a moment relative to a job that takes minutes, without polling
+ * anywhere near as often as `JobsBadge` (3s), which is cheap by comparison:
+ * one small `jobs` query rather than a full reel-with-items fetch.
+ */
+export const REEL_POLL_INTERVAL_MS = 15000
+
+/**
  * Why Render is disabled, or null if it is not.
  *
  * The count is in the string on purpose: §5.1 requires render to refuse

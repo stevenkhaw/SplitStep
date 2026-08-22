@@ -4,6 +4,7 @@ import {
   reelMembershipKey,
   reelStateLabel,
   renderBlockedReason,
+  shouldPollReel,
   spanKey,
 } from '../src/lib/reels'
 import type { Reel, ReelItem, SpanRef } from '../src/lib/types'
@@ -90,6 +91,20 @@ describe('reelMembershipKey', () => {
 describe('missingClipCount', () => {
   it('counts items with no clip on disk', () => {
     expect(missingClipCount([item(), item({ clip_ready: false })])).toBe(1)
+  })
+})
+
+describe('shouldPollReel', () => {
+  it('is true while any clip is still missing', () => {
+    expect(shouldPollReel([item({ clip_ready: false }), item()])).toBe(true)
+  })
+
+  it('is false once every clip is ready', () => {
+    expect(shouldPollReel([item(), item()])).toBe(false)
+  })
+
+  it('is false for an empty reel -- nothing to wait for', () => {
+    expect(shouldPollReel([])).toBe(false)
   })
 })
 

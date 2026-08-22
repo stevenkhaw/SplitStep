@@ -1,11 +1,19 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import AddRalliesPicker from '../components/AddRalliesPicker.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import ReelItemList from '../components/ReelItemList.svelte'
   import ReelPreview from '../components/ReelPreview.svelte'
   import { api } from '../lib/api'
   import { describeExportCounts } from '../lib/export'
-  import { reelMembershipKey, renderBlockedReason, spanRef } from '../lib/reels'
+  import { startPolling } from '../lib/polling'
+  import {
+    REEL_POLL_INTERVAL_MS,
+    reelMembershipKey,
+    renderBlockedReason,
+    shouldPollReel,
+    spanRef,
+  } from '../lib/reels'
   import { navigate } from '../lib/router.svelte'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import type { ReelDetail, ReelItem, SpanRef } from '../lib/types'
@@ -51,6 +59,65 @@
   const items = $derived(detail?.items ?? [])
   const blocked = $derived(renderBlockedReason(items))
   const existing = $derived<SpanRef[]>(items.map(spanRef))
+
+  // Whether there is still something worth polling for. Read through a
+  // `$derived` (not `shouldPollReel(items)` inlined in the effect below) so
+  // the effect only reruns on a genuine true<->false flip: `detail` gets a
+  // fresh `items` array on every fetch, poll-driven or not, and reacting to
+  // that directly would tear the poller down and rebuild it on every tick.
+  const hasMissingClips = $derived(shouldPollReel(items))
+
+  $effect(() => {
+    // The whole-branch finding this fixes: cutMissing() used to leave
+    // Render's "N clips not cut yet" caption stale for the entire time the
+    // jobs badge counted the encodes down, because nothing on this page
+    // re-read the reel once cutting kicked off. Polling only while a clip
+    // is missing, and stopping the moment none are, is what keeps that from
+    // becoming a page that polls a fully-rendered reel forever -- a request
+    // every few seconds against a server that is single-threaded for jobs
+    // and shares its worker pool with media serving, for a reel that will
+    // never change again on its own.
+    if (!hasMissingClips) return
+    // Snapshotted like the fetch effect above, and for the same reason:
+    // reading the `slug` prop inside the async fetcher would make it a
+    // tracked dependency of this effect too (its first tick runs
+    // synchronously, before any `await`), restarting the poll loop on any
+    // prop tick rather than only on a missing-clips transition.
+    const currentSlug = slug
+    const poller = startPolling(async () => {
+      // Read untracked for the same reason `currentSlug` is snapshotted
+      // above: this closure's first invocation runs synchronously inside
+      // this effect, so a tracked read of `busy` here would resubscribe
+      // the effect to every mutation start/end and rebuild the whole
+      // poller each time -- the "fighting an in-flight mutation" this
+      // guard exists to prevent, not cause. Skipping (rather than queuing
+      // to run the instant `busy` clears) is enough: `mutate()`
+      // unconditionally bumps `revision` when it finishes, success or
+      // failure, and the fetch effect above refetches on that regardless
+      // -- so a skipped tick costs at most one poll interval of staleness,
+      // never a stuck page.
+      if (untrack(() => busy)) return
+      try {
+        // Assigned straight to `detail`, not routed through `revision`:
+        // the revision effect sets `loading = true` on every run, and a
+        // silent background poll must not flash the whole page to
+        // "Loading…" out from under someone just reading the list.
+        //
+        // Nothing else needs to guard against this refetch. The preview is
+        // keyed on `reelMembershipKey`, not on `items` identity (see that
+        // function's comment), so a poll that leaves membership and order
+        // unchanged does not remount it or interrupt playback; and
+        // `ReelItemList` only reads its `items` prop when no drag is in
+        // progress (`shown` falls back to its own local `order` mid-drag),
+        // so a poll landing mid-drag cannot stomp that either.
+        detail = await api.getReel(currentSlug)
+      } catch {
+        // A background refresh failing is not worth a toast for a page
+        // nobody may currently be watching -- the next tick just retries.
+      }
+    }, REEL_POLL_INTERVAL_MS)
+    return () => poller.stop()
+  })
 
   async function mutate(fn: () => Promise<unknown>, failure: string): Promise<void> {
     // One in-flight mutation at a time -- membership/order writes AND the
