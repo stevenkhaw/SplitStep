@@ -79,6 +79,30 @@ async function open(d: ReelDetail) {
 
 const render = () => host.querySelector('[data-render]') as HTMLButtonElement
 const cut = () => host.querySelector('[data-cut]') as HTMLButtonElement
+const previewToggle = () => host.querySelector('[data-preview]') as HTMLButtonElement
+const previewHeading = () =>
+  [...host.querySelectorAll('h2')].find((h) => h.textContent === 'Preview') ?? null
+
+async function settle(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  flushSync()
+}
+
+// Waits for the Nth (0-indexed) call to getReel to have actually resolved
+// and been applied. Awaiting `mock.results[n].value` -- the exact Promise
+// the effect itself is chained off -- rather than a fixed number of
+// `Promise.resolve()` ticks guarantees the component's own `.then` (attached
+// first, when the effect ran) has already fired before this continues:
+// callbacks on one promise run in attachment order. A tick-counting
+// `settle()` is one layer too shallow for cutMissing()/render(), which now
+// wrap their API call in an extra `async () => { await ... }` inside
+// `mutate` -- one more promise hop than a fixed tick count assumed.
+async function afterRefetch(callIndex: number): Promise<void> {
+  await vi.waitFor(() => expect(mockApi.getReel.mock.results.length).toBeGreaterThan(callIndex))
+  await mockApi.getReel.mock.results[callIndex]!.value
+  flushSync()
+}
 
 describe('Reel builder', () => {
   it('renders the reel name and its items', async () => {
@@ -125,13 +149,25 @@ describe('Reel builder', () => {
 
   it('cutting is the only thing that enqueues an encode', async () => {
     await open(detail([item(1000), item(9000)]))
+
     render().click()
     flushSync()
     expect(mockApi.exportReelClips).not.toHaveBeenCalled()
+    await settle()
+
+    // The other direction: cutting must not also enqueue a render. Cleared
+    // rather than checked from a fresh mount, so this exercises the same
+    // shared `busy` guard the render click above just went through.
+    mockApi.renderReel.mockClear()
+    cut().click()
+    flushSync()
+    await settle()
+    expect(mockApi.renderReel).not.toHaveBeenCalled()
   })
 
   it('persists a reorder and refetches', async () => {
     await open(detail([item(1000), item(9000)]))
+    expect(mockApi.getReel).toHaveBeenCalledTimes(1)
     const handles = [...host.querySelectorAll('[data-drag-handle]')] as HTMLElement[]
     handles[0].dispatchEvent(new KeyboardEvent('keydown', {
       bubbles: true, key: 'ArrowDown', altKey: true,
@@ -141,6 +177,10 @@ describe('Reel builder', () => {
       { source_id: 'src1', start_ms: 9000, end_ms: 13000 },
       { source_id: 'src1', start_ms: 1000, end_ms: 5000 },
     ])
+    // The "refetches" half of the name: a successful reorder bumps
+    // `revision`, and the effect that watches it re-reads the reel.
+    await settle()
+    expect(mockApi.getReel).toHaveBeenCalledTimes(2)
   })
 
   it('removes an item through the API', async () => {
@@ -167,5 +207,54 @@ describe('Reel builder', () => {
     await Promise.resolve()
     flushSync()
     expect(host.textContent).toContain("Couldn't reorder")
+  })
+
+  it('does not remount the preview on a refetch that leaves membership unchanged', async () => {
+    await open(detail([item(1000), item(9000)]))
+    previewToggle().click()
+    flushSync()
+    const before = previewHeading()
+    expect(before).toBeTruthy()
+
+    // A fresh array of fresh objects, same spans in the same order -- what
+    // a real refetch returns, since JSON never shares identity with what
+    // produced it. cutMissing() is just a convenient way to trigger the
+    // refetch; the fixture's items are already all clip_ready.
+    mockApi.getReel.mockResolvedValue(detail([item(1000), item(9000)]))
+    cut().click()
+    flushSync()
+    await afterRefetch(1)
+
+    expect(previewHeading()).toBe(before)
+  })
+
+  it('remounts the preview when an item is removed', async () => {
+    await open(detail([item(1000), item(9000)]))
+    previewToggle().click()
+    flushSync()
+    const before = previewHeading()
+    expect(before).toBeTruthy()
+
+    mockApi.getReel.mockResolvedValue(detail([item(1000)]))
+    cut().click()
+    flushSync()
+    await afterRefetch(1)
+
+    expect(previewHeading()).not.toBe(before)
+  })
+
+  it('remounts the preview when the items are reordered', async () => {
+    await open(detail([item(1000), item(9000)]))
+    previewToggle().click()
+    flushSync()
+    const before = previewHeading()
+    expect(before).toBeTruthy()
+
+    mockApi.getReel.mockResolvedValue(detail([item(9000), item(1000)]))
+    cut().click()
+    flushSync()
+    await afterRefetch(1)
+
+    expect(previewHeading()).not.toBe(before)
   })
 })

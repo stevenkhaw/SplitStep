@@ -5,7 +5,7 @@
   import ReelPreview from '../components/ReelPreview.svelte'
   import { api } from '../lib/api'
   import { describeExportCounts } from '../lib/export'
-  import { renderBlockedReason, spanRef } from '../lib/reels'
+  import { reelMembershipKey, renderBlockedReason, spanRef } from '../lib/reels'
   import { navigate } from '../lib/router.svelte'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import type { ReelDetail, ReelItem, SpanRef } from '../lib/types'
@@ -53,10 +53,23 @@
   const existing = $derived<SpanRef[]>(items.map(spanRef))
 
   async function mutate(fn: () => Promise<unknown>, failure: string): Promise<void> {
-    // One in-flight mutation at a time. Every one of these rewrites
-    // membership or order and then refetches; overlapping them would let an
-    // older response land after a newer one and render a state the user has
-    // already moved past -- the same hazard LabelWriter serialises against.
+    // One in-flight mutation at a time -- membership/order writes AND the
+    // export and render kickoffs all funnel through here now, so a fast
+    // double-click on any one button can't fire two overlapping POSTs.
+    // Every one of these rewrites server state and then refetches;
+    // overlapping them would let an older response land after a newer one
+    // and render a state the user has already moved past -- the same
+    // hazard LabelWriter serialises against.
+    //
+    // The `if (busy) return` below is a backstop, not the primary guard:
+    // every button that calls into `mutate` is also `disabled={busy}` in
+    // the template, so a click ordinarily can't reach here while another
+    // mutation is in flight -- the user sees a disabled button, not a click
+    // that silently did nothing. This still checks `busy` itself, in case
+    // an event slips in between the click and the DOM reflecting it (a
+    // dispatched-not-clicked event, a stale reference to the element from
+    // before a re-render); dropping it would trade one silent no-op for
+    // another, just a rarer one.
     if (busy) return
     busy = true
     try {
@@ -92,34 +105,37 @@
     }, "Couldn't add those rallies")
   }
 
-  async function cutMissing(): Promise<void> {
-    // Fire-and-forget, exactly like the reviewed panel's export: encode
-    // progress is the jobs badge's job, and a second progress UI here would
-    // be a second thing to keep correct. The four counts stay four.
-    try {
+  function cutMissing(): void {
+    // Routed through `mutate` like every other action here: it used to
+    // fire outside the one-in-flight guard, so a fast double-click could
+    // send two overlapping export POSTs. That happened to be harmless only
+    // because the server's plan_reel_export buckets a re-click into
+    // `in_flight` rather than re-queueing -- a safety net standing in for a
+    // guarantee this page's own code claims to make. The four-counts
+    // reporting is unchanged: encode progress is still the jobs badge's
+    // job, not a second progress UI here.
+    mutate(async () => {
       const result = await api.exportReelClips(slug)
       toaster.push(`Clips: ${describeExportCounts(result)}`, 'info')
-      revision += 1
-    } catch (e) {
-      toaster.push(`Couldn't cut clips -- ${String(e)}`)
-    }
+    }, "Couldn't cut clips")
   }
 
-  async function render(): Promise<void> {
+  function render(): void {
     // Guarded by `blocked` on the button too; repeated here because the
     // button is not the only way this can be reached once a clip is deleted
     // between the fetch and the click.
     if (blocked) return
-    try {
+    // Same reasoning as cutMissing: routed through `mutate` so a double
+    // click can't fire two render requests, even though enqueue_reel_once's
+    // locked check-and-insert already makes a second one harmless server
+    // side.
+    mutate(async () => {
       const result = await api.renderReel(slug)
       toaster.push(
         result.already_running ? 'Already rendering.' : 'Rendering — see the jobs badge.',
         'info',
       )
-      revision += 1
-    } catch (e) {
-      toaster.push(`Couldn't render -- ${String(e)}`)
-    }
+    }, "Couldn't render")
   }
 </script>
 
@@ -145,6 +161,7 @@
     >Add rallies</button>
 
     <button
+      data-preview
       class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
              hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={items.length === 0}
@@ -153,23 +170,27 @@
 
     <!-- Cutting is the ONLY action here that starts an encode. Render never
          enqueues clips: a button labelled "render" must not silently launch
-         half an hour of work. -->
+         half an hour of work. Both are also disabled while `busy`: they now
+         go through the same one-in-flight `mutate` as every other action
+         here, and disabling is how a click while busy avoids being a
+         silent no-op -- the user sees why nothing happened instead of
+         wondering whether the click registered. -->
     <button
       data-cut
       class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
              hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-      disabled={items.length === 0}
+      disabled={items.length === 0 || busy}
       onclick={cutMissing}
-    >Cut missing clips</button>
+    >{busy ? 'Working…' : 'Cut missing clips'}</button>
 
     <button
       data-render
       class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
              hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-      disabled={blocked !== null}
+      disabled={blocked !== null || busy}
       title={blocked ?? ''}
       onclick={render}
-    >{blocked ? `Render — ${blocked}` : 'Render'}</button>
+    >{busy ? 'Working…' : blocked ? `Render — ${blocked}` : 'Render'}</button>
 
     <span class="ml-auto font-mono text-xs text-neutral-500">
       {items.length} clips{detail.reel.rendered_path && !detail.reel.dirty
@@ -190,11 +211,19 @@
   {/if}
 
   {#if showPreview && items.length > 0}
-    <!-- Keyed on the membership so a change remounts the preview with a
-         fresh controller rather than mutating one mid-playback, the same
-         guarantee Session.svelte gives QueueMode. -->
+    <!-- Keyed on reelMembershipKey(items), NOT on `items` itself: `items`
+         comes back from a refetch as a fresh array of fresh objects every
+         time (JSON never shares identity with what produced it), so keying
+         on the reference remounted the preview after every successful
+         mutation -- and after a failed one's recovery refetch -- even
+         though none of those change which spans are in the reel or their
+         order. reelMembershipKey only changes when membership or order
+         actually does, so the preview remounts with a fresh controller
+         exactly when one is needed (the same guarantee Session.svelte gives
+         QueueMode) and otherwise keeps playing through an unrelated
+         refetch. -->
     <div class="mb-4">
-      {#key items}
+      {#key reelMembershipKey(items)}
         <ReelPreview {items} onclose={() => (showPreview = false)} />
       {/key}
     </div>

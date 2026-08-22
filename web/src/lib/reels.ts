@@ -19,25 +19,22 @@ export function spanRef(span: SpanRef): SpanRef {
 }
 
 /**
- * `existing` with every span of `incoming` it does not already hold appended.
+ * A stable identity for a reel's current membership *and order*, for keying
+ * the preview's `{#key}` block.
  *
- * Additive, never a replacement: existing entries and the order a human
- * dragged them into are untouched. Overwriting membership would silently
- * discard a manual reorder -- the same class of mistake replace_rallies
- * makes with boundary edits, which already cost this project a 9.6-second
- * rally. Mirrors what `add_items` does server-side; used here so the picker
- * can show the result of an add before committing to it.
+ * `detail.items` is a fresh array of fresh objects on every fetch -- it
+ * comes back over the wire as JSON, which never shares identity with what
+ * produced it -- so keying on the array reference itself remounts the
+ * preview on every successful refetch (after `cutMissing()`, after
+ * `render()`) and even on a failed mutation's recovery refetch, none of
+ * which change which spans are in the reel or what order they play in.
+ * Joining each item's `spanKey` in list order gives a key that is stable
+ * across exactly those no-op refetches, and changes only when a span is
+ * actually added, removed, or reordered -- the cases that need a fresh
+ * preview controller rather than one mutated mid-playback.
  */
-export function mergeSpans(existing: SpanRef[], incoming: SpanRef[]): SpanRef[] {
-  const seen = new Set(existing.map(spanKey))
-  const out = [...existing]
-  for (const span of incoming) {
-    const key = spanKey(span)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(spanRef(span))
-  }
-  return out
+export function reelMembershipKey(items: ReelItem[]): string {
+  return items.map(spanKey).join('|')
 }
 
 export function missingClipCount(items: ReelItem[]): number {

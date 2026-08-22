@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  mergeSpans,
   missingClipCount,
+  reelMembershipKey,
   reelStateLabel,
   renderBlockedReason,
   spanKey,
@@ -51,27 +51,39 @@ describe('spanKey', () => {
   })
 })
 
-describe('mergeSpans', () => {
-  it('appends only what is new, in the order given', () => {
-    expect(mergeSpans([span('a', 1, 2)], [span('a', 3, 4), span('a', 5, 6)])).toEqual([
-      span('a', 1, 2), span('a', 3, 4), span('a', 5, 6),
-    ])
+describe('reelMembershipKey', () => {
+  it('is stable across two different array instances with the same spans in order', () => {
+    // The whole point: `detail.items` is a fresh array on every fetch (JSON
+    // never shares identity), so a `{#key}` on the array reference would
+    // remount on every refetch. The key must not.
+    const a = [item({ source_id: 's1', start_ms: 1000 }), item({ source_id: 's1', start_ms: 9000 })]
+    const b = [item({ source_id: 's1', start_ms: 1000 }), item({ source_id: 's1', start_ms: 9000 })]
+    expect(a).not.toBe(b)
+    expect(reelMembershipKey(a)).toBe(reelMembershipKey(b))
   })
 
-  it('never removes or reorders what is already there', () => {
-    // The whole point: a second click must not discard a manual reorder.
-    const existing = [span('a', 5, 6), span('a', 1, 2)]
-    expect(mergeSpans(existing, [span('a', 1, 2)])).toEqual(existing)
+  it('changes when an item is removed', () => {
+    const before = [item({ source_id: 's1', start_ms: 1000 }), item({ source_id: 's1', start_ms: 9000 })]
+    const after = [item({ source_id: 's1', start_ms: 1000 })]
+    expect(reelMembershipKey(before)).not.toBe(reelMembershipKey(after))
   })
 
-  it('drops a duplicate within the incoming list too', () => {
-    expect(mergeSpans([], [span('a', 1, 2), span('a', 1, 2)])).toEqual([span('a', 1, 2)])
+  it('changes when the same items are reordered', () => {
+    // Order is part of the identity too -- a reorder needs a fresh preview
+    // controller just as much as an add or remove does.
+    const before = [item({ source_id: 's1', start_ms: 1000 }), item({ source_id: 's1', start_ms: 9000 })]
+    const after = [item({ source_id: 's1', start_ms: 9000 }), item({ source_id: 's1', start_ms: 1000 })]
+    expect(reelMembershipKey(before)).not.toBe(reelMembershipKey(after))
   })
 
-  it('does not mutate its inputs', () => {
-    const existing = [span('a', 1, 2)]
-    mergeSpans(existing, [span('a', 3, 4)])
-    expect(existing).toEqual([span('a', 1, 2)])
+  it('changes when an item is added', () => {
+    const before = [item({ source_id: 's1', start_ms: 1000 })]
+    const after = [item({ source_id: 's1', start_ms: 1000 }), item({ source_id: 's1', start_ms: 9000 })]
+    expect(reelMembershipKey(before)).not.toBe(reelMembershipKey(after))
+  })
+
+  it('is empty but stable for an empty reel', () => {
+    expect(reelMembershipKey([])).toBe(reelMembershipKey([]))
   })
 })
 

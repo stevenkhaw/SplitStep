@@ -22,12 +22,18 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
   }
 }
 
-const sessions: Session[] = [{
-  id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed',
-  rally_count: 4, starred_count: 1, point_count: 2,
-}]
+const sessions: Session[] = [
+  {
+    id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed',
+    rally_count: 4, starred_count: 1, point_count: 2,
+  },
+  {
+    id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed',
+    rally_count: 1, starred_count: 0, point_count: 1,
+  },
+]
 
-const detail: SessionDetail = {
+const detailS1: SessionDetail = {
   session: { id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed' },
   sources: [],
   rallies: [
@@ -38,9 +44,33 @@ const detail: SessionDetail = {
   ],
 }
 
+// A second session with its own rallies, so a test can actually switch
+// sessions -- with only one session in the fixture, "changing session
+// clears the checked set" was untestable.
+//
+// Its rally deliberately reuses id 'r1' from session one's fixture. Real
+// rally ids are unique across the whole library, so this collision can't
+// happen in production -- but that is exactly why it is the right fixture
+// for THIS test: `checked` is a Set of rally ids, and if the picker ever
+// stopped clearing it on a session change, a stale id from the previous
+// session would silently re-render as checked here only when the new
+// session happens to reuse it, which the real backend's uniqueness makes
+// rare enough to never get noticed. A distinct id would make that failure
+// mode invisible to the test even though the reset itself is what's being
+// verified, giving a false pass. Same idea as spanKey's own session-agnostic
+// keying: the picker's correctness has to hold without leaning on ids being
+// unique across sessions.
+const detailS2: SessionDetail = {
+  session: { id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed' },
+  sources: [],
+  rallies: [
+    rally('r1', 1, { session_id: 's2', source_id: 'src2', point: 1 }),
+  ],
+}
+
 const mockApi = {
   listSessions: vi.fn().mockResolvedValue(sessions),
-  getSession: vi.fn().mockResolvedValue(detail),
+  getSession: vi.fn((id: string) => Promise.resolve(id === 's2' ? detailS2 : detailS1)),
 }
 vi.mock('../src/lib/api', () => ({ api: mockApi }))
 
@@ -135,5 +165,40 @@ describe('AddRalliesPicker', () => {
     ;(host.querySelector('[data-add]') as HTMLElement).click()
     flushSync()
     expect(onadd.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('clears the checked set when switching sessions', async () => {
+    const onadd = vi.fn()
+    await open({ onadd })
+    boxes()[0].click()
+    flushSync()
+    expect(boxes()[0].checked).toBe(true)
+
+    const select = host.querySelector('select[aria-label="Session"]') as HTMLSelectElement
+    select.value = 's2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    // getSession('s2') is async, so the row list is briefly in its
+    // "Loading…" state (no checkboxes at all) -- wait for the fetch to
+    // actually land rather than assuming two `settle()` ticks cover it.
+    await vi.waitFor(() => {
+      flushSync()
+      expect(boxes().length).toBeGreaterThan(0)
+    })
+
+    // detailS2's rally reuses id 'r1' -- see the fixture comment above for
+    // why. If `checked` survived the session switch, this box would render
+    // checked without ever having been clicked in session two.
+    expect(boxes().every((b) => !b.checked)).toBe(true)
+
+    // A subsequent, genuine check in session two sends only its own span --
+    // not a phantom carried over from session one's selection.
+    boxes()[0].click()
+    flushSync()
+    ;(host.querySelector('[data-add]') as HTMLElement).click()
+    flushSync()
+    expect(onadd).toHaveBeenCalledWith([
+      { source_id: 'src2', start_ms: 10000, end_ms: 14000 },
+    ])
   })
 })
