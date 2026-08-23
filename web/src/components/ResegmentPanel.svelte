@@ -3,7 +3,12 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
-  import { editedBoundaryCount, resegmentConfirmMessage, splitCount } from '../lib/resegment'
+  import {
+    editedBoundaryCount,
+    resegmentConfirmMessage,
+    resegmentLossPhrase,
+    splitCount,
+  } from '../lib/resegment'
   import type { Rally, Source } from '../lib/types'
   import ScoreCurve from './ScoreCurve.svelte'
 
@@ -218,10 +223,9 @@
       </div>
     {/if}
 
-    {#if editedCount > 0}
+    {#if editedCount > 0 || splits > 0}
       <p class="mt-2 text-caption text-danger">
-        {editedCount} hand-edited boundar{editedCount === 1 ? 'y' : 'ies'} on this source will be
-        discarded if you re-segment.
+        Re-segmenting will discard {resegmentLossPhrase(editedCount, splits)} on this source.
       </p>
     {/if}
     {#if lastCount !== null && threshold !== null}

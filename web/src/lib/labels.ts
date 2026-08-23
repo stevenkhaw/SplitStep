@@ -75,6 +75,13 @@ export type DetectedRally = Rally & { det_start_ms: number; det_end_ms: number }
  * "this rally has a detector span" -- `LabelController` uses it to filter at
  * construction, and the label-mode fake-server test harness uses the same
  * guard rather than re-deriving the check, so the two cannot drift.
+ *
+ * Tests only `det_start_ms`, but the narrowed type asserts both
+ * `det_start_ms` and `det_end_ms` are `number`. That is sound, not an
+ * oversight: `splitstep/db/migrations/009_rally_split.sql` carries
+ * `CHECK ((det_start_ms IS NULL) = (det_end_ms IS NULL))`, so the database
+ * itself guarantees the pair is always both-null or both-set, and one field
+ * proving non-null licenses the other.
  */
 export function isDetected(r: Rally): r is DetectedRally {
   return r.det_start_ms !== null

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { editedBoundaryCount, resegmentConfirmMessage, splitCount } from '../src/lib/resegment'
+import {
+  editedBoundaryCount,
+  resegmentConfirmMessage,
+  resegmentLossPhrase,
+  splitCount,
+} from '../src/lib/resegment'
 import type { Rally } from '../src/lib/types'
 
 function rally(overrides: Partial<Rally> = {}): Rally {
@@ -61,6 +66,24 @@ describe('editedBoundaryCount', () => {
   it('stars/rejects alone (no bounds change) do not count as edits', () => {
     const rallies = [rally({ id: 'r1', starred: 1, rejected: 0 })]
     expect(editedBoundaryCount(rallies, 'src1')).toBe(0)
+  })
+})
+
+describe('resegmentLossPhrase', () => {
+  it('says nothing was hand-edited for (0, 0)', () => {
+    expect(resegmentLossPhrase(0, 0)).toBe('nothing hand-edited')
+  })
+
+  it('names a single hand-edited boundary, singular, for (1, 0)', () => {
+    expect(resegmentLossPhrase(1, 0)).toBe('1 hand-edited boundary')
+  })
+
+  it('names a single split, singular, for (0, 1)', () => {
+    expect(resegmentLossPhrase(0, 1)).toBe('1 split')
+  })
+
+  it('names both losses, each pluralized independently, for (2, 3)', () => {
+    expect(resegmentLossPhrase(2, 3)).toBe('2 hand-edited boundaries and 3 splits')
   })
 })
 

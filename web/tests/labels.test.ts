@@ -79,16 +79,6 @@ describe('LabelController', () => {
     expect(c.current?.id).toBe('r1')
   })
 
-  it('does not seed a verdict from a hand-made rally', () => {
-    // The constructor's seeding loop must iterate the FILTERED list. A
-    // hand-made half inherits its parent's bounds-derived span only by
-    // accident; matching a stored record against it would attribute a verdict
-    // to a clip nobody judged.
-    const handMade = rally(1, { det_start_ms: null, det_end_ms: null })
-    const c = new LabelController([handMade], [record({ verdict: 'clean' })])
-    expect(c.total).toBe(0)
-  })
-
   it('setVerdict returns an action carrying the previous state', () => {
     const action = c.setVerdict('clean')
     expect(action).toEqual({

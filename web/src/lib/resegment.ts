@@ -31,8 +31,19 @@ export function splitCount(rallies: Rally[], sourceId: string): number {
   return rallies.filter((r) => r.source_id === sourceId && r.det_start_ms === null).length
 }
 
-/** The confirmation copy naming that cost, singular/plural correct. */
-export function resegmentConfirmMessage(editedCount: number, splits: number): string {
+/**
+ * The noun phrase naming what a re-segment on this source will cost,
+ * singular/plural correct in each count independently -- "1 hand-edited
+ * boundary", "2 splits", "1 hand-edited boundary and 3 splits", or (both
+ * counts zero) "nothing hand-edited".
+ *
+ * Shared by `resegmentConfirmMessage` (the click-time confirm dialog) and
+ * `ResegmentPanel`'s persistent warning (the decision-time paragraph the
+ * reviewer reads before clicking at all) so the two cannot say different
+ * things about the same cost -- that disagreement would be a worse bug than
+ * either one going silent.
+ */
+export function resegmentLossPhrase(editedCount: number, splits: number): string {
   const losses: string[] = []
   if (editedCount > 0) {
     losses.push(`${editedCount} hand-edited boundar${editedCount === 1 ? 'y' : 'ies'}`)
@@ -41,6 +52,11 @@ export function resegmentConfirmMessage(editedCount: number, splits: number): st
   // Both counts zero is still a real prompt: the reviewer is replacing every
   // rally on the source and should be told so, even when nothing hand-made
   // is at stake.
-  const what = losses.length ? losses.join(' and ') : 'nothing hand-edited'
+  return losses.length ? losses.join(' and ') : 'nothing hand-edited'
+}
+
+/** The confirmation copy naming that cost, singular/plural correct. */
+export function resegmentConfirmMessage(editedCount: number, splits: number): string {
+  const what = resegmentLossPhrase(editedCount, splits)
   return `Re-segmenting discards ${what} on this source. Stars and rejections are kept. Continue?`
 }
