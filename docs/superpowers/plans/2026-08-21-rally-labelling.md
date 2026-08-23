@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-08-21-rally-labelling-design.md`. Read it before Task 1.
-- Python runs from the `bootleg` conda env by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
+- Python runs from the `splitstep` conda env by path: `~/miniconda3/envs/splitstep/bin/pytest`, `~/miniconda3/envs/splitstep/bin/ruff`.
 - ruff line-length is 100.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
 - Migrations are numbered `.sql` files applied by `PRAGMA user_version`. Add `003_rally_labels.sql`; never edit `001_init.sql` or `002_rotation.sql`.
@@ -25,12 +25,12 @@
 ### Task 1: `rally_labels` table and its data module
 
 **Files:**
-- Create: `bootleg/db/migrations/003_rally_labels.sql`
-- Create: `bootleg/db/labels.py`
+- Create: `splitstep/db/migrations/003_rally_labels.sql`
+- Create: `splitstep/db/labels.py`
 - Test: `tests/test_labels.py`
 
 **Interfaces:**
-- Consumes: `bootleg.db.schema.migrate`, `bootleg.db.rallies.replace_rallies` (test only).
+- Consumes: `splitstep.db.schema.migrate`, `splitstep.db.rallies.replace_rallies` (test only).
 - Produces:
   - `VERDICTS: tuple[str, ...]`, `FLAG_ORDER: tuple[str, ...]`
   - `format_flags(flags: Iterable[str]) -> str`
@@ -41,7 +41,7 @@
 
 - [ ] **Step 1: Write the migration**
 
-Create `bootleg/db/migrations/003_rally_labels.sql`:
+Create `splitstep/db/migrations/003_rally_labels.sql`:
 
 ```sql
 -- Human judgements about spans of a source, kept as a corpus for scoring the
@@ -102,16 +102,16 @@ Create `tests/test_labels.py`:
 import pytest
 import sqlite3
 
-from bootleg.db.labels import (
+from splitstep.db.labels import (
     add_label,
     format_flags,
     latest_labels,
     parse_flags,
     record_boundary_correction,
 )
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -281,10 +281,10 @@ def test_record_boundary_correction_flags_only_the_edge_that_moved(conn, seeded)
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_labels.py -q`
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.db.labels'`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_labels.py -q`
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.db.labels'`
 
-- [ ] **Step 4: Write `bootleg/db/labels.py`**
+- [ ] **Step 4: Write `splitstep/db/labels.py`**
 
 ```python
 import sqlite3
@@ -418,18 +418,18 @@ def record_boundary_correction(
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_labels.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_labels.py -q`
 Expected: PASS, 14 passed
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all tests pass (348 existing + 14 new), ruff clean
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/db/migrations/003_rally_labels.sql bootleg/db/labels.py tests/test_labels.py
+git add splitstep/db/migrations/003_rally_labels.sql splitstep/db/labels.py tests/test_labels.py
 git commit -m "feat(db): an append-only label corpus anchored to detector spans
 
 Anchored to (source_id, span_start_ms, span_end_ms) rather than to a rally
@@ -444,7 +444,7 @@ catches anyone adding it back."
 ### Task 2: Label API routes
 
 **Files:**
-- Modify: `bootleg/api/routes.py` (imports at 12-20, body models near 42-56, new routes after `api_bounds` at 169-173)
+- Modify: `splitstep/api/routes.py` (imports at 12-20, body models near 42-56, new routes after `api_bounds` at 169-173)
 - Modify: `docs/superpowers/specs/2026-08-21-rally-labelling-design.md` (§8, first bullet group)
 - Test: `tests/test_api_labels.py`
 
@@ -463,11 +463,11 @@ Create `tests/test_api_labels.py`:
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.labels import add_label
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.api.app import create_app
+from splitstep.db.labels import add_label
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -570,15 +570,15 @@ def test_source_labels_404s_on_an_unknown_source(client, seeded):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_labels.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_labels.py -q`
 Expected: FAIL — the label routes return 404/405 and `test_source_labels_404s_on_an_unknown_source` is the only one that could accidentally pass.
 
 - [ ] **Step 3: Add the imports and body model**
 
-In `bootleg/api/routes.py`, add after the `bootleg.db.presets` import (line 11):
+In `splitstep/api/routes.py`, add after the `splitstep.db.presets` import (line 11):
 
 ```python
-from bootleg.db.labels import FLAG_ORDER, VERDICTS, add_label, latest_labels, parse_flags
+from splitstep.db.labels import FLAG_ORDER, VERDICTS, add_label, latest_labels, parse_flags
 ```
 
 Add after `class BoundsBody` (ends line 62):
@@ -610,7 +610,7 @@ class LabelBody(BaseModel):
 
 - [ ] **Step 4: Add the helper and the two routes**
 
-In `bootleg/api/routes.py`, add next to `_session_id_for_rally` (line 136):
+In `splitstep/api/routes.py`, add next to `_session_id_for_rally` (line 136):
 
 ```python
 def _rally_det_span(conn, rally_id: str):
@@ -673,7 +673,7 @@ def api_source_labels(source_id: str, request: Request):
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_labels.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_labels.py -q`
 Expected: PASS, 8 passed
 
 - [ ] **Step 6: Correct the spec's error-code claim**
@@ -698,13 +698,13 @@ with:
 
 - [ ] **Step 7: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/api/routes.py tests/test_api_labels.py \
+git add splitstep/api/routes.py tests/test_api_labels.py \
         docs/superpowers/specs/2026-08-21-rally-labelling-design.md
 git commit -m "feat(api): label a rally, and read a source's labels
 
@@ -720,7 +720,7 @@ table-level CHECK is unreachable over HTTP."
 ### Task 3: The bounds route records a boundary correction
 
 **Files:**
-- Modify: `bootleg/api/routes.py:169-173` (`api_bounds`)
+- Modify: `splitstep/api/routes.py:169-173` (`api_bounds`)
 - Test: `tests/test_api_labels.py` (append)
 
 **Interfaces:**
@@ -775,15 +775,15 @@ def test_a_boundary_drag_does_not_overwrite_an_existing_verdict(client, conn, se
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_labels.py -q -k boundary or bounds`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_labels.py -q -k boundary or bounds`
 Expected: FAIL — `test_a_boundary_drag_records_a_signed_correction` gets `[]`, `test_bounds_404s_on_an_unknown_rally` gets 200.
 
 - [ ] **Step 3: Add the import**
 
-In `bootleg/api/routes.py`, extend the Task 2 import line to:
+In `splitstep/api/routes.py`, extend the Task 2 import line to:
 
 ```python
-from bootleg.db.labels import (
+from splitstep.db.labels import (
     FLAG_ORDER,
     VERDICTS,
     add_label,
@@ -795,7 +795,7 @@ from bootleg.db.labels import (
 
 - [ ] **Step 4: Rewrite `api_bounds`**
 
-Replace lines 169-173 of `bootleg/api/routes.py`:
+Replace lines 169-173 of `splitstep/api/routes.py`:
 
 ```python
 @router.post("/api/rallies/{rally_id}/bounds")
@@ -836,18 +836,18 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_labels.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_labels.py -q`
 Expected: PASS, 12 passed
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean. `tests/test_api.py::test_bounds_endpoint_does_not_touch_det_columns` and `::test_bounds_rejects_inverted_range` must still pass unchanged.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/api/routes.py tests/test_api_labels.py
+git add splitstep/api/routes.py tests/test_api_labels.py
 git commit -m "feat(api): every boundary drag records a signed correction
 
 det_start_ms has always sat immutable beside the edited start_ms, so the
@@ -862,12 +862,12 @@ reported as success while updating nothing."
 ### Task 4: The scorer
 
 **Files:**
-- Create: `bootleg/label_score.py`
-- Modify: `bootleg/db/rallies.py:14` (rename `_overlap_fraction` → `overlap_fraction`, update its two call sites)
+- Create: `splitstep/label_score.py`
+- Modify: `splitstep/db/rallies.py:14` (rename `_overlap_fraction` → `overlap_fraction`, update its two call sites)
 - Test: `tests/test_label_score.py`
 
 **Interfaces:**
-- Consumes: `bootleg.detect.segment.Interval`, `bootleg.db.rallies.overlap_fraction`, `bootleg.db.labels.parse_flags`.
+- Consumes: `splitstep.detect.segment.Interval`, `splitstep.db.rallies.overlap_fraction`, `splitstep.db.labels.parse_flags`.
 - Produces:
   - `MATCH_OVERLAP_MIN: float`
   - `@dataclass(frozen=True) LabelRow(span_start_ms, span_end_ms, verdict, true_start_ms, true_end_ms)`
@@ -875,7 +875,7 @@ reported as success while updating nothing."
   - `@dataclass(frozen=True) LabelScore` with fields `matched_play, matched_not_play, unknown, missed_clean, labelled_clean, start_bias_ms, end_bias_ms, start_mae_ms, end_mae_ms, boundary_n` and properties `precision`, `span_recall`
   - `score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> LabelScore`
 
-Top-level module, not `bootleg/detect/`: `detect/` never imports `bootleg.db` and that layering is worth keeping. `bootleg/setup.py` is the existing precedent for a top-level module that spans layers.
+Top-level module, not `splitstep/detect/`: `detect/` never imports `splitstep.db` and that layering is worth keeping. `splitstep/setup.py` is the existing precedent for a top-level module that spans layers.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -890,8 +890,8 @@ hand-written data, and this file fits no constant. It checks that overlap
 matching, medians and the unknown count are computed the way the spec says.
 """
 
-from bootleg.detect.segment import Interval
-from bootleg.label_score import LabelRow, score_against_labels
+from splitstep.detect.segment import Interval
+from splitstep.label_score import LabelRow, score_against_labels
 
 
 def label(start, end, verdict="clean", true_start=None, true_end=None):
@@ -1006,12 +1006,12 @@ def test_a_verdict_less_boundary_row_still_contributes_boundary_stats_only():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_label_score.py -q`
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.label_score'`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_label_score.py -q`
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.label_score'`
 
 - [ ] **Step 3: Make the overlap rule public**
 
-In `bootleg/db/rallies.py`, rename `_overlap_fraction` to `overlap_fraction` (line 14) and update its two references inside `_overlaps_any` (line 24) — nothing outside the module used it. Add to its definition:
+In `splitstep/db/rallies.py`, rename `_overlap_fraction` to `overlap_fraction` (line 14) and update its two references inside `_overlaps_any` (line 24) — nothing outside the module used it. Add to its definition:
 
 ```python
 def overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
@@ -1025,7 +1025,7 @@ def overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> floa
     """
 ```
 
-- [ ] **Step 4: Write `bootleg/label_score.py`**
+- [ ] **Step 4: Write `splitstep/label_score.py`**
 
 ```python
 import sqlite3
@@ -1033,8 +1033,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 
-from bootleg.db.rallies import STAR_OVERLAP_MIN, overlap_fraction
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import STAR_OVERLAP_MIN, overlap_fraction
+from splitstep.detect.segment import Interval
 
 # The same floor replace_rallies uses to carry a star across a re-segment.
 # Aliased rather than re-declared so the two can never drift apart.
@@ -1178,18 +1178,18 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_label_score.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_label_score.py -q`
 Expected: PASS, 13 passed
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass. `tests/test_db.py` and `tests/test_api.py` exercise `replace_rallies`' star carry-over and must still pass after the rename.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/label_score.py bootleg/db/rallies.py tests/test_label_score.py
+git add splitstep/label_score.py splitstep/db/rallies.py tests/test_label_score.py
 git commit -m "feat: score a candidate segmentation against the label corpus
 
 Matching is by >50% overlap, reusing replace_rallies' own rule rather than
@@ -1204,10 +1204,10 @@ median."
 
 ---
 
-### Task 5: `bootleg labels export` and `bootleg labels score`
+### Task 5: `splitstep labels export` and `splitstep labels score`
 
 **Files:**
-- Modify: `bootleg/cli.py` (imports 8-25, new `cmd_labels_export`/`cmd_labels_score` after `cmd_segment` which ends near line 237, parser wiring near line 341)
+- Modify: `splitstep/cli.py` (imports 8-25, new `cmd_labels_export`/`cmd_labels_score` after `cmd_segment` which ends near line 237, parser wiring near line 341)
 - Test: `tests/test_cli.py` (append)
 
 **Interfaces:**
@@ -1222,9 +1222,9 @@ Append to `tests/test_cli.py`:
 def test_labels_export_writes_the_corpus_as_json(library, conn, capsys, tmp_path):
     # json, main, add_source, find_or_create_session_for_date and
     # write_features are already imported at the top of this file.
-    from bootleg.db.labels import add_label
-    from bootleg.db.rallies import replace_rallies
-    from bootleg.detect.segment import Interval
+    from splitstep.db.labels import add_label
+    from splitstep.db.rallies import replace_rallies
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -1266,7 +1266,7 @@ def test_labels_score_reports_the_recall_caveat_and_the_unknown_count(
     round, and a precision figure with the unknown count hidden conceals a
     sweep that matched three candidates and missed forty.
     """
-    from bootleg.db.labels import add_label
+    from splitstep.db.labels import add_label
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, idx = add_source(
@@ -1306,26 +1306,26 @@ def test_labels_score_without_features_fails(library, conn, capsys):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_cli.py -q -k labels`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_cli.py -q -k labels`
 Expected: FAIL — `argparse` exits with "invalid choice: 'labels'"
 
 - [ ] **Step 3: Add the imports**
 
-In `bootleg/cli.py`, add after the `bootleg.db.presets` import (line 10):
+In `splitstep/cli.py`, add after the `splitstep.db.presets` import (line 10):
 
 ```python
-from bootleg.db.labels import latest_labels, parse_flags
+from splitstep.db.labels import latest_labels, parse_flags
 ```
 
-and after the `bootleg.jobs.worker` import (line 22):
+and after the `splitstep.jobs.worker` import (line 22):
 
 ```python
-from bootleg.label_score import rows_to_labels, score_against_labels
+from splitstep.label_score import rows_to_labels, score_against_labels
 ```
 
 - [ ] **Step 4: Write the two commands**
 
-In `bootleg/cli.py`, add after `cmd_segment`:
+In `splitstep/cli.py`, add after `cmd_segment`:
 
 ```python
 def _source_or_fail(conn, source_id: str):
@@ -1426,7 +1426,7 @@ def cmd_labels_score(args) -> int:
 
 - [ ] **Step 5: Wire the parser**
 
-In `bootleg/cli.py`, add after the `source` subparser block (near line 347):
+In `splitstep/cli.py`, add after the `source` subparser block (near line 347):
 
 ```python
     p = sub.add_parser("labels", help="export or score the human label corpus")
@@ -1446,19 +1446,19 @@ In `bootleg/cli.py`, add after the `source` subparser block (near line 347):
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_cli.py -q -k labels`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_cli.py -q -k labels`
 Expected: PASS, 4 passed
 
 - [ ] **Step 7: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/cli.py tests/test_cli.py
-git commit -m "feat(cli): bootleg labels export and bootleg labels score
+git add splitstep/cli.py tests/test_cli.py
+git commit -m "feat(cli): splitstep labels export and splitstep labels score
 
 score re-runs segment() over cached features -- pure and ~200 ms -- so a
 threshold sweep against fixed human judgement is a sub-second operation
@@ -1730,7 +1730,7 @@ import type { LabelRecord, Rally } from './types'
 export type Verdict = 'clean' | 'not_play' | 'partly' | 'unsure'
 export type BoundaryFlag = 'start_early' | 'start_late' | 'end_early' | 'end_late'
 
-// Mirrors FLAG_ORDER in bootleg/db/labels.py. The server re-orders on write
+// Mirrors FLAG_ORDER in splitstep/db/labels.py. The server re-orders on write
 // anyway, but sending and rendering the same order keeps the UI's flag row
 // from reshuffling as you toggle.
 export const FLAG_ORDER: readonly BoundaryFlag[] = [
@@ -2484,7 +2484,7 @@ Expected: svelte-check clean (0 errors, 0 warnings), all vitest files pass. `web
 - [ ] **Step 10: Build and verify by hand**
 
 Run (from `web/`): `npm run build`
-Then, in a second terminal: `bootleg --library /Volumes/SanDisk_2TB/BootlegVision serve`
+Then, in a second terminal: `splitstep --library /Volumes/SanDisk_2TB/SplitStep serve`
 
 Open a session with rallies, press `L`, and confirm:
 - the clip loops inside its span rather than running on
@@ -2497,7 +2497,7 @@ Open a session with rallies, press `L`, and confirm:
 Then confirm the corpus landed:
 
 ```bash
-bootleg --library /Volumes/SanDisk_2TB/BootlegVision labels export <source_id>
+splitstep --library /Volumes/SanDisk_2TB/SplitStep labels export <source_id>
 ```
 
 - [ ] **Step 11: Commit**
@@ -2525,7 +2525,7 @@ QueueMode's undo stack for nothing."
 
 Once Task 7 is verified by hand, update the two documents that describe how the detector is evaluated:
 
-- `CLAUDE.md` — add `rally_labels` to the conventions section beside `replace_rallies`, noting that the corpus is anchored to detector spans and survives a re-segment, and that `bootleg labels score` is the scoring loop.
+- `CLAUDE.md` — add `rally_labels` to the conventions section beside `replace_rallies`, noting that the corpus is anchored to detector spans and survives a re-segment, and that `splitstep labels score` is the scoring loop.
 - `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` — its closing section asks for a second labelling pass. Add a line pointing at label mode as the way to produce one.
 
 Both are documentation-only and belong in a single follow-up commit.

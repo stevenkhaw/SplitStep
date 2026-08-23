@@ -12,16 +12,16 @@
 
 ## Global Constraints
 
-- Python is the `bootleg` conda env and is **not** the shell default. Invoke by path.
-- **In this worktree, run pytest as a module: `~/miniconda3/envs/bootleg/bin/python -m pytest`, never the bare `pytest` entry point.** The env editable-installs `bootleg` via a finder pinned to `/Users/stevenkhaw/Documents/GitHub/BootlegVision/bootleg` — the MAIN checkout, on `master`. The console script does not put the cwd on `sys.path`, so from here `import bootleg` silently resolves to master's code and every test in this plan passes or fails against the wrong package. `-m` prepends the cwd, which wins. CLAUDE.md documents the bare form because it is correct in the main checkout; it is wrong in a worktree.
-- `~/miniconda3/envs/bootleg/bin/ruff check bootleg tests` for lint (ruff reads paths, not imports, so the bare entry point is fine).
+- Python is the `splitstep` conda env and is **not** the shell default. Invoke by path.
+- **In this worktree, run pytest as a module: `~/miniconda3/envs/splitstep/bin/python -m pytest`, never the bare `pytest` entry point.** The env editable-installs `splitstep` via a finder pinned to `/Users/stevenkhaw/Documents/GitHub/SplitStep/splitstep` — the MAIN checkout, on `master`. The console script does not put the cwd on `sys.path`, so from here `import splitstep` silently resolves to master's code and every test in this plan passes or fails against the wrong package. `-m` prepends the cwd, which wins. CLAUDE.md documents the bare form because it is correct in the main checkout; it is wrong in a worktree.
+- `~/miniconda3/envs/splitstep/bin/ruff check splitstep tests` for lint (ruff reads paths, not imports, so the bare entry point is fine).
 - ruff line-length is **100**.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
 - ffmpeg must be on PATH. YOLO is never run in tests.
 - **Comments explain why, not what.** This codebase carries long rationale comments on non-obvious calls. Match that density; do not strip existing ones.
 - The four pinned values are, in ffprobe's own spellings and its own field order:
   `color_range=tv`, `color_space=bt2020nc`, `color_transfer=arib-std-b67`, `color_primaries=bt2020`.
-- **`feat/reels` is not merged.** Do not edit `bootleg/media/concat.py`; see Task 5's note.
+- **`feat/reels` is not merged.** Do not edit `splitstep/media/concat.py`; see Task 5's note.
 
 ## The two measured facts this plan is built on
 
@@ -44,7 +44,7 @@ The matrix and range stick; primaries and transfer are dropped. A fixture built 
 ### Task 1: `probe()` reads the four colour fields
 
 **Files:**
-- Modify: `bootleg/media/probe.py` (the `MediaInfo` dataclass, a new `_color_tag()` helper beside `_sar()`, and `probe()`'s return statement)
+- Modify: `splitstep/media/probe.py` (the `MediaInfo` dataclass, a new `_color_tag()` helper beside `_sar()`, and `probe()`'s return statement)
 - Test: `tests/test_probe.py`
 
 **Interfaces:**
@@ -102,14 +102,14 @@ def test_probe_reads_absent_colour_metadata_as_none(sample_video):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_probe.py -q -k colour
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_probe.py -q -k colour
 ```
 
 Expected: FAIL, `AttributeError: 'MediaInfo' object has no attribute 'color_range'`.
 
 - [ ] **Step 3: Add the fields, the helper, and the reads**
 
-In `bootleg/media/probe.py`, append four fields to `MediaInfo` (keep the existing trailing-comment style):
+In `splitstep/media/probe.py`, append four fields to `MediaInfo` (keep the existing trailing-comment style):
 
 ```python
     sar: float                          # sample (pixel) aspect ratio; 1.0 for square pixels
@@ -157,7 +157,7 @@ Extend `probe()`'s return statement:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_probe.py -q
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_probe.py -q
 ```
 
 Expected: PASS, whole file.
@@ -165,7 +165,7 @@ Expected: PASS, whole file.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/media/probe.py tests/test_probe.py
+git add splitstep/media/probe.py tests/test_probe.py
 git commit -m "feat(probe): read the four colour fields, both spellings of missing as None"
 ```
 
@@ -315,7 +315,7 @@ In `test_handle_clip_cuts_from_the_proxy_when_the_original_is_reclaimed`, add `h
 - [ ] **Step 6: Run the affected files**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -q
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_clips.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -q
 ```
 
 Expected: PASS. Nothing has changed behaviourally yet — this step is confirming the retagged fixtures still encode and still exercise what they did before.
@@ -332,12 +332,12 @@ git commit -m "test(clips): tag every synthetic source as the locked colour prof
 ### Task 3: Pin the four constants and write them explicitly
 
 **Files:**
-- Modify: `bootleg/media/transcode.py` (the locked-profile constant block, and `make_clip`'s `run_ffmpeg` argument list)
+- Modify: `splitstep/media/transcode.py` (the locked-profile constant block, and `make_clip`'s `run_ffmpeg` argument list)
 - Test: `tests/test_clips.py`
 
 **Interfaces:**
 - Consumes: `hlg_setparams` (Task 2).
-- Produces: `CLIP_COLOR_RANGE`, `CLIP_COLOR_SPACE`, `CLIP_COLOR_PRIMARIES`, `CLIP_COLOR_TRC` — all `str`, importable from `bootleg.media.transcode`. Task 4 compares against them.
+- Produces: `CLIP_COLOR_RANGE`, `CLIP_COLOR_SPACE`, `CLIP_COLOR_PRIMARIES`, `CLIP_COLOR_TRC` — all `str`, importable from `splitstep.media.transcode`. Task 4 compares against them.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -346,7 +346,7 @@ Extend the existing literal-guard test in `tests/test_clips.py`. That test is th
 Add to the imports:
 
 ```python
-from bootleg.media.transcode import (
+from splitstep.media.transcode import (
     CLIP_COLOR_PRIMARIES,
     CLIP_COLOR_RANGE,
     CLIP_COLOR_SPACE,
@@ -408,14 +408,14 @@ drift rather than in a test someone forgets -- is met by both.
 - [ ] **Step 2: Run to verify it fails**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q -k "colour or always_been"
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_clips.py -q -k "colour or always_been"
 ```
 
-Expected: FAIL at collection, `ImportError: cannot import name 'CLIP_COLOR_PRIMARIES' from 'bootleg.media.transcode'`.
+Expected: FAIL at collection, `ImportError: cannot import name 'CLIP_COLOR_PRIMARIES' from 'splitstep.media.transcode'`.
 
 - [ ] **Step 3: Add the constants**
 
-In `bootleg/media/transcode.py`, inside the existing locked-profile block, after `CLIP_CRF = 20`:
+In `splitstep/media/transcode.py`, inside the existing locked-profile block, after `CLIP_CRF = 20`:
 
 ```python
 CLIP_CRF = 20
@@ -465,7 +465,7 @@ In `make_clip`'s `run_ffmpeg([...])` list, directly after `"-pix_fmt", "yuv420p"
 - [ ] **Step 5: Run to verify it passes**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_clips.py -q
 ```
 
 Expected: PASS, whole file.
@@ -473,7 +473,7 @@ Expected: PASS, whole file.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/media/transcode.py tests/test_clips.py
+git add splitstep/media/transcode.py tests/test_clips.py
 git commit -m "feat(clips): pin the locked profile's colour metadata explicitly"
 ```
 
@@ -482,7 +482,7 @@ git commit -m "feat(clips): pin the locked profile's colour metadata explicitly"
 ### Task 4: Refuse a source whose colour is not the profile's
 
 **Files:**
-- Modify: `bootleg/media/transcode.py` (new `_require_locked_color()`, called from `make_clip`)
+- Modify: `splitstep/media/transcode.py` (new `_require_locked_color()`, called from `make_clip`)
 - Test: `tests/test_clips.py`
 
 **Interfaces:**
@@ -572,14 +572,14 @@ def test_make_clip_refusal_names_both_sets_of_tags(tmp_path):
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q -k "refuse or refusal"
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_clips.py -q -k "refuse or refusal"
 ```
 
 Expected: FAIL — `DID NOT RAISE <class 'TranscodeError'>` on all three, because `make_clip` currently cuts these happily.
 
 - [ ] **Step 3: Add the check**
 
-In `bootleg/media/transcode.py`, add above `make_clip`:
+In `splitstep/media/transcode.py`, add above `make_clip`:
 
 ```python
 def _require_locked_color(info: MediaInfo, src: Path) -> None:
@@ -623,8 +623,8 @@ def _require_locked_color(info: MediaInfo, src: Path) -> None:
 ```
 
 Change the existing import at the top of `transcode.py` from
-`from bootleg.media.probe import probe` to
-`from bootleg.media.probe import MediaInfo, probe`.
+`from splitstep.media.probe import probe` to
+`from splitstep.media.probe import MediaInfo, probe`.
 
 Call it in `make_clip`, directly after the existing `info = probe(src)`:
 
@@ -640,7 +640,7 @@ Call it in `make_clip`, directly after the existing `info = probe(src)`:
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest tests/test_clips.py -q
+~/miniconda3/envs/splitstep/bin/python -m pytest tests/test_clips.py -q
 ```
 
 Expected: PASS, whole file — including the existing tests, which Task 2 already tagged.
@@ -648,7 +648,7 @@ Expected: PASS, whole file — including the existing tests, which Task 2 alread
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/media/transcode.py tests/test_clips.py
+git add splitstep/media/transcode.py tests/test_clips.py
 git commit -m "feat(clips): refuse a source whose colour is not the locked profile's"
 ```
 
@@ -666,7 +666,7 @@ git commit -m "feat(clips): refuse a source whose colour is not the locked profi
 - [ ] **Step 1: Run the whole suite**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -m pytest -q
+~/miniconda3/envs/splitstep/bin/python -m pytest -q
 ```
 
 Expected: PASS. The count was 471 before this plan; it should be 471 plus the six tests added here (two in Task 1, one in Task 3, three in Task 4). If anything outside `tests/test_clips.py`, `tests/test_probe.py`, `tests/test_handler_clip.py` fails, it is a source fixture Task 2 missed — find it with `grep -rn "lavfi" tests/` and tag it the same way rather than loosening the check.
@@ -674,7 +674,7 @@ Expected: PASS. The count was 471 before this plan; it should be 471 plus the si
 - [ ] **Step 2: Lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: `All checks passed!`. Line-length is 100; the long f-string in `_require_locked_color` is already split to fit.
@@ -707,5 +707,5 @@ git commit -m "docs: note the clip profile's colour pin and the lavfi tagging tr
 
 - **`make_proxy` is untouched.** It has the same unpinned property, but a proxy never concatenates with anything, and the one path where a proxy reaches a clip (`has_original = 0`) is already consistent because the proxy inherits the source's tags.
 - **No pre-flight in `plan_export`.** Spec §6.3 — it would put an ffprobe per source into a request handler to pre-empt a failure that has not happened once, and `make_clip` is the chokepoint every caller passes through anyway.
-- **`bootleg/media/concat.py` is not edited.** It exists only on the unmerged `feat/reels` branch, where `ClipParams` already carries these four fields and a comment says `MediaInfo` "deliberately does not carry" stream-level parameters. That sentence is false once this lands. Whoever merges resolves it — spec §8. Textually the conflict is nil: `feat/reels` touched `probe()`'s body, not the `MediaInfo` dataclass and not its return statement.
+- **`splitstep/media/concat.py` is not edited.** It exists only on the unmerged `feat/reels` branch, where `ClipParams` already carries these four fields and a comment says `MediaInfo` "deliberately does not carry" stream-level parameters. That sentence is false once this lands. Whoever merges resolves it — spec §8. Textually the conflict is nil: `feat/reels` touched `probe()`'s body, not the `MediaInfo` dataclass and not its return statement.
 - **The 24 existing clips are not re-cut.** The pinned value is what they already carry.

@@ -1,10 +1,10 @@
-# BootlegVision — session handoff
+# SplitStep — session handoff
 
 Copy everything below into a new chat.
 
 ---
 
-I'm working on **BootlegVision**, a local tennis video tool I built at `/Users/stevenkhaw/Documents/GitHub/BootlegVision`. It ingests phone footage of my tennis sessions, automatically cuts it into rallies, and lets me review them in a keyboard-driven pass — star the good ones, reject false positives, fix boundaries — then eventually compile starred rallies into highlight reels.
+I'm working on **SplitStep**, a local tennis video tool I built at `/Users/stevenkhaw/Documents/GitHub/SplitStep`. It ingests phone footage of my tennis sessions, automatically cuts it into rallies, and lets me review them in a keyboard-driven pass — star the good ones, reject false positives, fix boundaries — then eventually compile starred rallies into highlight reels.
 
 **The code is complete. One real session has now been through it, and validating the
 detector against that footage produced a negative result** — read "Known weakness" below
@@ -14,15 +14,15 @@ cannot tell play from not-play, and the reason is not the weights.
 ## Setup
 
 ```bash
-conda activate bootleg
-cd /Users/stevenkhaw/Documents/GitHub/BootlegVision
+conda activate splitstep
+cd /Users/stevenkhaw/Documents/GitHub/SplitStep
 ```
 
-Library lives on an external SSD: `/Volumes/SanDisk_2TB/BootlegVision` (1.8 TB free).
+Library lives on an external SSD: `/Volumes/SanDisk_2TB/SplitStep` (1.8 TB free).
 
 I have this alias:
 ```bash
-alias bv="conda run -n bootleg bootleg --library /Volumes/SanDisk_2TB/BootlegVision"
+alias bv="conda run -n splitstep splitstep --library /Volumes/SanDisk_2TB/SplitStep"
 ```
 
 Machine: M2 MacBook Air, 8 GB RAM. ffmpeg 9.0.1. torch 2.13 with MPS. `detect_accel()` returns `videotoolbox` / `h264_videotoolbox` / `mps`, so both transcode and inference are GPU-accelerated.
@@ -201,20 +201,20 @@ bv --library ... serve           # then http://127.0.0.1:8420
 
 Inspect the DB directly:
 ```bash
-sqlite3 /Volumes/SanDisk_2TB/BootlegVision/library.db \
+sqlite3 /Volumes/SanDisk_2TB/SplitStep/library.db \
   "SELECT id, idx, start_ms, end_ms, confidence, starred FROM rallies ORDER BY idx;"
 ```
 
 Feature stream for a source:
 ```bash
-head -3 /Volumes/SanDisk_2TB/BootlegVision/sessions/<date>/sources/01/features.jsonl
+head -3 /Volumes/SanDisk_2TB/SplitStep/sessions/<date>/sources/01/features.jsonl
 ```
 Each line: `{"t":ms,"n":players_in_region,"near":{...},"far":{...},"hits":n,"hit_reg":0-1}` where player `v` is speed in body-lengths/sec.
 
 ## State
 
 - Both plans plus 4K clip export complete and merged to `master`. 471 Python tests, 319 TypeScript tests, ruff clean, svelte-check clean.
-- Design rationale and decision log: `docs/superpowers/specs/2026-08-19-bootlegvision-design.md`
+- Design rationale and decision log: `docs/superpowers/specs/2026-08-19-splitstep-design.md`
 - Implementation plans: `docs/superpowers/plans/`
 - **Still deferred:** reel building (concat with `-c copy`), cross-session rally browser.
 - **Rejected:** Reclaim Space. The drive holds ~110 hours of play keeping every original, so there is nothing to reclaim, and deleting an original forfeits the 4K source for any rally not flagged at the time.

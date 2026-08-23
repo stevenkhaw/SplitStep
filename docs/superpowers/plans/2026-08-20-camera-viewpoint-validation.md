@@ -11,7 +11,7 @@ supporting arguments. The verdict itself survives re-testing. See §"Correction"
 
 ## What was run
 
-`bootleg segment 0926ad87101b40dc9cd63a915858147c --dry-run` produced **61 rallies at
+`splitstep segment 0926ad87101b40dc9cd63a915858147c --dry-run` produced **61 rallies at
 threshold 0.25**, median 7.6 s — matching the spec §7 prediction exactly. Six intervals
 were then inspected frame by frame at their boundaries and interior: the 1st, 10th, 20th,
 35th, 50th and last.
@@ -298,8 +298,8 @@ survives a re-segment. Every manual boundary drag also records a signed millisec
 correction, with no extra keystrokes, so the boundary half of the corpus accumulates
 just by reviewing normally.
 
-`bootleg labels score <source_id> --threshold X` scores a candidate segmentation against
-whatever has been labelled so far, in well under a second. `bootleg labels export` writes
+`splitstep labels score <source_id> --threshold X` scores a candidate segmentation against
+whatever has been labelled so far, in well under a second. `splitstep labels export` writes
 it out as JSON alongside `labels_2026-08-18_source01.json`.
 
 The caveat above still stands, and the tooling does not soften it: every label attaches to

@@ -1,4 +1,4 @@
-# BootlegVision — Rally Labelling
+# SplitStep — Rally Labelling
 
 **Date:** 2026-08-21
 **Status:** Approved, ready for implementation
@@ -99,7 +99,7 @@ proposed, so there is no row to attach it to; the honest version of that case is
 
 ## 4. Data model
 
-New migration `bootleg/db/migrations/003_rally_labels.sql`. 001 and 002 are
+New migration `splitstep/db/migrations/003_rally_labels.sql`. 001 and 002 are
 applied and are not touched.
 
 ```sql
@@ -177,7 +177,7 @@ it to the verdict it withdrew and carry that forward on the next drag.
 
 ## 5. Capture
 
-Two write paths. `bootleg/db/labels.py` holds `add_label()` and
+Two write paths. `splitstep/db/labels.py` holds `add_label()` and
 `latest_labels()`; the API routes and the CLI both call those, the same
 single-source-of-truth arrangement `queue_setup` uses so that HTTP and terminal
 cannot drift.
@@ -297,7 +297,7 @@ to be wrong about on a span that contains no rally. The header shows
 
 ## 7. Consumption
 
-**Export.** `bootleg labels export <source_id>` writes JSON to stdout, or to
+**Export.** `splitstep labels export <source_id>` writes JSON to stdout, or to
 `--out PATH`; the intended destination is beside `labels_2026-08-18_source01.json`
 in `tests/fixtures/`. The top level carries `source`, `source_id`, `exported_on`
 and a `labels` array of rows shaped `{span_start_ms, span_end_ms, verdict,
@@ -315,7 +315,7 @@ four-value vocabulary in §3 (`clean`/`not_play`/`partly`/`unsure`). The same ke
 `*.jsonl`, and the `!tests/fixtures/**` re-inclusion exists for golden *feature*
 fixtures. A `.json` export is not ignored in the first place.
 
-**Scoring.** `bootleg labels score <source_id> --threshold X` re-runs `segment()`
+**Scoring.** `splitstep labels score <source_id> --threshold X` re-runs `segment()`
 over cached features and reports against the corpus. Candidates are matched to
 labelled spans by **>50% overlap** — the same rule `replace_rallies` uses for
 carrying stars, reused rather than reinvented.
@@ -366,7 +366,7 @@ two-stage detector split was built for.
   `CHECK` is unreachable over HTTP: `LabelBody.verdict` is required, so no
   request can produce a row carrying neither a verdict nor a corrected span.
   `add_label` still validates the verdict itself, for the CLI path.
-- `bootleg labels score` on a source with no `features.jsonl` has no HTTP route
+- `splitstep labels score` on a source with no `features.jsonl` has no HTTP route
   to return a status from — it is CLI-only. `cmd_labels_score` prints
   `source has not been detected yet: <id>` to stderr and returns exit code 1,
   the same convention `_source_or_fail` already uses for an unknown source id.
@@ -402,4 +402,4 @@ two-stage detector split was built for.
 - Any re-fit of `segment()` weights or thresholds.
 - Cross-source or cross-session corpus views.
 - Deleting or editing labels through the UI; the table is append-only and
-  `bootleg labels export` is the only read path outside the app.
+  `splitstep labels export` is the only read path outside the app.

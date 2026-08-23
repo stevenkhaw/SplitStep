@@ -4,13 +4,13 @@
 
 **Goal:** Segment ground-level footage correctly by classifying each source's camera viewpoint from its features and scoring subject-mode sources on a size-gated presence test plus audio, while leaving the existing two-player model untouched.
 
-**Architecture:** A new pure module `bootleg/detect/viewpoint.py` measures the median vertical separation between the two largest person boxes and returns a `ViewGeometry` (`pair` or `subject`, plus a derived box-height floor). `SegmentParams` gains a `profile` field; `_raw_score` branches on it. One helper, `params_for_frames()`, is the single place that turns a feature stream into params, so the detect handler, the CLI and the API cannot drift.
+**Architecture:** A new pure module `splitstep/detect/viewpoint.py` measures the median vertical separation between the two largest person boxes and returns a `ViewGeometry` (`pair` or `subject`, plus a derived box-height floor). `SegmentParams` gains a `profile` field; `_raw_score` branches on it. One helper, `params_for_frames()`, is the single place that turns a feature stream into params, so the detect handler, the CLI and the API cannot drift.
 
-**Tech Stack:** Python 3.12 (conda env `bootleg`), pytest, ruff, Svelte 5, vitest.
+**Tech Stack:** Python 3.12 (conda env `splitstep`), pytest, ruff, Svelte 5, vitest.
 
 ## Global Constraints
 
-- Python interpreter is not on the default PATH: invoke `~/miniconda3/envs/bootleg/bin/python`, `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
+- Python interpreter is not on the default PATH: invoke `~/miniconda3/envs/splitstep/bin/python`, `~/miniconda3/envs/splitstep/bin/pytest`, `~/miniconda3/envs/splitstep/bin/ruff`.
 - `pytest` runs with `filterwarnings = ["error"]`. A new warning fails the suite.
 - ruff line-length is 100.
 - Comments explain **why**, not what. This codebase carries long rationale comments on non-obvious calls. Match that density.
@@ -27,11 +27,11 @@
 
 | File | Responsibility |
 |---|---|
-| `bootleg/detect/viewpoint.py` | **new** — `ViewGeometry`, `analyze_view()`. Pure; imports only `features`. |
-| `bootleg/detect/segment.py` | modified — `profile`/`subject_min_h` on `SegmentParams`, `_subject_score`, `params_for_frames()`. |
-| `bootleg/jobs/handlers.py` | modified — detect handler uses `params_for_frames`. |
-| `bootleg/cli.py` | modified — `--threshold` becomes optional, resolved per source. |
-| `bootleg/api/routes.py` | modified — `threshold` optional on resegment and scores. |
+| `splitstep/detect/viewpoint.py` | **new** — `ViewGeometry`, `analyze_view()`. Pure; imports only `features`. |
+| `splitstep/detect/segment.py` | modified — `profile`/`subject_min_h` on `SegmentParams`, `_subject_score`, `params_for_frames()`. |
+| `splitstep/jobs/handlers.py` | modified — detect handler uses `params_for_frames`. |
+| `splitstep/cli.py` | modified — `--threshold` becomes optional, resolved per source. |
+| `splitstep/api/routes.py` | modified — `threshold` optional on resegment and scores. |
 | `tests/fixtures/ground_level_source01.jsonl` | **new** — 1200-frame slice of real footage. Golden fixture. |
 | `tests/test_viewpoint.py` | **new** — classifier tests, synthetic + golden. |
 | `tests/test_segment.py` | modified — subject-mode scoring and gate tests. |
@@ -58,10 +58,10 @@ The root cause of this whole spec was calibrating against synthetic signals. Eve
 The library drive must be mounted. This is a one-time extraction — the output is committed and never regenerated.
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -c "
-from bootleg.detect.features import read_features, write_features
+~/miniconda3/envs/splitstep/bin/python -c "
+from splitstep.detect.features import read_features, write_features
 from pathlib import Path
-src = Path('/Volumes/SanDisk_2TB/BootlegVision/sessions/2026-08-18/sources/01/features.jsonl')
+src = Path('/Volumes/SanDisk_2TB/SplitStep/sessions/2026-08-18/sources/01/features.jsonl')
 out = Path('tests/fixtures/ground_level_source01.jsonl')
 out.parent.mkdir(parents=True, exist_ok=True)
 write_features(out, read_features(src)[1000:2200])
@@ -90,7 +90,7 @@ from pathlib import Path
 
 import pytest
 
-from bootleg.detect.features import FeatureFrame, read_features
+from splitstep.detect.features import FeatureFrame, read_features
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -123,7 +123,7 @@ def test_ground_fixture_has_the_expected_shape(ground_features):
 
 - [ ] **Step 5: Run it**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_viewpoint.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_viewpoint.py -q`
 Expected: PASS, 1 test.
 
 - [ ] **Step 6: Commit**
@@ -138,7 +138,7 @@ git commit -m "test: commit a real-footage golden fixture for the detector"
 ## Task 2: The viewpoint classifier
 
 **Files:**
-- Create: `bootleg/detect/viewpoint.py`
+- Create: `splitstep/detect/viewpoint.py`
 - Test: `tests/test_viewpoint.py`
 
 **Interfaces:**
@@ -150,8 +150,8 @@ git commit -m "test: commit a real-footage golden fixture for the detector"
 Append to `tests/test_viewpoint.py`:
 
 ```python
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.viewpoint import analyze_view
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.viewpoint import analyze_view
 
 SAMPLE_MS = 200
 
@@ -229,19 +229,19 @@ Add `import pytest` at the top of the file if it is not already there.
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_viewpoint.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'bootleg.detect.viewpoint'`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_viewpoint.py -q`
+Expected: FAIL — `ModuleNotFoundError: No module named 'splitstep.detect.viewpoint'`
 
 - [ ] **Step 3: Write the module**
 
-Create `bootleg/detect/viewpoint.py`:
+Create `splitstep/detect/viewpoint.py`:
 
 ```python
 import statistics
 from dataclasses import dataclass
 from typing import Literal
 
-from bootleg.detect.features import FeatureFrame
+from splitstep.detect.features import FeatureFrame
 
 # Median |near.foot - far.foot| below which the two largest boxes are sharing
 # a horizon line rather than standing at different depths. A camera propped a
@@ -306,18 +306,18 @@ def analyze_view(frames: list[FeatureFrame]) -> ViewGeometry:
 
 - [ ] **Step 4: Run tests**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_viewpoint.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_viewpoint.py -q`
 Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Lint**
 
-Run: `~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: `All checks passed!`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/detect/viewpoint.py tests/test_viewpoint.py
+git add splitstep/detect/viewpoint.py tests/test_viewpoint.py
 git commit -m "feat(detect): classify camera viewpoint from feature geometry"
 ```
 
@@ -326,7 +326,7 @@ git commit -m "feat(detect): classify camera viewpoint from feature geometry"
 ## Task 3: Subject-mode scoring
 
 **Files:**
-- Modify: `bootleg/detect/segment.py`
+- Modify: `splitstep/detect/segment.py`
 - Test: `tests/test_segment.py`
 
 **Interfaces:**
@@ -433,21 +433,21 @@ def test_real_ground_footage_segments_into_rallies(ground_features):
 ```
 
 Add `import statistics` to the top of `tests/test_segment.py` if absent, and extend the
-existing segment import to `from bootleg.detect.segment import (SegmentParams,
+existing segment import to `from splitstep.detect.segment import (SegmentParams,
 params_for_frames, score_series, segment)`. Do not add a mid-file import — ruff
 flags E402 and the suite treats warnings as errors.
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q -k "subject or params_for_frames"`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q -k "subject or params_for_frames"`
 Expected: FAIL — `ImportError: cannot import name 'params_for_frames'`
 
 - [ ] **Step 3: Add the profile fields to `SegmentParams`**
 
-In `bootleg/detect/segment.py`, add the import at the top:
+In `splitstep/detect/segment.py`, add the import at the top:
 
 ```python
-from bootleg.detect.viewpoint import Profile, ViewGeometry, analyze_view
+from splitstep.detect.viewpoint import Profile, ViewGeometry, analyze_view
 ```
 
 Add these two fields to `SegmentParams`, after `pad_end_s`:
@@ -520,7 +520,7 @@ Add this as the first two lines of the body of `_raw_score`:
 
 - [ ] **Step 5: Add `params_for_frames`**
 
-Add at the end of `bootleg/detect/segment.py`:
+Add at the end of `splitstep/detect/segment.py`:
 
 ```python
 # Subject mode's own defaults. Fitted against audio-impact clusters on the one
@@ -568,18 +568,18 @@ from dataclasses import dataclass, replace
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q`
 Expected: PASS. Existing pair-mode tests must be untouched — their fixtures use `near_foot=0.9, far_foot=0.4`, a separation of 0.5, so they classify as `pair`.
 
 - [ ] **Step 7: Lint**
 
-Run: `~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: `All checks passed!`
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/detect/segment.py tests/test_segment.py
+git add splitstep/detect/segment.py tests/test_segment.py
 git commit -m "feat(detect): add subject-mode scoring gated on your player's box size"
 ```
 
@@ -588,9 +588,9 @@ git commit -m "feat(detect): add subject-mode scoring gated on your player's box
 ## Task 4: Wire the three call sites
 
 **Files:**
-- Modify: `bootleg/jobs/handlers.py:304`
-- Modify: `bootleg/cli.py:210`, `bootleg/cli.py:312`
-- Modify: `bootleg/api/routes.py:68`, `:187`, `:205`, `:217`
+- Modify: `splitstep/jobs/handlers.py:304`
+- Modify: `splitstep/cli.py:210`, `splitstep/cli.py:312`
+- Modify: `splitstep/api/routes.py:68`, `:187`, `:205`, `:217`
 - Test: `tests/test_handlers.py`, `tests/test_cli.py`, `tests/test_api.py`
 
 **Interfaces:**
@@ -626,12 +626,12 @@ Match the imports already used at the top of `tests/test_handlers.py`.
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_handlers.py -q -k subject_mode`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_handlers.py -q -k subject_mode`
 Expected: FAIL — the count will not be 16, because `SegmentParams()` is pair mode.
 
 - [ ] **Step 3: Update the detect handler**
 
-In `bootleg/jobs/handlers.py`, replace line 304:
+In `splitstep/jobs/handlers.py`, replace line 304:
 
 ```python
     intervals = segment(frames, SegmentParams())
@@ -643,11 +643,11 @@ with:
     intervals = segment(frames, params_for_frames(frames))
 ```
 
-Update the import in that file from `SegmentParams` to `params_for_frames` (keep `segment`). Remove `SegmentParams` from the import if nothing else in the file uses it — check with `grep -n SegmentParams bootleg/jobs/handlers.py`.
+Update the import in that file from `SegmentParams` to `params_for_frames` (keep `segment`). Remove `SegmentParams` from the import if nothing else in the file uses it — check with `grep -n SegmentParams splitstep/jobs/handlers.py`.
 
 - [ ] **Step 4: Update the CLI**
 
-In `bootleg/cli.py`, replace line 210:
+In `splitstep/cli.py`, replace line 210:
 
 ```python
     params = SegmentParams(threshold=args.threshold)
@@ -674,7 +674,7 @@ Change the argument default at line 312 so "not given" is distinguishable from a
 
 - [ ] **Step 5: Update the API**
 
-In `bootleg/api/routes.py`, change `ResegmentBody` (keep the existing NaN comment above it):
+In `splitstep/api/routes.py`, change `ResegmentBody` (keep the existing NaN comment above it):
 
 ```python
     threshold: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -708,18 +708,18 @@ and the response, so the UI can read the resolved default back:
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q`
 Expected: PASS. `tests/test_cli.py` already reads its expected threshold from `SegmentParams().threshold`, and its fixture classifies as pair, so it still reads 0.45.
 
 - [ ] **Step 7: Lint**
 
-Run: `~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: `All checks passed!`
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py bootleg/cli.py bootleg/api/routes.py tests/
+git add splitstep/jobs/handlers.py splitstep/cli.py splitstep/api/routes.py tests/
 git commit -m "feat(detect): route every segment call through params_for_frames"
 ```
 
@@ -731,7 +731,7 @@ Spec §8. The 0.25 threshold was fitted against audio clusters while audio drive
 
 **Files:**
 - Create: `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` (findings)
-- Possibly modify: `bootleg/detect/segment.py` (`SUBJECT_THRESHOLD`)
+- Possibly modify: `splitstep/detect/segment.py` (`SUBJECT_THRESHOLD`)
 
 **Interfaces:**
 - Consumes: the wired pipeline from Task 4.
@@ -740,7 +740,7 @@ Spec §8. The 0.25 threshold was fitted against audio clusters while audio drive
 - [ ] **Step 1: Re-segment the real source**
 
 ```bash
-bootleg --library /Volumes/SanDisk_2TB/BootlegVision segment 0926ad87101b40dc9cd63a915858147c --dry-run
+splitstep --library /Volumes/SanDisk_2TB/SplitStep segment 0926ad87101b40dc9cd63a915858147c --dry-run
 ```
 
 Expected: roughly 61 rallies, median duration near 7.6 s. Record the actual output.
@@ -750,7 +750,7 @@ Expected: roughly 61 rallies, median duration near 7.6 s. Record the actual outp
 Pick the 1st, 10th, 20th, 35th, 50th and last interval from that output. For each, with `START` and `DURATION` in seconds:
 
 ```bash
-ffmpeg -v error -ss START -i /Volumes/SanDisk_2TB/BootlegVision/sessions/2026-08-18/sources/01/proxy.mp4 -t DURATION -c copy /tmp/clip_N.mp4
+ffmpeg -v error -ss START -i /Volumes/SanDisk_2TB/SplitStep/sessions/2026-08-18/sources/01/proxy.mp4 -t DURATION -c copy /tmp/clip_N.mp4
 ```
 
 - [ ] **Step 3: Watch each clip and record the verdict**
@@ -763,10 +763,10 @@ Create `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` with a
 
 - [ ] **Step 5: Adjust the threshold if the verdict demands it**
 
-If clips systematically start or end late, the threshold is too high; if they merge separate points, it is too low or `close_gap_s` is too large. Change `SUBJECT_THRESHOLD` in `bootleg/detect/segment.py`, update the expected counts in `test_real_ground_footage_segments_into_rallies` and `test_detect_uses_subject_mode_on_ground_level_features`, and re-run:
+If clips systematically start or end late, the threshold is too high; if they merge separate points, it is too low or `close_gap_s` is too large. Change `SUBJECT_THRESHOLD` in `splitstep/detect/segment.py`, update the expected counts in `test_real_ground_footage_segments_into_rallies` and `test_detect_uses_subject_mode_on_ground_level_features`, and re-run:
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q
+~/miniconda3/envs/splitstep/bin/pytest -q
 ```
 
 If no adjustment is needed, say so explicitly in the findings document.
@@ -774,7 +774,7 @@ If no adjustment is needed, say so explicitly in the findings document.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md bootleg/detect/segment.py tests/
+git add docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md splitstep/detect/segment.py tests/
 git commit -m "docs: record visual validation of subject-mode rally boundaries"
 ```
 
@@ -880,7 +880,7 @@ In "Conventions that matter", add: *"Tuning constants are validated against `tes
 - [ ] **Step 3: Verify everything still passes**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all pass.

@@ -1,15 +1,15 @@
-# BootlegVision
+# SplitStep
 
 Local tennis rally cutter. Ingests phone footage, segments it into rallies
 using motion + audio detection, and serves a review UI for starring/rejecting
 rallies and tuning the segmentation. Everything — the API, the media server,
-and the review UI — runs as one process: `bootleg serve`.
+and the review UI — runs as one process: `splitstep serve`.
 
 ## Setup
 
 ```bash
-conda create -n bootleg python=3.12 -y
-conda activate bootleg
+conda create -n splitstep python=3.12 -y
+conda activate splitstep
 pip install -e ".[dev]"
 brew install ffmpeg
 ```
@@ -21,7 +21,7 @@ not at runtime:
 ```bash
 cd web
 npm install
-npm run build          # output goes to web/dist and is served by `bootleg serve`
+npm run build          # output goes to web/dist and is served by `splitstep serve`
 ```
 
 ## Library
@@ -29,18 +29,18 @@ npm run build          # output goes to web/dist and is served by `bootleg serve
 The library is a self-contained folder, normally on an external drive:
 
 ```
-/Volumes/BootlegVision/
+/Volumes/SplitStep/
   library.db
   _inbox/               drop videos here; failed ones land in _inbox/failed/
   sessions/<date>/sources/NN/{original,proxy.mp4,thumbs.jpg,features.jsonl}
   reels/
 ```
 
-Create it once with `bootleg init` — the app never creates a library
+Create it once with `splitstep init` — the app never creates a library
 implicitly:
 
 ```bash
-bootleg --library /Volumes/BootlegVision init
+splitstep --library /Volumes/SplitStep init
 ```
 
 `Library.open` (used by every other command) refuses to start unless
@@ -54,8 +54,8 @@ already exists at the path, so it can't clobber one by accident.
 ## Running it
 
 ```bash
-bootleg --library /Volumes/BootlegVision doctor      # check hardware + paths
-bootleg --library /Volumes/BootlegVision serve       # http://127.0.0.1:8420
+splitstep --library /Volumes/SplitStep doctor      # check hardware + paths
+splitstep --library /Volumes/SplitStep serve       # http://127.0.0.1:8420
 ```
 
 `serve` starts the FastAPI app, the background job worker, and the inbox
@@ -65,7 +65,7 @@ watcher in one process, and serves the built `web/dist` bundle at `/` — open
 hasn't been built yet, `serve` still runs — you just get the API with no UI,
 and a log warning telling you to run `npm run build`.
 
-Full CLI surface (`bootleg --help`):
+Full CLI surface (`splitstep --help`):
 
 ```
 init                create a new library tree and database
@@ -86,7 +86,7 @@ source set-preset    manage sources
    automatically. You can also queue (or force) it from the CLI:
 
    ```bash
-   bootleg --library /Volumes/BootlegVision ingest /path/to/clip.mov --now
+   splitstep --library /Volumes/SplitStep ingest /path/to/clip.mov --now
    ```
 
 2. **Detect.** Runs YOLO person-detection + audio impact detection over the
@@ -102,7 +102,7 @@ source set-preset    manage sources
    GPU:
 
    ```bash
-   bootleg --library /Volumes/BootlegVision segment <source_id> --threshold 0.35 --dry-run
+   splitstep --library /Volumes/SplitStep segment <source_id> --threshold 0.35 --dry-run
    ```
 
    Drop `--dry-run` to write the new intervals as the source's rallies (this
@@ -134,10 +134,10 @@ source from the same camera setup.
 **From the CLI:**
 
 ```bash
-bootleg --library /Volumes/BootlegVision preset add --name "court 3" \
+splitstep --library /Volumes/SplitStep preset add --name "court 3" \
   --quad "0.1,0.3 0.9,0.3 1.0,1.0 0.0,1.0"
-bootleg --library /Volumes/BootlegVision preset list
-bootleg --library /Volumes/BootlegVision source set-preset <source_id> <preset_id>
+splitstep --library /Volumes/SplitStep preset list
+splitstep --library /Volumes/SplitStep source set-preset <source_id> <preset_id>
 ```
 
 `--quad` takes four normalized (0-1) points as `x,y` pairs, space-separated.
@@ -149,7 +149,7 @@ whole-frame region) and do not change retroactively. Re-run detect without
 cached features and will not pick up the new region:
 
 ```bash
-bootleg --library /Volumes/BootlegVision detect <source_id> --now
+splitstep --library /Volumes/SplitStep detect <source_id> --now
 ```
 
 ## Keybindings
@@ -187,13 +187,13 @@ so both data and video work with hot reload, and you don't have to rebuild
 the bundle after every change:
 
 ```bash
-bootleg --library /Volumes/BootlegVision serve   # terminal 1: API + media on :8420
+splitstep --library /Volumes/SplitStep serve   # terminal 1: API + media on :8420
 cd web && npm run dev                            # terminal 2: UI on http://localhost:5173
 ```
 
 For anything that isn't UI iteration (checking the real integration, a demo,
 normal use), build once and run `serve` alone — that's the FastAPI-served
-path described above, and it's what `bootleg serve` gives you without Vite
+path described above, and it's what `splitstep serve` gives you without Vite
 running at all.
 
 ## Tests
@@ -202,8 +202,8 @@ Backend (pytest; YOLO is never run in tests — detector output is fixtured or
 mocked throughout):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q
-~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q
+~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Frontend:
@@ -225,7 +225,7 @@ Ingest, transcode, detection (vision + audio), segmentation, the job queue, the
 inbox watcher, the REST API, the full review UI (queue mode, timeline mode,
 re-segment tuning, play-region editor), and cutting starred/point rallies to 4K
 clips at the locked libx264 profile all work end to end and are served from a
-single `bootleg serve` process.
+single `splitstep serve` process.
 
 **Still deferred:** reel building via `-c copy` concat and the cross-session
 rally browser with filters. The `reels`/`reel_items` tables exist unused.

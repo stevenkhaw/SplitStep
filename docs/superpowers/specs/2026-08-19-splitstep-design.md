@@ -1,4 +1,4 @@
-# BootlegVision — Design
+# SplitStep — Design
 
 **Date:** 2026-08-19
 **Status:** Approved, ready for implementation planning
@@ -32,7 +32,7 @@ Ball tracking · in/out calls · stroke classification · score tracking · vert
 One Python process. Web server and job worker in the same app.
 
 ```
-bootleg serve --library /Volumes/BootlegVision
+splitstep serve --library /Volumes/SplitStep
 
   FastAPI (uvicorn)          :8420
    ├── /api/*                REST
@@ -45,7 +45,7 @@ bootleg serve --library /Volumes/BootlegVision
 
 No Docker, no Redis, no Celery. `^C` stops it.
 
-A future `bootleg worker --library ...` on a second machine is the same code with the web server disabled. Designed for, not built.
+A future `splitstep worker --library ...` on a second machine is the same code with the web server disabled. Designed for, not built.
 
 ### Hardware abstraction
 
@@ -61,7 +61,7 @@ A single module, `accel.py`, detects the host once at startup. Every other modul
 
 **Backend** — Python 3.12 (pinned; 3.13 torch wheels are still unreliable), FastAPI, uvicorn, stdlib `sqlite3` with explicit SQL, ultralytics (YOLO11), opencv-python-headless, numpy + scipy (audio onset detection), ffmpeg via subprocess.
 
-Environment: `conda create -n bootleg python=3.12`.
+Environment: `conda create -n splitstep python=3.12`.
 
 **Frontend** — Vite, Svelte 5, TypeScript, Tailwind v4, hand-rolled hash router, raw `<video>` element.
 
@@ -80,7 +80,7 @@ Environment: `conda create -n bootleg python=3.12`.
 The external drive *is* the library — a single self-contained portable folder. Unplug it from the Mac, plug it into the mini PC, run the same command.
 
 ```
-/Volumes/BootlegVision/
+/Volumes/SplitStep/
   library.db                       SQLite, WAL, synchronous=FULL
   _inbox/                          drop videos here
   sessions/<id>/                   one calendar date of play
@@ -96,9 +96,9 @@ The external drive *is* the library — a single self-contained portable folder.
 
 The app refuses to start unless `library.db` already exists at the path, naming it in the error. It never auto-creates the tree — doing so would silently build a second empty library on internal storage.
 
-Checking only that the directory exists and is writable is not enough, because that is exactly what a stale `/Volumes/BootlegVision` mountpoint looks like after an unclean eject: the app would start a clean empty library, report zero sessions, and ingest new footage to the internal SSD while the real drive remounted as `/Volumes/BootlegVision 1`. Requiring the database file distinguishes "the drive is here" from "something is mounted here."
+Checking only that the directory exists and is writable is not enough, because that is exactly what a stale `/Volumes/SplitStep` mountpoint looks like after an unclean eject: the app would start a clean empty library, report zero sessions, and ingest new footage to the internal SSD while the real drive remounted as `/Volumes/SplitStep 1`. Requiring the database file distinguishes "the drive is here" from "something is mounted here."
 
-First-time creation is explicit: `bootleg --library /Volumes/BootlegVision init`.
+First-time creation is explicit: `splitstep --library /Volumes/SplitStep init`.
 
 ### Retention
 
@@ -269,7 +269,7 @@ The user drags four corners over frame 1. Not the court lines — the region bot
 
 Stored as a `court_preset`, normalized 0-1, reusable across every session shot from the same spot. This one manual step is what makes adjacent courts disappear from detection — without it `w_outside`, the largest single weight, never fires.
 
-Until the visual editor exists, presets are created and assigned from the CLI: `bootleg preset add --name NAME --quad "x1,y1 x2,y2 x3,y3 x4,y4"`, then `bootleg source set-preset <source_id> <preset_id>`.
+Until the visual editor exists, presets are created and assigned from the CLI: `splitstep preset add --name NAME --quad "x1,y1 x2,y2 x3,y3 x4,y4"`, then `splitstep source set-preset <source_id> <preset_id>`.
 
 Automatic court-line detection was rejected: it is a substantial project on its own, and at roughly 1 ft camera height the lines converge into a sliver.
 

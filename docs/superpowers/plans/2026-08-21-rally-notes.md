@@ -12,15 +12,15 @@
 
 ## Global Constraints
 
-- Python runs from the `bootleg` conda env by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`. It is not the shell default.
+- Python runs from the `splitstep` conda env by path: `~/miniconda3/envs/splitstep/bin/pytest`, `~/miniconda3/envs/splitstep/bin/ruff`. It is not the shell default.
 - `pytest` runs with `filterwarnings = ["error"]`. A new warning fails the suite.
 - ruff line-length is 100.
-- Note cap is **120 characters**, enforced in both `bootleg/db/rallies.py::NOTE_MAX_CHARS` and `web/src/lib/notes.ts::NOTE_MAX_CHARS`.
+- Note cap is **120 characters**, enforced in both `splitstep/db/rallies.py::NOTE_MAX_CHARS` and `web/src/lib/notes.ts::NOTE_MAX_CHARS`.
 - Migrations are numbered `.sql` files applied by `PRAGMA user_version`. Add a file; never edit an applied one.
 - Comments explain **why**, not what. This codebase carries long rationale comments on non-obvious calls. Match that density.
 - All frontend logic goes in `web/src/lib/`, never in a `.svelte` file — jsdom has no `<video>`, so components are verified by hand and only `lib/` is testable.
 - YOLO is never run in tests. No test may invoke a real detector.
-- **Phase 2 (Tasks 5–7) is blocked** until the reels-builder branch merges — that work owns `bootleg/export.py`, `bootleg/jobs/handlers.py`, and `bootleg/media/`. Do not start Task 5 before confirming it has landed. Tasks 1–4 touch none of those files.
+- **Phase 2 (Tasks 5–7) is blocked** until the reels-builder branch merges — that work owns `splitstep/export.py`, `splitstep/jobs/handlers.py`, and `splitstep/media/`. Do not start Task 5 before confirming it has landed. Tasks 1–4 touch none of those files.
 
 **One correction to the spec:** §3 says the route rejects an over-long note with a 400. Pydantic validators in this codebase (e.g. `PresetCreateBody.check_points`) surface as **422**, and Task 2 follows that existing behavior rather than adding custom exception handling for one route.
 
@@ -31,13 +31,13 @@
 ### Task 1: The `note` column and its carry-across
 
 **Files:**
-- Create: `bootleg/db/migrations/006_rally_notes.sql`
-- Modify: `bootleg/db/rallies.py` (add `NOTE_MAX_CHARS`, `_carried_note`, extend `replace_rallies`)
+- Create: `splitstep/db/migrations/006_rally_notes.sql`
+- Modify: `splitstep/db/rallies.py` (add `NOTE_MAX_CHARS`, `_carried_note`, extend `replace_rallies`)
 - Test: `tests/test_rally_notes.py` (create)
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `rallies.note TEXT NOT NULL DEFAULT ''`; `bootleg.db.rallies.NOTE_MAX_CHARS: int = 120`; `_carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str`.
+- Produces: `rallies.note TEXT NOT NULL DEFAULT ''`; `splitstep.db.rallies.NOTE_MAX_CHARS: int = 120`; `_carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -46,9 +46,9 @@ Create `tests/test_rally_notes.py`:
 ```python
 import pytest
 
-from bootleg.db.rallies import list_rallies, replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import list_rallies, replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -133,12 +133,12 @@ def test_a_note_alone_keeps_a_rally_in_the_carry_over_read_back(conn, seeded):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rally_notes.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rally_notes.py -v`
 Expected: all five FAIL, `sqlite3.OperationalError: no such column: note`.
 
 - [ ] **Step 3: Write the migration**
 
-Create `bootleg/db/migrations/006_rally_notes.sql`:
+Create `splitstep/db/migrations/006_rally_notes.sql`:
 
 ```sql
 -- One free-text note per rally, written during review and burned into the
@@ -159,7 +159,7 @@ ALTER TABLE rallies ADD COLUMN note TEXT NOT NULL DEFAULT '';
 
 - [ ] **Step 4: Carry the note across a re-segment**
 
-In `bootleg/db/rallies.py`, add the cap constant beside `STAR_OVERLAP_MIN`:
+In `splitstep/db/rallies.py`, add the cap constant beside `STAR_OVERLAP_MIN`:
 
 ```python
 # The longest note that still renders as two lines inside the caption pill at
@@ -236,18 +236,18 @@ Update the `replace_rallies` docstring's first line to name the note:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rally_notes.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rally_notes.py -v`
 Expected: 5 passed.
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all tests pass (471 + 5 new), ruff clean. `tests/test_db.py` and `tests/test_rallies_point.py` exercise `replace_rallies` heavily — if either fails, the INSERT column list and its value tuple have drifted out of step.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/db/migrations/006_rally_notes.sql bootleg/db/rallies.py tests/test_rally_notes.py
+git add splitstep/db/migrations/006_rally_notes.sql splitstep/db/rallies.py tests/test_rally_notes.py
 git commit -m "feat(db): a note per rally, carried across a re-segment by overlap"
 ```
 
@@ -256,8 +256,8 @@ git commit -m "feat(db): a note per rally, carried across a re-segment by overla
 ### Task 2: `set_note` and the write route
 
 **Files:**
-- Modify: `bootleg/db/rallies.py` (add `set_note`)
-- Modify: `bootleg/api/routes.py` (add `NoteBody`, `api_note`, import `set_note`)
+- Modify: `splitstep/db/rallies.py` (add `set_note`)
+- Modify: `splitstep/api/routes.py` (add `NoteBody`, `api_note`, import `set_note`)
 - Test: `tests/test_rally_notes.py` (extend), `tests/test_api.py` (extend)
 
 **Interfaces:**
@@ -270,7 +270,7 @@ Append to `tests/test_rally_notes.py`:
 
 ```python
 def test_set_note_writes_and_overwrites(conn, seeded):
-    from bootleg.db.rallies import set_note
+    from splitstep.db.rallies import set_note
 
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])
@@ -288,7 +288,7 @@ def test_set_note_does_not_stamp_reviewed_at(conn, seeded):
     # a note is not one. "check this later" is a perfectly ordinary note, and
     # flipping the session to reviewed because someone typed it would report a
     # judgement nobody made.
-    from bootleg.db.rallies import set_note
+    from splitstep.db.rallies import set_note
 
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])
@@ -347,12 +347,12 @@ def test_note_route_clears_a_note_with_an_empty_string(client, seeded_session):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rally_notes.py tests/test_api.py -k note -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rally_notes.py tests/test_api.py -k note -v`
 Expected: FAIL — `ImportError: cannot import name 'set_note'` for the db tests, 404 for the route tests.
 
 - [ ] **Step 3: Write `set_note`**
 
-In `bootleg/db/rallies.py`, beside `set_point`:
+In `splitstep/db/rallies.py`, beside `set_point`:
 
 ```python
 def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
@@ -370,7 +370,7 @@ def set_note(conn: sqlite3.Connection, rally_id: str, note: str) -> None:
 
 - [ ] **Step 4: Add the route**
 
-In `bootleg/api/routes.py`, add to the imports from `bootleg.db.rallies` (the block that already imports `set_bounds`, `set_point`): `NOTE_MAX_CHARS`, `set_note`.
+In `splitstep/api/routes.py`, add to the imports from `splitstep.db.rallies` (the block that already imports `set_bounds`, `set_point`): `NOTE_MAX_CHARS`, `set_note`.
 
 Add the body model beside `PointBody`:
 
@@ -406,18 +406,18 @@ def api_note(rally_id: str, body: NoteBody, request: Request):
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rally_notes.py tests/test_api.py -k note -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rally_notes.py tests/test_api.py -k note -v`
 Expected: all pass.
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: green.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/db/rallies.py bootleg/api/routes.py tests/test_rally_notes.py tests/test_api.py
+git add splitstep/db/rallies.py splitstep/api/routes.py tests/test_rally_notes.py tests/test_api.py
 git commit -m "feat(api): POST /api/rallies/{id}/note"
 ```
 
@@ -534,7 +534,7 @@ import type { Rally } from './types'
 /**
  * The longest note that still renders as two lines inside the caption pill at
  * 4K without shrinking the type. Mirrors NOTE_MAX_CHARS in
- * bootleg/db/rallies.py -- the server enforces it too, because the UI is not
+ * splitstep/db/rallies.py -- the server enforces it too, because the UI is not
  * the only writer a library ever has.
  */
 export const NOTE_MAX_CHARS = 120
@@ -803,7 +803,7 @@ Expected: all tests pass, 0 errors 0 warnings.
 
 - [ ] **Step 6: Verify by hand in the real app**
 
-Run: `cd web && npm run build`, then with `bootleg serve` running, open a session, press `N`, type a note with a space in it, press Enter. Confirm: the ✎ turns blue, star/reject did not fire on the letters typed, reloading the page shows the note still there, and Escape on a second edit discards it.
+Run: `cd web && npm run build`, then with `splitstep serve` running, open a session, press `N`, type a note with a space in it, press Enter. Confirm: the ✎ turns blue, star/reject did not fire on the letters typed, reloading the page shows the note still there, and Escape on a second edit discards it.
 
 - [ ] **Step 7: Commit**
 
@@ -816,12 +816,12 @@ git commit -m "feat(queue): N writes a note on the current rally"
 
 ## Phase 2 — Burn-in (blocked on the reels branch)
 
-**Before starting Task 5:** confirm the reels-builder work has merged (`git log --oneline -20`, look for reel/concat commits) and rebase onto it. Tasks 5–7 touch `bootleg/media/` and `bootleg/export.py`, which that work owns until then.
+**Before starting Task 5:** confirm the reels-builder work has merged (`git log --oneline -20`, look for reel/concat commits) and rebase onto it. Tasks 5–7 touch `splitstep/media/` and `splitstep/export.py`, which that work owns until then.
 
 ### Task 5: `render_caption`
 
 **Files:**
-- Create: `bootleg/media/caption.py`
+- Create: `splitstep/media/caption.py`
 - Test: `tests/test_caption.py` (create)
 
 **Interfaces:**
@@ -833,7 +833,7 @@ git commit -m "feat(queue): N writes a note on the current rally"
 Create `tests/test_caption.py`:
 
 ```python
-from bootleg.media.caption import render_caption
+from splitstep.media.caption import render_caption
 
 W, H = 3840, 2160
 
@@ -902,12 +902,12 @@ def test_the_caption_never_reaches_the_frame_edges():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_caption.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'bootleg.media.caption'`.
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_caption.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'splitstep.media.caption'`.
 
 - [ ] **Step 3: Write the module**
 
-Create `bootleg/media/caption.py`:
+Create `splitstep/media/caption.py`:
 
 ```python
 """Render a rally's note to a transparent overlay for burn-in at clip export.
@@ -1034,7 +1034,7 @@ def render_caption(text: str, width: int, height: int) -> Image.Image | None:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_caption.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_caption.py -v`
 Expected: 6 passed.
 
 - [ ] **Step 5: Look at one**
@@ -1042,9 +1042,9 @@ Expected: 6 passed.
 Render a caption over the real frame and view it, rather than trusting pixel assertions alone:
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -c "
+~/miniconda3/envs/splitstep/bin/python -c "
 from PIL import Image
-from bootleg.media.caption import render_caption
+from splitstep.media.caption import render_caption
 base = Image.open('/tmp/frame4k.png').convert('RGBA')
 cap = render_caption('late on the backhand — good depth, bad recovery', *base.size)
 Image.alpha_composite(base, cap).convert('RGB').resize((1280, 720)).save('/tmp/caption_check.png')
@@ -1056,8 +1056,8 @@ Expected: legible white text in a dark pill, bottom-left, clear of the player.
 - [ ] **Step 6: Run the full suite and the linter, then commit**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
-git add bootleg/media/caption.py tests/test_caption.py
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
+git add splitstep/media/caption.py tests/test_caption.py
 git commit -m "feat(media): render a rally note to a caption overlay"
 ```
 
@@ -1066,7 +1066,7 @@ git commit -m "feat(media): render a rally note to a caption overlay"
 ### Task 6: The caption fingerprint in the clip's name
 
 **Files:**
-- Modify: `bootleg/media/clips.py`
+- Modify: `splitstep/media/clips.py`
 - Test: `tests/test_clips.py` (extend)
 
 **Interfaces:**
@@ -1078,7 +1078,7 @@ git commit -m "feat(media): render a rally note to a caption overlay"
 Append to `tests/test_clips.py`:
 
 ```python
-from bootleg.media.clips import caption_fingerprint, clip_relpath, parse_clip_name
+from splitstep.media.clips import caption_fingerprint, clip_relpath, parse_clip_name
 
 
 def test_an_uncaptioned_clip_keeps_the_name_it_has_always_had():
@@ -1135,12 +1135,12 @@ def test_a_name_with_an_unexpected_extra_segment_still_does_not_parse():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_clips.py -v`
 Expected: FAIL — `cannot import name 'caption_fingerprint'`.
 
 - [ ] **Step 3: Implement**
 
-In `bootleg/media/clips.py`:
+In `splitstep/media/clips.py`:
 
 ```python
 import hashlib
@@ -1197,14 +1197,14 @@ _CLIP_NAME = re.compile(r"^(\d{2,})-(\d+)-(\d+)(?:-c[0-9a-f]{8})?\.mp4$")
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_clips.py -v`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
-git add bootleg/media/clips.py tests/test_clips.py
+~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
+git add splitstep/media/clips.py tests/test_clips.py
 git commit -m "feat(clips): caption fingerprint in the clip filename"
 ```
 
@@ -1213,9 +1213,9 @@ git commit -m "feat(clips): caption fingerprint in the clip filename"
 ### Task 7: Burn the caption in, and make export notice a changed note
 
 **Files:**
-- Modify: `bootleg/media/transcode.py` (`make_clip`)
-- Modify: `bootleg/jobs/handlers.py` (`handle_clip`)
-- Modify: `bootleg/export.py` (`plan_export`, `find_orphan_clips`)
+- Modify: `splitstep/media/transcode.py` (`make_clip`)
+- Modify: `splitstep/jobs/handlers.py` (`handle_clip`)
+- Modify: `splitstep/export.py` (`plan_export`, `find_orphan_clips`)
 - Test: `tests/test_transcode.py`, `tests/test_handler_clip.py`, `tests/test_export.py`, `tests/test_orphans.py` (extend)
 
 **Interfaces:**
@@ -1339,12 +1339,12 @@ def test_a_note_less_rally_cuts_to_the_plain_name(library, conn, clip_job_source
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_transcode.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_transcode.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -v`
 Expected: FAIL — `make_clip() got an unexpected keyword argument 'caption_png'`, and KeyError on `note` in the export payloads.
 
 - [ ] **Step 3: Add `caption_png` to `make_clip`**
 
-In `bootleg/media/transcode.py`, add the parameter to the signature:
+In `splitstep/media/transcode.py`, add the parameter to the signature:
 
 ```python
     caption_png: Path | None = None,
@@ -1401,7 +1401,7 @@ Add `*caption_in` to the argv immediately after `*silence`, and replace the `"-v
 
 - [ ] **Step 4: Wire the handler and the planner**
 
-In `bootleg/jobs/handlers.py::handle_clip`, after the `start_ms, end_ms` line:
+In `splitstep/jobs/handlers.py::handle_clip`, after the `start_ms, end_ms` line:
 
 ```python
     note = payload.get("note", "")
@@ -1430,7 +1430,7 @@ and, before `make_clip`:
             caption_png.unlink(missing_ok=True)
 ```
 
-In `bootleg/export.py::plan_export`, pass the note into the name and into the payload:
+In `splitstep/export.py::plan_export`, pass the note into the name and into the payload:
 
 ```python
         name = clip_relpath(source["idx"], rally["start_ms"], rally["end_ms"], rally["note"])
@@ -1465,12 +1465,12 @@ Add `render_caption` and `CLIP_WIDTH`/`CLIP_HEIGHT` to `handlers.py`'s imports.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_transcode.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -v`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_transcode.py tests/test_handler_clip.py tests/test_export.py tests/test_orphans.py -v`
 Expected: all pass.
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: green.
 
 - [ ] **Step 7: Verify concat compatibility by hand**
@@ -1489,7 +1489,7 @@ Expected: exits 0 with no "Non-monotonous DTS" or parameter-mismatch warnings, a
 CLAUDE.md's "Deferred" section says 4K clip export shipped; add a line to the conventions section recording that a caption is part of a clip's filename identity and why, so the next reader does not "tidy" the suffix away.
 
 ```bash
-git add bootleg/media/transcode.py bootleg/jobs/handlers.py bootleg/export.py tests CLAUDE.md
+git add splitstep/media/transcode.py splitstep/jobs/handlers.py splitstep/export.py tests CLAUDE.md
 git commit -m "feat(clips): burn a rally's note into its exported clip"
 ```
 
@@ -1501,4 +1501,4 @@ git commit -m "feat(clips): burn a rally's note into its exported clip"
 
 **Known gap, deliberate.** The spec's §3 says the route answers 400; this plan uses 422 and says why at the top. No other divergence.
 
-**Type consistency.** `clip_relpath`'s `note` parameter is keyword-optional with the same default (`""`) at all four call sites (Task 6 definition; Task 7's `handle_clip`, `plan_export`, `find_orphan_clips`). `render_caption(text, width, height)` is called with `CLIP_WIDTH, CLIP_HEIGHT` in Task 7 and with a frame's own size in Task 5's by-hand check. `NOTE_MAX_CHARS` is 120 in both `bootleg/db/rallies.py` and `web/src/lib/notes.ts`.
+**Type consistency.** `clip_relpath`'s `note` parameter is keyword-optional with the same default (`""`) at all four call sites (Task 6 definition; Task 7's `handle_clip`, `plan_export`, `find_orphan_clips`). `render_caption(text, width, height)` is called with `CLIP_WIDTH, CLIP_HEIGHT` in Task 7 and with a frame's own size in Task 5's by-hand check. `NOTE_MAX_CHARS` is 120 in both `splitstep/db/rallies.py` and `web/src/lib/notes.ts`.

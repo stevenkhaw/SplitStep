@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-08-21-clip-export-and-reels-design.md`. Read §3 and §4 before Task 1. This plan covers those two sections only; §5–§6 (reels, builder, preview) are Plan B.
-- Python runs from the `bootleg` conda env by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
+- Python runs from the `splitstep` conda env by path: `~/miniconda3/envs/splitstep/bin/pytest`, `~/miniconda3/envs/splitstep/bin/ruff`.
 - ruff line-length 100. **ruff 0.16.3 defaults here are broader than the classic set** — `I001` (import ordering), `BLE001` (blind except), `PLW1510` (`subprocess.run` without `check=`) are active.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
 - Migrations are numbered `.sql` applied by `PRAGMA user_version`. Add `005_point_flag.sql`; **never edit `001`–`003`**, all of which are applied to the user's real library.
@@ -27,17 +27,17 @@
 ### Task 1: The `point` flag in the database
 
 **Files:**
-- Create: `bootleg/db/migrations/005_point_flag.sql`
-- Modify: `bootleg/db/rallies.py` (add `set_point`; `replace_rallies` carries `point`)
+- Create: `splitstep/db/migrations/005_point_flag.sql`
+- Modify: `splitstep/db/rallies.py` (add `set_point`; `replace_rallies` carries `point`)
 - Test: `tests/test_db.py` (append), `tests/test_rallies_point.py` (create)
 
 **Interfaces:**
-- Consumes: `bootleg.db.schema.migrate`, the existing `replace_rallies` / `_overlaps_any`.
+- Consumes: `splitstep.db.schema.migrate`, the existing `replace_rallies` / `_overlaps_any`.
 - Produces: `set_point(conn, rally_id: str, point: bool) -> None`; `rallies.point` column.
 
 - [ ] **Step 1: Write the migration**
 
-Create `bootleg/db/migrations/005_point_flag.sql`:
+Create `splitstep/db/migrations/005_point_flag.sql`:
 
 ```sql
 -- A third review flag beside starred and rejected.
@@ -76,9 +76,9 @@ Create `tests/test_rallies_point.py`:
 ```python
 import pytest
 
-from bootleg.db.rallies import list_rallies, replace_rallies, set_point, set_star
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import list_rallies, replace_rallies, set_point, set_star
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -179,7 +179,7 @@ def test_a_rejected_carry_over_does_not_gain_a_point(conn, seeded):
     # overlapped a rejection.
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])
-    from bootleg.db.rallies import set_rejected
+    from splitstep.db.rallies import set_rejected
     set_rejected(conn, _rallies(conn, seeded["session_id"])[0]["id"], True)
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1200, 4800, 0.7)])
@@ -197,12 +197,12 @@ Find that assertion (it currently expects `3`) and update it to `4`. Do not add 
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rallies_point.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rallies_point.py -q`
 Expected: FAIL — `ImportError: cannot import name 'set_point'`
 
 - [ ] **Step 4: Add `set_point` and carry `point` in `replace_rallies`**
 
-In `bootleg/db/rallies.py`, add beside `set_star`:
+In `splitstep/db/rallies.py`, add beside `set_star`:
 
 ```python
 def set_point(conn: sqlite3.Connection, rally_id: str, point: bool) -> None:
@@ -258,18 +258,18 @@ and the INSERT gains the column:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_rallies_point.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_rallies_point.py -q`
 Expected: PASS, 7 passed
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass. `tests/test_db.py`, `tests/test_api.py` and `tests/test_labels.py` all exercise `replace_rallies`; they must still pass unchanged apart from the version bump.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/db/migrations/005_point_flag.sql bootleg/db/rallies.py \
+git add splitstep/db/migrations/005_point_flag.sql splitstep/db/rallies.py \
         tests/test_rallies_point.py tests/test_db.py
 git commit -m "feat(db): a point flag, and a reinterpretation of every star
 
@@ -292,7 +292,7 @@ test_replace_rallies_carries_point_across_a_resegment is what catches it."
 ### Task 2: The point API route
 
 **Files:**
-- Modify: `bootleg/api/routes.py` (body model near the other flag bodies; route beside `api_star`)
+- Modify: `splitstep/api/routes.py` (body model near the other flag bodies; route beside `api_star`)
 - Test: `tests/test_api_review.py` (append)
 
 **Interfaces:**
@@ -336,19 +336,19 @@ def test_point_does_not_touch_starred(client, conn, seeded):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_review.py -q -k point`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_review.py -q -k point`
 Expected: FAIL — 404/405 on an unregistered route.
 
 - [ ] **Step 3: Add the body model and the route**
 
-In `bootleg/api/routes.py`, add beside `RejectBody`:
+In `splitstep/api/routes.py`, add beside `RejectBody`:
 
 ```python
 class PointBody(BaseModel):
     point: bool
 ```
 
-Add `set_point` to the `bootleg.db.rallies` import list, and add the route beside `api_reject`:
+Add `set_point` to the `splitstep.db.rallies` import list, and add the route beside `api_reject`:
 
 ```python
 @router.post("/api/rallies/{rally_id}/point")
@@ -364,18 +364,18 @@ def api_point(rally_id: str, body: PointBody, request: Request):
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_api_review.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_api_review.py -q`
 Expected: PASS
 
 - [ ] **Step 5: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/api/routes.py tests/test_api_review.py
+git add splitstep/api/routes.py tests/test_api_review.py
 git commit -m "feat(api): mark a rally as a point
 
 Refreshes session review status, unlike the label route -- a point is a
@@ -610,8 +610,8 @@ advancing."
 ### Task 4: The locked clip profile
 
 **Files:**
-- Modify: `bootleg/media/transcode.py` (add `make_clip`)
-- Create: `bootleg/media/clips.py` (`clip_relpath`)
+- Modify: `splitstep/media/transcode.py` (add `make_clip`)
+- Create: `splitstep/media/clips.py` (`clip_relpath`)
 - Test: `tests/test_clips.py`
 
 **Interfaces:**
@@ -630,9 +630,9 @@ import subprocess
 
 import pytest
 
-from bootleg.media.clips import clip_relpath
-from bootleg.media.probe import probe
-from bootleg.media.transcode import CLIP_FPS, CLIP_HEIGHT, CLIP_WIDTH, make_clip
+from splitstep.media.clips import clip_relpath
+from splitstep.media.probe import probe
+from splitstep.media.transcode import CLIP_FPS, CLIP_HEIGHT, CLIP_WIDTH, make_clip
 
 
 @pytest.fixture
@@ -761,10 +761,10 @@ def test_make_clip_cuts_from_the_requested_in_point(source_4k, tmp_path):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q`
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.media.clips'`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_clips.py -q`
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.media.clips'`
 
-- [ ] **Step 3: Write `bootleg/media/clips.py`**
+- [ ] **Step 3: Write `splitstep/media/clips.py`**
 
 ```python
 def clip_relpath(source_idx: int, start_ms: int, end_ms: int) -> str:
@@ -784,7 +784,7 @@ def clip_relpath(source_idx: int, start_ms: int, end_ms: int) -> str:
     return f"{source_idx:02d}-{start_ms}-{end_ms}.mp4"
 ```
 
-- [ ] **Step 4: Add `make_clip` to `bootleg/media/transcode.py`**
+- [ ] **Step 4: Add `make_clip` to `splitstep/media/transcode.py`**
 
 ```python
 # The locked clip profile. CHANGING ANY OF THESE BREAKS `-c copy` AGAINST
@@ -868,18 +868,18 @@ def make_clip(
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_clips.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_clips.py -q`
 Expected: PASS, 10 passed. These encode real 4K frames; the file takes a minute or two.
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/media/clips.py bootleg/media/transcode.py tests/test_clips.py
+git add splitstep/media/clips.py splitstep/media/transcode.py tests/test_clips.py
 git commit -m "feat(media): cut a clip at the locked profile
 
 3840x2160 30fps CFR CRF20 High yuv420p, AAC 128k 48k stereo, software
@@ -902,9 +902,9 @@ keep in sync."
 ### Task 5: The `clip` job
 
 **Files:**
-- Modify: `bootleg/jobs/handlers.py` (`handle_clip`, `HANDLERS`)
-- Modify: `bootleg/db/rallies.py` (`set_clip_path`)
-- Modify: `bootleg/db/jobs.py` (`has_pending_clip`)
+- Modify: `splitstep/jobs/handlers.py` (`handle_clip`, `HANDLERS`)
+- Modify: `splitstep/db/rallies.py` (`set_clip_path`)
+- Modify: `splitstep/db/jobs.py` (`has_pending_clip`)
 - Test: `tests/test_handlers.py` (append)
 
 **Interfaces:**
@@ -921,15 +921,15 @@ import subprocess
 
 import pytest
 
-from bootleg.config import NotEnoughSpace
-from bootleg.db.jobs import has_pending_clip
-from bootleg.db.jobs import enqueue
-from bootleg.db.rallies import replace_rallies
-from bootleg.detect.segment import Interval
-from bootleg.jobs.handlers import handle_clip
-from bootleg.media.clips import clip_relpath
-from bootleg.media.probe import probe
-from bootleg.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
+from splitstep.config import NotEnoughSpace
+from splitstep.db.jobs import has_pending_clip
+from splitstep.db.jobs import enqueue
+from splitstep.db.rallies import replace_rallies
+from splitstep.detect.segment import Interval
+from splitstep.jobs.handlers import handle_clip
+from splitstep.media.clips import clip_relpath
+from splitstep.media.probe import probe
+from splitstep.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
 
 
 @pytest.fixture
@@ -1049,12 +1049,12 @@ def test_has_pending_clip_distinguishes_two_spans_of_one_source(conn, a_rally):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_handlers.py -q -k clip`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_handlers.py -q -k clip`
 Expected: FAIL — `ImportError: cannot import name 'handle_clip'`
 
 - [ ] **Step 3: Add `set_clip_path`**
 
-In `bootleg/db/rallies.py`:
+In `splitstep/db/rallies.py`:
 
 ```python
 def set_clip_path(conn: sqlite3.Connection, rally_id: str, clip_path: str) -> None:
@@ -1071,7 +1071,7 @@ def set_clip_path(conn: sqlite3.Connection, rally_id: str, clip_path: str) -> No
 
 - [ ] **Step 4: Add `has_pending_clip`**
 
-In `bootleg/db/jobs.py`:
+In `splitstep/db/jobs.py`:
 
 ```python
 def has_pending_clip(
@@ -1096,7 +1096,7 @@ def has_pending_clip(
 
 - [ ] **Step 5: Write `handle_clip`**
 
-In `bootleg/jobs/handlers.py`:
+In `splitstep/jobs/handlers.py`:
 
 ```python
 def handle_clip(library: Library, payload: dict) -> None:
@@ -1152,18 +1152,18 @@ HANDLERS: dict[str, Handler] = {
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_handlers.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_handlers.py -q`
 Expected: PASS
 
 - [ ] **Step 7: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py bootleg/db/rallies.py bootleg/db/jobs.py \
+git add splitstep/jobs/handlers.py splitstep/db/rallies.py splitstep/db/jobs.py \
         tests/test_handlers.py
 git commit -m "feat(jobs): a clip job
 
@@ -1195,8 +1195,8 @@ the first enqueued clip suppress all the rest."
 > adds — must use this contract, not the one originally drafted below.
 
 **Files:**
-- Modify: `bootleg/api/routes.py` (`POST /api/sessions/{session_id}/export`)
-- Create: `bootleg/export.py` (`plan_export`, `column_for`, `ExportPlan`)
+- Modify: `splitstep/api/routes.py` (`POST /api/sessions/{session_id}/export`)
+- Create: `splitstep/export.py` (`plan_export`, `column_for`, `ExportPlan`)
 - Test: `tests/test_export.py`
 
 **Interfaces:**
@@ -1214,13 +1214,13 @@ Create `tests/test_export.py`:
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.jobs import enqueue
-from bootleg.db.rallies import replace_rallies, set_point, set_rejected, set_star
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.export import column_for, plan_export
-from bootleg.media.clips import clip_relpath
+from splitstep.api.app import create_app
+from splitstep.db.jobs import enqueue
+from splitstep.db.rallies import replace_rallies, set_point, set_rejected, set_star
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.export import column_for, plan_export
+from splitstep.media.clips import clip_relpath
 
 
 @pytest.fixture
@@ -1439,19 +1439,19 @@ def test_route_422s_on_an_unknown_set(client, seeded):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_export.py -q`
-Expected: collection error — no `bootleg.export`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_export.py -q`
+Expected: collection error — no `splitstep.export`
 
-- [ ] **Step 3: Write `bootleg/export.py`**
+- [ ] **Step 3: Write `splitstep/export.py`**
 
 ```python
 import sqlite3
 from dataclasses import dataclass, field
 
-from bootleg.config import Library
-from bootleg.db.jobs import has_pending_clip
-from bootleg.db.sessions import get_source
-from bootleg.media.clips import clip_relpath
+from splitstep.config import Library
+from splitstep.db.jobs import has_pending_clip
+from splitstep.db.sessions import get_source
+from splitstep.media.clips import clip_relpath
 
 SETS = ("points", "starred")
 
@@ -1567,11 +1567,11 @@ rather than each hand-rolling the check.
 - [ ] **Step 4: Add the route**
 
 `routes.py` does not import the job queue today — add it alongside the other
-`bootleg.db` imports, letting ruff's `I001` place it:
+`splitstep.db` imports, letting ruff's `I001` place it:
 
 ```python
-from bootleg.db import jobs as jobq
-from bootleg.export import SETS, plan_export
+from splitstep.db import jobs as jobq
+from splitstep.export import SETS, plan_export
 ```
 
 Then the body model and route:
@@ -1613,18 +1613,18 @@ def api_export(session_id: str, body: ExportBody, request: Request):
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_export.py -q`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_export.py -q`
 Expected: PASS
 
 - [ ] **Step 6: Run the full suite and the linter**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Expected: all pass, ruff clean
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/export.py bootleg/api/routes.py tests/test_export.py
+git add splitstep/export.py splitstep/api/routes.py tests/test_export.py
 git commit -m "feat(api): export a session's points or starred rallies as clips
 
 Incremental by construction: a clip either exists at the path its current
@@ -1640,12 +1640,12 @@ staleness because there is nothing to keep in sync."
 **Files:**
 - Modify: `web/src/lib/api.ts` (`exportClips`)
 - Modify: `web/src/components/QueueMode.svelte` (the "Session reviewed" panel)
-- Modify: `bootleg/cli.py` (`bootleg clips export`)
+- Modify: `splitstep/cli.py` (`splitstep clips export`)
 - Test: `web/tests/queue.test.ts` or a new component test; `tests/test_cli.py` (append)
 
 **Interfaces:**
 - Consumes: `POST /api/sessions/{id}/export` (Task 6), `QueueController.pointCount`/`starredCount`.
-- Produces: `api.exportClips(sessionId, which)`; `cmd_clips_export(args) -> int` behind `bootleg clips export <session_id> --set points|starred`.
+- Produces: `api.exportClips(sessionId, which)`; `cmd_clips_export(args) -> int` behind `splitstep clips export <session_id> --set points|starred`.
 
 - [ ] **Step 1: Add the API client method**
 
@@ -1783,7 +1783,7 @@ Expected: all pass, svelte-check 0/0
 
 - [ ] **Step 4: Add the CLI command**
 
-In `bootleg/cli.py`, mirroring the `labels` subcommand's shape:
+In `splitstep/cli.py`, mirroring the `labels` subcommand's shape:
 
 ```python
 def cmd_clips_export(args) -> int:
@@ -1820,8 +1820,8 @@ Append to `tests/test_cli.py` (`json`, `main`, `add_source` and
 
 ```python
 def test_clips_export_queues_a_job_per_point(library, conn, capsys):
-    from bootleg.db.rallies import replace_rallies, set_point
-    from bootleg.detect.segment import Interval
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -1843,8 +1843,8 @@ def test_clips_export_queues_a_job_per_point(library, conn, capsys):
 
 
 def test_clips_export_a_second_time_queues_nothing_and_says_so(library, conn, capsys):
-    from bootleg.db.rallies import replace_rallies, set_point
-    from bootleg.detect.segment import Interval
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -1874,12 +1874,12 @@ def test_clips_export_on_an_unknown_session_fails(library, conn, capsys):
     assert "not found" in capsys.readouterr().err.lower()
 ```
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest tests/test_cli.py -q -k clips`
+Run: `~/miniconda3/envs/splitstep/bin/pytest tests/test_cli.py -q -k clips`
 Expected: PASS, 3 passed
 
 - [ ] **Step 6: Run everything**
 
-Run: `~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests`
+Run: `~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests`
 Then from `web/`: `npx vitest run && npm run check`
 Expected: all green
 
@@ -1887,8 +1887,8 @@ Expected: all green
 
 ```bash
 git add web/src/lib/api.ts web/src/components/QueueMode.svelte web/tests \
-        bootleg/cli.py tests/test_cli.py
-git commit -m "feat: export buttons on the reviewed panel, and bootleg clips export
+        splitstep/cli.py tests/test_cli.py
+git commit -m "feat: export buttons on the reviewed panel, and splitstep clips export
 
 The end-of-queue panel has been a dead end carrying a comment reserving this
 spot since the review UI was built. Both buttons report the plan's four
@@ -1904,6 +1904,6 @@ press mid-encode reads as '0 queued, 3 in flight' rather than the false
 Once Task 7 is verified by hand against the real library:
 
 - **CLAUDE.md** — document the locked clip profile and that it can never change, the span-derived clip naming, and that `replace_rallies` carries `point`. Correct the test count.
-- **Verify on real footage**: run `bootleg clips export` for the 2026-08-18 session (24 points, ~9 minutes of encoding), then confirm with `ffprobe` that a cut clip matches the locked profile and carries no rotation side data despite the source being `rotation 180`. That last check is the one this whole plan turns on.
+- **Verify on real footage**: run `splitstep clips export` for the 2026-08-18 session (24 points, ~9 minutes of encoding), then confirm with `ffprobe` that a cut clip matches the locked profile and carries no rotation side data despite the source being `rotation 180`. That last check is the one this whole plan turns on.
 
 Plan B (reels, the builder, preview) is written after this lands.

@@ -1,11 +1,11 @@
-# BootlegVision — Camera Viewpoint and Subject-Mode Segmentation
+# SplitStep — Camera Viewpoint and Subject-Mode Segmentation
 
 **Date:** 2026-08-20
 **Status:** Implemented. **§5, §7 and §9 are SUPERSEDED** — subject mode was validated
 on 2026-08-20 and failed. Read
 `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before acting on
 anything in this document. §4 was also amended during implementation (see §4).
-**Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` (§5 detection)
+**Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` (§5 detection)
 **Supersedes for ground-level sources:** the two-player scoring model in `detect/segment.py`
 
 ---
@@ -70,7 +70,7 @@ that — it would only make the noise smoother.
 
 ## 3. Architecture
 
-One new pure module, `bootleg/detect/viewpoint.py`:
+One new pure module, `splitstep/detect/viewpoint.py`:
 
 ```python
 @dataclass(frozen=True)

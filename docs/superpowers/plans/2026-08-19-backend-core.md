@@ -1,4 +1,4 @@
-# BootlegVision Backend Core — Implementation Plan
+# SplitStep Backend Core — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,11 +8,11 @@
 
 **Tech Stack:** Python 3.12, FastAPI, uvicorn, stdlib `sqlite3`, numpy, scipy, ultralytics (YOLO11), opencv-python-headless, watchdog, ffmpeg (subprocess), pytest, ruff.
 
-**Spec:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md`
+**Spec:** `docs/superpowers/specs/2026-08-19-splitstep-design.md`
 
 ## Global Constraints
 
-- Python **3.12** exactly. Create with `conda create -n bootleg python=3.12`. Do not use 3.13 — torch wheels are unreliable there.
+- Python **3.12** exactly. Create with `conda create -n splitstep python=3.12`. Do not use 3.13 — torch wheels are unreliable there.
 - ffmpeg must be on `PATH`. Install with `brew install ffmpeg`.
 - SQLite opened with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=FULL`. Both, always.
 - Explicit SQL only. **No ORM.** Migrations are numbered `.sql` files.
@@ -31,7 +31,7 @@
 
 ```
 pyproject.toml
-bootleg/
+splitstep/
   __init__.py
   config.py            Library — root paths, mount validation
   accel.py             host detection → ffmpeg flags + torch device
@@ -90,8 +90,8 @@ Split by responsibility, not layer. `detect/` holds everything that turns pixels
 
 **Files:**
 - Create: `pyproject.toml`
-- Create: `bootleg/__init__.py`
-- Create: `bootleg/config.py`
+- Create: `splitstep/__init__.py`
+- Create: `splitstep/config.py`
 - Test: `tests/test_config.py`
 - Create: `tests/conftest.py`
 
@@ -103,7 +103,7 @@ Split by responsibility, not layer. `detect/` holds everything that turns pixels
 
 ```toml
 [project]
-name = "bootleg"
+name = "splitstep"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
@@ -120,7 +120,7 @@ dependencies = [
 dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
 
 [project.scripts]
-bootleg = "bootleg.cli:main"
+splitstep = "splitstep.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -141,7 +141,7 @@ Create `tests/test_config.py`:
 ```python
 import pytest
 from pathlib import Path
-from bootleg.config import Library, LibraryNotMounted, NotEnoughSpace
+from splitstep.config import Library, LibraryNotMounted, NotEnoughSpace
 
 
 def test_open_returns_library_for_existing_writable_root(tmp_path):
@@ -191,13 +191,13 @@ def test_require_free_raises_before_a_write_that_cannot_fit(tmp_path):
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `pytest tests/test_config.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.config'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.config'`
 
 - [ ] **Step 4: Write the implementation**
 
-Create `bootleg/__init__.py` (empty file).
+Create `splitstep/__init__.py` (empty file).
 
-Create `bootleg/config.py`:
+Create `splitstep/config.py`:
 
 ```python
 import os
@@ -275,7 +275,7 @@ Create `tests/conftest.py`:
 ```python
 import pytest
 from pathlib import Path
-from bootleg.config import Library
+from splitstep.config import Library
 
 
 @pytest.fixture
@@ -293,7 +293,7 @@ Expected: 7 passed
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml bootleg/__init__.py bootleg/config.py tests/conftest.py tests/test_config.py
+git add pyproject.toml splitstep/__init__.py splitstep/config.py tests/conftest.py tests/test_config.py
 git commit -m "feat: add library root config with mount validation"
 ```
 
@@ -302,9 +302,9 @@ git commit -m "feat: add library root config with mount validation"
 ### Task 2: Database schema and migrations
 
 **Files:**
-- Create: `bootleg/db/__init__.py`
-- Create: `bootleg/db/schema.py`
-- Create: `bootleg/db/migrations/001_init.sql`
+- Create: `splitstep/db/__init__.py`
+- Create: `splitstep/db/schema.py`
+- Create: `splitstep/db/migrations/001_init.sql`
 - Test: `tests/test_db.py`
 
 **Interfaces:**
@@ -316,7 +316,7 @@ git commit -m "feat: add library root config with mount validation"
 Create `tests/test_db.py`:
 
 ```python
-from bootleg.db.schema import connect, migrate
+from splitstep.db.schema import connect, migrate
 
 
 def test_connect_sets_wal_and_full_sync(library):
@@ -369,11 +369,11 @@ def test_rally_cascades_when_source_deleted(library):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_db.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.db'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.db'`
 
 - [ ] **Step 3: Write the migration SQL**
 
-Create `bootleg/db/migrations/001_init.sql`:
+Create `splitstep/db/migrations/001_init.sql`:
 
 ```sql
 CREATE TABLE sessions (
@@ -463,9 +463,9 @@ CREATE INDEX idx_jobs_queued     ON jobs(status, created_at);
 
 - [ ] **Step 4: Write the schema module**
 
-Create `bootleg/db/__init__.py` (empty file).
+Create `splitstep/db/__init__.py` (empty file).
 
-Create `bootleg/db/schema.py`:
+Create `splitstep/db/schema.py`:
 
 ```python
 import sqlite3
@@ -508,7 +508,7 @@ Expected: 4 passed
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/db tests/test_db.py
+git add splitstep/db tests/test_db.py
 git commit -m "feat: add sqlite schema and migration runner"
 ```
 
@@ -517,9 +517,9 @@ git commit -m "feat: add sqlite schema and migration runner"
 ### Task 3: Hardware acceleration and ffprobe
 
 **Files:**
-- Create: `bootleg/accel.py`
-- Create: `bootleg/media/__init__.py`
-- Create: `bootleg/media/probe.py`
+- Create: `splitstep/accel.py`
+- Create: `splitstep/media/__init__.py`
+- Create: `splitstep/media/probe.py`
 - Test: `tests/test_probe.py`
 
 **Interfaces:**
@@ -533,8 +533,8 @@ Create `tests/test_probe.py`:
 ```python
 import subprocess
 import pytest
-from bootleg.accel import detect_accel
-from bootleg.media.probe import probe, ProbeError
+from splitstep.accel import detect_accel
+from splitstep.media.probe import probe, ProbeError
 
 
 @pytest.fixture
@@ -575,9 +575,9 @@ def test_probe_raises_on_non_media(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_probe.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.accel'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.accel'`
 
-- [ ] **Step 3: Write `bootleg/accel.py`**
+- [ ] **Step 3: Write `splitstep/accel.py`**
 
 ```python
 import platform
@@ -640,9 +640,9 @@ def _torch_device() -> str:
     return "cpu"
 ```
 
-- [ ] **Step 4: Write `bootleg/media/probe.py`**
+- [ ] **Step 4: Write `splitstep/media/probe.py`**
 
-Create `bootleg/media/__init__.py` (empty file).
+Create `splitstep/media/__init__.py` (empty file).
 
 ```python
 import json
@@ -710,7 +710,7 @@ Expected: 3 passed
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/accel.py bootleg/media tests/test_probe.py
+git add splitstep/accel.py splitstep/media tests/test_probe.py
 git commit -m "feat: add hardware accel detection and ffprobe wrapper"
 ```
 
@@ -719,9 +719,9 @@ git commit -m "feat: add hardware accel detection and ffprobe wrapper"
 ### Task 4: Feature types and geometry
 
 **Files:**
-- Create: `bootleg/detect/__init__.py`
-- Create: `bootleg/detect/features.py`
-- Create: `bootleg/detect/geometry.py`
+- Create: `splitstep/detect/__init__.py`
+- Create: `splitstep/detect/features.py`
+- Create: `splitstep/detect/geometry.py`
 - Test: `tests/test_features.py`
 - Test: `tests/test_geometry.py`
 
@@ -735,7 +735,7 @@ Create `tests/test_geometry.py`:
 
 ```python
 import pytest
-from bootleg.detect.geometry import Quad
+from splitstep.detect.geometry import Quad
 
 
 @pytest.fixture
@@ -772,11 +772,11 @@ def test_rejects_wrong_point_count():
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_geometry.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.detect'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.detect'`
 
-- [ ] **Step 3: Write `bootleg/detect/geometry.py`**
+- [ ] **Step 3: Write `splitstep/detect/geometry.py`**
 
-Create `bootleg/detect/__init__.py` (empty file).
+Create `splitstep/detect/__init__.py` (empty file).
 
 ```python
 import json
@@ -826,7 +826,7 @@ Expected: 5 passed
 Create `tests/test_features.py`:
 
 ```python
-from bootleg.detect.features import FeatureFrame, Player, read_features, write_features
+from splitstep.detect.features import FeatureFrame, Player, read_features, write_features
 
 
 def test_frame_json_round_trip():
@@ -864,9 +864,9 @@ def test_read_skips_blank_lines(tmp_path):
 - [ ] **Step 6: Run it to verify it fails**
 
 Run: `pytest tests/test_features.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.detect.features'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.detect.features'`
 
-- [ ] **Step 7: Write `bootleg/detect/features.py`**
+- [ ] **Step 7: Write `splitstep/detect/features.py`**
 
 ```python
 import json
@@ -934,7 +934,7 @@ Expected: 9 passed
 - [ ] **Step 9: Commit**
 
 ```bash
-git add bootleg/detect tests/test_features.py tests/test_geometry.py
+git add splitstep/detect tests/test_features.py tests/test_geometry.py
 git commit -m "feat: add feature frame types and play-region geometry"
 ```
 
@@ -945,7 +945,7 @@ git commit -m "feat: add feature frame types and play-region geometry"
 This is the highest-value unit in the project. It is a pure function, so it gets the densest test suite.
 
 **Files:**
-- Create: `bootleg/detect/segment.py`
+- Create: `splitstep/detect/segment.py`
 - Test: `tests/test_segment.py`
 
 **Interfaces:**
@@ -958,8 +958,8 @@ Create `tests/test_segment.py`:
 
 ```python
 import pytest
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.segment import Interval, SegmentParams, score_series, segment
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.segment import Interval, SegmentParams, score_series, segment
 
 SAMPLE_MS = 200  # 5 fps
 
@@ -1083,15 +1083,15 @@ def test_score_series_length_matches_input(params):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_segment.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.detect.segment'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.detect.segment'`
 
-- [ ] **Step 3: Write `bootleg/detect/segment.py`**
+- [ ] **Step 3: Write `splitstep/detect/segment.py`**
 
 ```python
 import statistics
 from dataclasses import dataclass
 
-from bootleg.detect.features import FeatureFrame
+from splitstep.detect.features import FeatureFrame
 
 MAX_SPEED = 4.0   # body-lengths/sec that counts as "fully moving"
 MAX_HIT_RATE = 2.0  # impacts in the trailing second that counts as "full"
@@ -1246,7 +1246,7 @@ Expected: 15 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/detect/segment.py tests/test_segment.py
+git add splitstep/detect/segment.py tests/test_segment.py
 git commit -m "feat: add rally segmenter with ace-preserving 1.5s floor"
 ```
 
@@ -1255,7 +1255,7 @@ git commit -m "feat: add rally segmenter with ace-preserving 1.5s floor"
 ### Task 6: Audio impact detection
 
 **Files:**
-- Create: `bootleg/detect/audio.py`
+- Create: `splitstep/detect/audio.py`
 - Test: `tests/test_audio.py`
 
 **Interfaces:**
@@ -1269,7 +1269,7 @@ Create `tests/test_audio.py`:
 ```python
 import numpy as np
 import pytest
-from bootleg.detect.audio import Hit, detect_hits, hits_to_grid
+from splitstep.detect.audio import Hit, detect_hits, hits_to_grid
 
 SR = 22050
 
@@ -1344,9 +1344,9 @@ def test_grid_is_all_zero_without_hits():
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_audio.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.detect.audio'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.detect.audio'`
 
-- [ ] **Step 3: Write `bootleg/detect/audio.py`**
+- [ ] **Step 3: Write `splitstep/detect/audio.py`**
 
 ```python
 import statistics
@@ -1462,7 +1462,7 @@ Expected: 8 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/detect/audio.py tests/test_audio.py
+git add splitstep/detect/audio.py tests/test_audio.py
 git commit -m "feat: add audio impact detection with wind-rejecting highpass"
 ```
 
@@ -1473,7 +1473,7 @@ git commit -m "feat: add audio impact detection with wind-rejecting highpass"
 The YOLO call is isolated behind a thin runner so the interesting logic stays pure and testable without a model.
 
 **Files:**
-- Create: `bootleg/detect/vision.py`
+- Create: `splitstep/detect/vision.py`
 - Test: `tests/test_vision.py`
 
 **Interfaces:**
@@ -1485,8 +1485,8 @@ The YOLO call is isolated behind a thin runner so the interesting logic stays pu
 Create `tests/test_vision.py`:
 
 ```python
-from bootleg.detect.geometry import Quad
-from bootleg.detect.vision import Box, build_features, split_near_far
+from splitstep.detect.geometry import Quad
+from splitstep.detect.vision import Box, build_features, split_near_far
 
 FULL = Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
 
@@ -1565,9 +1565,9 @@ def test_build_features_counts_only_in_region():
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_vision.py -v`
-Expected: FAIL with `ImportError: cannot import name 'Box' from 'bootleg.detect.vision'`
+Expected: FAIL with `ImportError: cannot import name 'Box' from 'splitstep.detect.vision'`
 
-- [ ] **Step 3: Write `bootleg/detect/vision.py`**
+- [ ] **Step 3: Write `splitstep/detect/vision.py`**
 
 ```python
 import subprocess
@@ -1577,9 +1577,9 @@ from typing import Iterator, Sequence
 
 import numpy as np
 
-from bootleg.accel import detect_accel
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.geometry import Quad
+from splitstep.accel import detect_accel
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.geometry import Quad
 
 
 @dataclass(frozen=True)
@@ -1714,7 +1714,7 @@ Expected: 10 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/detect/vision.py tests/test_vision.py
+git add splitstep/detect/vision.py tests/test_vision.py
 git commit -m "feat: add vision feature extraction with size-based near/far split"
 ```
 
@@ -1723,7 +1723,7 @@ git commit -m "feat: add vision feature extraction with size-based near/far spli
 ### Task 8: Transcode wrappers
 
 **Files:**
-- Create: `bootleg/media/transcode.py`
+- Create: `splitstep/media/transcode.py`
 - Test: `tests/test_transcode.py`
 
 **Interfaces:**
@@ -1737,8 +1737,8 @@ Create `tests/test_transcode.py`:
 ```python
 import subprocess
 import pytest
-from bootleg.media.probe import probe
-from bootleg.media.transcode import TranscodeError, make_proxy, make_thumbs, run_ffmpeg
+from splitstep.media.probe import probe
+from splitstep.media.transcode import TranscodeError, make_proxy, make_thumbs, run_ffmpeg
 
 
 @pytest.fixture
@@ -1797,15 +1797,15 @@ def test_make_proxy_creates_parent_directories(big_video, tmp_path):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_transcode.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.media.transcode'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.media.transcode'`
 
-- [ ] **Step 3: Write `bootleg/media/transcode.py`**
+- [ ] **Step 3: Write `splitstep/media/transcode.py`**
 
 ```python
 import subprocess
 from pathlib import Path
 
-from bootleg.accel import Accel, detect_accel
+from splitstep.accel import Accel, detect_accel
 
 
 class TranscodeError(Exception):
@@ -1871,7 +1871,7 @@ Expected: 5 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/media/transcode.py tests/test_transcode.py
+git add splitstep/media/transcode.py tests/test_transcode.py
 git commit -m "feat: add proxy and sprite-sheet transcode wrappers"
 ```
 
@@ -1880,8 +1880,8 @@ git commit -m "feat: add proxy and sprite-sheet transcode wrappers"
 ### Task 9: Session, source and rally repositories
 
 **Files:**
-- Create: `bootleg/db/sessions.py`
-- Create: `bootleg/db/rallies.py`
+- Create: `splitstep/db/sessions.py`
+- Create: `splitstep/db/rallies.py`
 - Test: extend `tests/test_db.py`
 
 **Interfaces:**
@@ -1908,13 +1908,13 @@ git commit -m "feat: add proxy and sprite-sheet transcode wrappers"
 Append to `tests/test_db.py`:
 
 ```python
-from bootleg.db.rallies import (
+from splitstep.db.rallies import (
     list_rallies, replace_rallies, set_bounds, set_rejected, set_star,
 )
-from bootleg.db.sessions import (
+from splitstep.db.sessions import (
     add_source, find_or_create_session_for_date, list_sources,
 )
-from bootleg.detect.segment import Interval
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -2011,9 +2011,9 @@ Add `import pytest` to the top of `tests/test_db.py` if it is not already there.
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_db.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.db.sessions'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.db.sessions'`
 
-- [ ] **Step 3: Write `bootleg/db/sessions.py`**
+- [ ] **Step 3: Write `splitstep/db/sessions.py`**
 
 ```python
 import sqlite3
@@ -2106,14 +2106,14 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
     conn.commit()
 ```
 
-- [ ] **Step 4: Write `bootleg/db/rallies.py`**
+- [ ] **Step 4: Write `splitstep/db/rallies.py`**
 
 ```python
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 
-from bootleg.detect.segment import Interval
+from splitstep.detect.segment import Interval
 
 STAR_OVERLAP_MIN = 0.5
 
@@ -2225,7 +2225,7 @@ Expected: 12 passed
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/db/sessions.py bootleg/db/rallies.py tests/test_db.py
+git add splitstep/db/sessions.py splitstep/db/rallies.py tests/test_db.py
 git commit -m "feat: add session, source and rally repositories with star carry-over"
 ```
 
@@ -2234,9 +2234,9 @@ git commit -m "feat: add session, source and rally repositories with star carry-
 ### Task 10: Job queue and worker
 
 **Files:**
-- Create: `bootleg/db/jobs.py`
-- Create: `bootleg/jobs/__init__.py`
-- Create: `bootleg/jobs/worker.py`
+- Create: `splitstep/db/jobs.py`
+- Create: `splitstep/jobs/__init__.py`
+- Create: `splitstep/jobs/worker.py`
 - Test: `tests/test_jobs.py`
 
 **Interfaces:**
@@ -2259,11 +2259,11 @@ import json
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from bootleg.db.jobs import (
+from splitstep.db.jobs import (
     claim, enqueue, finish, heartbeat, reclaim_stale, set_progress,
 )
-from bootleg.db.schema import connect, migrate
-from bootleg.jobs.worker import Worker
+from splitstep.db.schema import connect, migrate
+from splitstep.jobs.worker import Worker
 
 
 @pytest.fixture
@@ -2382,9 +2382,9 @@ def test_worker_fails_unknown_job_types(library, conn):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_jobs.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.db.jobs'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.db.jobs'`
 
-- [ ] **Step 3: Write `bootleg/db/jobs.py`**
+- [ ] **Step 3: Write `splitstep/db/jobs.py`**
 
 ```python
 import json
@@ -2454,9 +2454,9 @@ def reclaim_stale(conn: sqlite3.Connection, older_than_s: int = 120) -> int:
     return cur.rowcount
 ```
 
-- [ ] **Step 4: Write `bootleg/jobs/worker.py`**
+- [ ] **Step 4: Write `splitstep/jobs/worker.py`**
 
-Create `bootleg/jobs/__init__.py` (empty file).
+Create `splitstep/jobs/__init__.py` (empty file).
 
 ```python
 import json
@@ -2465,9 +2465,9 @@ import threading
 import traceback
 from typing import Callable
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.schema import connect, migrate
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.schema import connect, migrate
 
 log = logging.getLogger(__name__)
 
@@ -2533,7 +2533,7 @@ Expected: 13 passed
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/db/jobs.py bootleg/jobs tests/test_jobs.py
+git add splitstep/db/jobs.py splitstep/jobs tests/test_jobs.py
 git commit -m "feat: add sqlite job queue and worker thread"
 ```
 
@@ -2542,7 +2542,7 @@ git commit -m "feat: add sqlite job queue and worker thread"
 ### Task 11: Ingest and detect handlers
 
 **Files:**
-- Create: `bootleg/jobs/handlers.py`
+- Create: `splitstep/jobs/handlers.py`
 - Test: `tests/test_handlers.py`
 
 **Interfaces:**
@@ -2562,11 +2562,11 @@ import json
 import subprocess
 import pytest
 
-from bootleg.db.rallies import list_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import list_sessions, list_sources
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.jobs.handlers import handle_detect, handle_ingest
+from splitstep.db.rallies import list_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import list_sessions, list_sources
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.jobs.handlers import handle_detect, handle_ingest
 
 
 @pytest.fixture
@@ -2675,30 +2675,30 @@ def test_detect_is_idempotent(library, conn, dropped_video):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_handlers.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.jobs.handlers'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.jobs.handlers'`
 
-- [ ] **Step 3: Write `bootleg/jobs/handlers.py`**
+- [ ] **Step 3: Write `splitstep/jobs/handlers.py`**
 
 ```python
 import logging
 import shutil
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source, find_or_create_session_for_date, get_source,
     set_session_status, set_source_status,
 )
-from bootleg.detect.audio import detect_hits, extract_pcm, hits_to_grid
-from bootleg.detect.features import read_features, write_features
-from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import SegmentParams, segment
-from bootleg.detect.vision import build_features, iter_person_boxes
-from bootleg.media.probe import probe
-from bootleg.media.transcode import make_proxy, make_thumbs
+from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
+from splitstep.detect.features import read_features, write_features
+from splitstep.detect.geometry import Quad
+from splitstep.detect.segment import SegmentParams, segment
+from splitstep.detect.vision import build_features, iter_person_boxes
+from splitstep.media.probe import probe
+from splitstep.media.transcode import make_proxy, make_thumbs
 
 log = logging.getLogger(__name__)
 
@@ -2819,7 +2819,7 @@ Expected: 6 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py tests/test_handlers.py
+git add splitstep/jobs/handlers.py tests/test_handlers.py
 git commit -m "feat: add ingest and detect job handlers"
 ```
 
@@ -2828,7 +2828,7 @@ git commit -m "feat: add ingest and detect job handlers"
 ### Task 12: Inbox watcher
 
 **Files:**
-- Create: `bootleg/watcher.py`
+- Create: `splitstep/watcher.py`
 - Test: `tests/test_watcher.py`
 
 **Interfaces:**
@@ -2844,8 +2844,8 @@ import threading
 import time
 import pytest
 
-from bootleg.db.schema import connect, migrate
-from bootleg.watcher import is_stable, scan_inbox
+from splitstep.db.schema import connect, migrate
+from splitstep.watcher import is_stable, scan_inbox
 
 
 @pytest.fixture
@@ -2909,9 +2909,9 @@ def test_scan_accepts_uppercase_suffixes(library, conn):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_watcher.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.watcher'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.watcher'`
 
-- [ ] **Step 3: Write `bootleg/watcher.py`**
+- [ ] **Step 3: Write `splitstep/watcher.py`**
 
 ```python
 import json
@@ -2921,9 +2921,9 @@ import threading
 import time
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.schema import connect, migrate
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.schema import connect, migrate
 
 log = logging.getLogger(__name__)
 
@@ -3020,7 +3020,7 @@ Expected: 6 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/watcher.py tests/test_watcher.py
+git add splitstep/watcher.py tests/test_watcher.py
 git commit -m "feat: add inbox watcher with file-size stability check"
 ```
 
@@ -3029,10 +3029,10 @@ git commit -m "feat: add inbox watcher with file-size stability check"
 ### Task 13: REST API and range-request media
 
 **Files:**
-- Create: `bootleg/api/__init__.py`
-- Create: `bootleg/api/media.py`
-- Create: `bootleg/api/routes.py`
-- Create: `bootleg/api/app.py`
+- Create: `splitstep/api/__init__.py`
+- Create: `splitstep/api/media.py`
+- Create: `splitstep/api/routes.py`
+- Create: `splitstep/api/app.py`
 - Test: `tests/test_api.py`
 
 **Interfaces:**
@@ -3056,11 +3056,11 @@ Create `tests/test_api.py`:
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.rallies import list_rallies, replace_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.api.app import create_app
+from splitstep.db.rallies import list_rallies, replace_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -3187,7 +3187,7 @@ def test_media_missing_file_is_404(client, seeded):
 
 
 def test_resegment_rewrites_rallies_from_cached_features(client, library, conn, seeded):
-    from bootleg.detect.features import FeatureFrame, Player, write_features
+    from splitstep.detect.features import FeatureFrame, Player, write_features
 
     frames = [
         FeatureFrame(i * 200, 2,
@@ -3208,11 +3208,11 @@ def test_resegment_rewrites_rallies_from_cached_features(client, library, conn, 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_api.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'bootleg.api'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'splitstep.api'`
 
-- [ ] **Step 3: Write `bootleg/api/media.py`**
+- [ ] **Step 3: Write `splitstep/api/media.py`**
 
-Create `bootleg/api/__init__.py` (empty file).
+Create `splitstep/api/__init__.py` (empty file).
 
 ```python
 import re
@@ -3284,16 +3284,16 @@ def range_response(path: Path, range_header: str | None) -> Response:
     )
 ```
 
-- [ ] **Step 4: Write `bootleg/api/routes.py`**
+- [ ] **Step 4: Write `splitstep/api/routes.py`**
 
 ```python
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
-from bootleg.db.rallies import list_rallies, replace_rallies, set_bounds, set_rejected, set_star
-from bootleg.db.sessions import get_session, get_source, list_sessions, list_sources
-from bootleg.detect.features import read_features
-from bootleg.detect.segment import SegmentParams, segment
+from splitstep.db.rallies import list_rallies, replace_rallies, set_bounds, set_rejected, set_star
+from splitstep.db.sessions import get_session, get_source, list_sessions, list_sources
+from splitstep.detect.features import read_features
+from splitstep.detect.segment import SegmentParams, segment
 
 from .media import range_response
 
@@ -3413,19 +3413,19 @@ def api_proxy(session_id: str, idx: int, request: Request,
     return range_response(path, range)
 ```
 
-- [ ] **Step 5: Write `bootleg/api/app.py`**
+- [ ] **Step 5: Write `splitstep/api/app.py`**
 
 ```python
 from fastapi import FastAPI
 
-from bootleg.config import Library
-from bootleg.db.schema import connect, migrate
+from splitstep.config import Library
+from splitstep.db.schema import connect, migrate
 
 from .routes import router
 
 
 def create_app(library: Library) -> FastAPI:
-    app = FastAPI(title="BootlegVision", version="0.1.0")
+    app = FastAPI(title="SplitStep", version="0.1.0")
     conn = connect(library.db_path)
     migrate(conn)
     app.state.library = library
@@ -3442,7 +3442,7 @@ Expected: 13 passed
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/api tests/test_api.py
+git add splitstep/api tests/test_api.py
 git commit -m "feat: add REST API with range-request media serving"
 ```
 
@@ -3451,7 +3451,7 @@ git commit -m "feat: add REST API with range-request media serving"
 ### Task 14: CLI
 
 **Files:**
-- Create: `bootleg/cli.py`
+- Create: `splitstep/cli.py`
 - Modify: `tests/test_api.py` — no change needed; CLI is exercised manually
 - Create: `README.md`
 
@@ -3459,7 +3459,7 @@ git commit -m "feat: add REST API with range-request media serving"
 - Consumes: everything
 - Produces: `main(argv: list[str] | None = None) -> int`; subcommands `serve`, `ingest`, `detect`, `segment`, `doctor`
 
-- [ ] **Step 1: Write `bootleg/cli.py`**
+- [ ] **Step 1: Write `splitstep/cli.py`**
 
 ```python
 import argparse
@@ -3468,16 +3468,16 @@ import logging
 import sys
 from pathlib import Path
 
-from bootleg.config import Library, LibraryNotMounted
-from bootleg.db import jobs as jobq
-from bootleg.db.rallies import list_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import get_source
-from bootleg.detect.features import read_features
-from bootleg.detect.segment import SegmentParams, segment
-from bootleg.jobs.handlers import HANDLERS
-from bootleg.jobs.worker import Worker
-from bootleg.watcher import InboxWatcher
+from splitstep.config import Library, LibraryNotMounted
+from splitstep.db import jobs as jobq
+from splitstep.db.rallies import list_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import get_source
+from splitstep.detect.features import read_features
+from splitstep.detect.segment import SegmentParams, segment
+from splitstep.jobs.handlers import HANDLERS
+from splitstep.jobs.worker import Worker
+from splitstep.watcher import InboxWatcher
 
 
 def _library(args) -> Library:
@@ -3485,7 +3485,7 @@ def _library(args) -> Library:
 
 
 def cmd_doctor(args) -> int:
-    from bootleg.accel import detect_accel
+    from splitstep.accel import detect_accel
 
     accel = detect_accel()
     lib = _library(args)
@@ -3501,7 +3501,7 @@ def cmd_doctor(args) -> int:
 def cmd_serve(args) -> int:
     import uvicorn
 
-    from bootleg.api.app import create_app
+    from splitstep.api.app import create_app
 
     lib = _library(args)
     app = create_app(lib)
@@ -3567,7 +3567,7 @@ def cmd_segment(args) -> int:
         print(f"\n{len(intervals)} rallies at threshold {args.threshold}")
         return 0
 
-    from bootleg.db.rallies import replace_rallies
+    from splitstep.db.rallies import replace_rallies
 
     replace_rallies(conn, source["session_id"], args.source_id, intervals)
     print(f"wrote {len(intervals)} rallies")
@@ -3579,7 +3579,7 @@ def cmd_segment(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    parser = argparse.ArgumentParser(prog="bootleg")
+    parser = argparse.ArgumentParser(prog="splitstep")
     parser.add_argument("--library", required=True, help="path to the library root")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -3626,19 +3626,19 @@ if __name__ == "__main__":
 Run:
 ```bash
 mkdir -p /tmp/bl/{_inbox,sessions,reels}
-python -m bootleg.cli --library /tmp/bl doctor
+python -m splitstep.cli --library /tmp/bl doctor
 ```
 Expected: prints the library path, an hwaccel line, an encoder, a torch device, and three `ok` lines.
 
 - [ ] **Step 3: Verify the missing-library error path**
 
-Run: `python -m bootleg.cli --library /tmp/definitely-not-mounted doctor`
+Run: `python -m splitstep.cli --library /tmp/definitely-not-mounted doctor`
 Expected: exit code 2, message `error: Library root not found: /tmp/definitely-not-mounted. Is the drive plugged in?`
 
 - [ ] **Step 4: Write `README.md`**
 
 ````markdown
-# BootlegVision
+# SplitStep
 
 Local tennis rally cutter. Ingests phone footage, segments it into rallies,
 serves them over a REST API.
@@ -3646,8 +3646,8 @@ serves them over a REST API.
 ## Setup
 
 ```bash
-conda create -n bootleg python=3.12 -y
-conda activate bootleg
+conda create -n splitstep python=3.12 -y
+conda activate splitstep
 pip install -e ".[dev]"
 brew install ffmpeg
 ```
@@ -3657,7 +3657,7 @@ brew install ffmpeg
 The library is a self-contained folder, normally on an external drive:
 
 ```
-/Volumes/BootlegVision/
+/Volumes/SplitStep/
   library.db
   _inbox/            drop videos here
   sessions/<date>/sources/NN/{original,proxy.mp4,thumbs.jpg,features.jsonl}
@@ -3668,14 +3668,14 @@ Create it once by hand — the app never creates it, so a missing drive is an
 error instead of a silent second library on internal storage.
 
 ```bash
-mkdir -p /Volumes/BootlegVision/{_inbox,sessions,reels}
+mkdir -p /Volumes/SplitStep/{_inbox,sessions,reels}
 ```
 
 ## Use
 
 ```bash
-bootleg --library /Volumes/BootlegVision doctor      # check hardware + paths
-bootleg --library /Volumes/BootlegVision serve       # http://127.0.0.1:8420
+splitstep --library /Volumes/SplitStep doctor      # check hardware + paths
+splitstep --library /Volumes/SplitStep serve       # http://127.0.0.1:8420
 ```
 
 Drop a video in `_inbox/`. It is picked up within 5 seconds once the file
@@ -3687,7 +3687,7 @@ Detection caches features to `features.jsonl`, so re-segmenting costs
 milliseconds and needs no GPU:
 
 ```bash
-bootleg --library /Volumes/BootlegVision segment <source_id> --threshold 0.35 --dry-run
+splitstep --library /Volumes/SplitStep segment <source_id> --threshold 0.35 --dry-run
 ```
 
 ## Tests
@@ -3707,7 +3707,7 @@ Expected: all tests pass (approximately 90 across 11 files)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/cli.py README.md
+git add splitstep/cli.py README.md
 git commit -m "feat: add CLI with serve, ingest, detect, segment and doctor"
 ```
 
@@ -3731,13 +3731,13 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import list_sessions, list_sources
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.jobs.handlers import HANDLERS
-from bootleg.jobs.worker import Worker
-from bootleg.watcher import scan_inbox
+from splitstep.api.app import create_app
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import list_sessions, list_sources
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.jobs.handlers import HANDLERS
+from splitstep.jobs.worker import Worker
+from splitstep.watcher import scan_inbox
 
 
 @pytest.fixture
@@ -3800,7 +3800,7 @@ Expected: 1 passed
 
 Run:
 ```bash
-pytest -q && ruff check bootleg tests
+pytest -q && ruff check splitstep tests
 ```
 Expected: all tests pass, ruff reports no errors.
 
@@ -3817,9 +3817,9 @@ git commit -m "test: add end-to-end inbox-to-api smoke test"
 
 Plan 1 is done when this works on an actual recording. It is not a task because it needs your video, but it is the point of everything above.
 
-1. `bootleg --library /Volumes/BootlegVision serve`
+1. `splitstep --library /Volumes/SplitStep serve`
 2. Drop one session into `_inbox/`. Wait for detection.
-3. `bootleg ... segment <source_id> --dry-run` — read the interval list against what you remember of the session.
+3. `splitstep ... segment <source_id> --dry-run` — read the interval list against what you remember of the session.
 4. Sweep the threshold: `--threshold 0.25`, `0.35`, `0.45`, `0.55`. Watch the rally count.
 5. Pick the value that **over-segments slightly**. Recall over precision — a false rally is one keystroke in Plan 2, a missed rally is gone.
 6. Commit that threshold as the new `SegmentParams` default, and copy that source's `features.jsonl` to `tests/fixtures/golden-<date>.jsonl` with your hand-labeled intervals beside it. That becomes the regression guard for every future weight change.

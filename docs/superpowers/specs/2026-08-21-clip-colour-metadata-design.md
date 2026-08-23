@@ -1,4 +1,4 @@
-# BootlegVision — Colour Metadata in the Locked Clip Profile
+# SplitStep — Colour Metadata in the Locked Clip Profile
 
 **Date:** 2026-08-21
 **Status:** Approved, ready for implementation
@@ -114,7 +114,7 @@ point is exactly where a conversion slots in.
 
 ## 4. The profile gains four constants
 
-In `bootleg/media/transcode.py`, beside `CLIP_WIDTH` / `CLIP_HEIGHT` /
+In `splitstep/media/transcode.py`, beside `CLIP_WIDTH` / `CLIP_HEIGHT` /
 `CLIP_FPS` / `CLIP_CRF`, under the same "CHANGING ANY OF THESE BREAKS
 `-c copy` AGAINST EVERY CLIP EVER CUT" banner:
 

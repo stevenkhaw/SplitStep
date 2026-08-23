@@ -13,8 +13,8 @@
 
 ## Global Constraints
 
-- Python **3.12** exactly, env `bootleg`. ffmpeg on `PATH` (9.0.1 on the dev machine).
-- Explicit SQL only, **no ORM**. Migrations are numbered `.sql` files under `bootleg/db/migrations/`, applied by `PRAGMA user_version`.
+- Python **3.12** exactly, env `splitstep`. ffmpeg on `PATH` (9.0.1 on the dev machine).
+- Explicit SQL only, **no ORM**. Migrations are numbered `.sql` files under `splitstep/db/migrations/`, applied by `PRAGMA user_version`.
 - **Svelte 5 runes only** (`$state`/`$derived`/`$effect`/`$props`). No `export let`, no `$:`, no stores.
 - **No YOLO inference inside tests.** Real ffmpeg in tests is fine and already used — `tests/test_probe.py` synthesizes clips with `lavfi`.
 - Proxy video stays **H.264 with `-g 30`**, 1080p, `yuv420p`. Rotation changes the filter chain only; it must never change the codec, GOP, or pixel format.
@@ -29,7 +29,7 @@
 ## File Structure
 
 ```
-bootleg/
+splitstep/
   db/migrations/002_rotation.sql        NEW  rotation_deg column
   db/sessions.py                        MOD  add_source(rotation_deg=), set_source_rotation()
   media/probe.py                        MOD  MediaInfo.rotation_deg, display_size()
@@ -38,13 +38,13 @@ bootleg/
   jobs/handlers.py                      MOD  ingest register-only, handle_build_proxy
   setup.py                              NEW  queue_setup() shared by API and CLI
   api/routes.py                         MOD  GET /api/sources/{id}, POST .../setup, preview.jpg
-  cli.py                                MOD  bootleg setup, doctor source table
+  cli.py                                MOD  splitstep setup, doctor source table
 tests/
   test_probe.py                         MOD  rotation parsing, display_size
   test_transcode.py                     MOD  rotation_filter, autorotate equivalence
   test_handlers.py                      MOD  register-only ingest, build_proxy
   test_api.py                           MOD  setup route, preview route
-  test_cli.py                           MOD  bootleg setup
+  test_cli.py                           MOD  splitstep setup
   test_db.py                            MOD  migration 002
 web/src/
   lib/preview.ts                        NEW  previewTimestamps()
@@ -90,7 +90,7 @@ git commit -m "feat(web): scrub the play-region frame instead of pinning it to t
 ### Task 2: probe reports display rotation and display dimensions
 
 **Files:**
-- Modify: `bootleg/media/probe.py`
+- Modify: `splitstep/media/probe.py`
 - Test: `tests/test_probe.py`
 
 **Interfaces:**
@@ -103,7 +103,7 @@ git commit -m "feat(web): scrub the play-region frame instead of pinning it to t
 
 import subprocess
 import pytest
-from bootleg.media.probe import display_size, probe
+from splitstep.media.probe import display_size, probe
 
 
 @pytest.fixture
@@ -149,7 +149,7 @@ Expected: FAIL — `ImportError: cannot import name 'display_size'`
 - [ ] **Step 3: Implement**
 
 ```python
-# bootleg/media/probe.py
+# splitstep/media/probe.py
 
 @dataclass(frozen=True)
 class MediaInfo:
@@ -168,7 +168,7 @@ def _display_rotation(video: dict) -> int:
 
     ffprobe reports the Display Matrix angle counter-clockwise, so the sign
     flips here. Anything that is not a quarter turn (a matrix carrying a
-    flip, or a stream with no matrix at all) reads as 0: BootlegVision only
+    flip, or a stream with no matrix at all) reads as 0: SplitStep only
     ever encodes right angles, and a bogus value must not reach
     `rotation_filter`, which raises on one.
     """
@@ -200,7 +200,7 @@ Expected: PASS (all, including the pre-existing ones)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/media/probe.py tests/test_probe.py
+git add splitstep/media/probe.py tests/test_probe.py
 git commit -m "feat(media): read display-matrix rotation in probe"
 ```
 
@@ -211,7 +211,7 @@ git commit -m "feat(media): read display-matrix rotation in probe"
 The sign convention chosen in Task 2 is settled here, empirically: a clip tagged with a display matrix must come out of our explicit pipeline pixel-identical to what ffmpeg's own autorotate produces.
 
 **Files:**
-- Modify: `bootleg/media/transcode.py`
+- Modify: `splitstep/media/transcode.py`
 - Test: `tests/test_transcode.py`
 
 **Interfaces:**
@@ -225,8 +225,8 @@ The sign convention chosen in Task 2 is settled here, empirically: a clip tagged
 
 import subprocess
 import pytest
-from bootleg.media.probe import probe
-from bootleg.media.transcode import make_proxy, rotation_filter
+from splitstep.media.probe import probe
+from splitstep.media.transcode import make_proxy, rotation_filter
 
 
 def test_rotation_filter_maps_every_right_angle():
@@ -293,7 +293,7 @@ Expected: FAIL — `ImportError: cannot import name 'rotation_filter'`
 - [ ] **Step 3: Implement**
 
 ```python
-# bootleg/media/transcode.py
+# splitstep/media/transcode.py
 
 # transpose=1 is 90 degrees clockwise, transpose=2 is 90 counter-clockwise.
 # 180 is two clockwise quarter turns rather than hflip,vflip: identical
@@ -347,7 +347,7 @@ Expected: PASS. If `test_make_proxy_at_the_probed_rotation_matches_ffmpeg_autoro
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/media/transcode.py tests/test_transcode.py
+git add splitstep/media/transcode.py tests/test_transcode.py
 git commit -m "feat(media): make proxy rotation explicit, never autorotate"
 ```
 
@@ -356,8 +356,8 @@ git commit -m "feat(media): make proxy rotation explicit, never autorotate"
 ### Task 4: rotation_deg column and source write helpers
 
 **Files:**
-- Create: `bootleg/db/migrations/002_rotation.sql`
-- Modify: `bootleg/db/sessions.py`
+- Create: `splitstep/db/migrations/002_rotation.sql`
+- Modify: `splitstep/db/sessions.py`
 - Test: `tests/test_db.py`
 
 **Interfaces:**
@@ -368,8 +368,8 @@ git commit -m "feat(media): make proxy rotation explicit, never autorotate"
 ```python
 # tests/test_db.py -- append
 
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source, find_or_create_session_for_date, get_source, set_source_rotation,
 )
 
@@ -428,7 +428,7 @@ Expected: FAIL — `no such column: rotation_deg`
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- bootleg/db/migrations/002_rotation.sql
+-- splitstep/db/migrations/002_rotation.sql
 --
 -- Clockwise degrees applied to a source's coded frame when its proxy is
 -- built. Existing rows default to 0 and are deliberately NOT backfilled
@@ -441,9 +441,9 @@ ALTER TABLE sources ADD COLUMN rotation_deg INTEGER NOT NULL DEFAULT 0;
 - [ ] **Step 4: Implement the helpers**
 
 ```python
-# bootleg/db/sessions.py
+# splitstep/db/sessions.py
 
-from bootleg.media.transcode import rotation_filter
+from splitstep.media.transcode import rotation_filter
 
 
 def _check_rotation(rotation_deg: int) -> int:
@@ -472,7 +472,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/db/migrations/002_rotation.sql bootleg/db/sessions.py tests/test_db.py
+git add splitstep/db/migrations/002_rotation.sql splitstep/db/sessions.py tests/test_db.py
 git commit -m "feat(db): store a per-source rotation"
 ```
 
@@ -481,7 +481,7 @@ git commit -m "feat(db): store a per-source rotation"
 ### Task 5: ingest becomes register-only
 
 **Files:**
-- Modify: `bootleg/jobs/handlers.py`
+- Modify: `splitstep/jobs/handlers.py`
 - Test: `tests/test_handlers.py`
 
 **Interfaces:**
@@ -494,14 +494,14 @@ git commit -m "feat(db): store a per-source rotation"
 # tests/test_handlers.py -- append
 
 import json
-from bootleg.db.sessions import get_source
-from bootleg.jobs.handlers import handle_ingest
+from splitstep.db.sessions import get_source
+from splitstep.jobs.handlers import handle_ingest
 
 
 def test_ingest_registers_without_transcoding(library, sample_video, monkeypatch):
     called = []
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda *a, **k: called.append(a),
     )
     src = library.inbox / "IMG_0001.MOV"
@@ -634,7 +634,7 @@ def handle_ingest(library: Library, payload: dict) -> None:
         raise
 ```
 
-Import `display_size` from `bootleg.media.probe`.
+Import `display_size` from `splitstep.media.probe`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -644,7 +644,7 @@ Expected: PASS. Existing ingest tests asserting `status == "ingested"` or a queu
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py tests/test_handlers.py
+git add splitstep/jobs/handlers.py tests/test_handlers.py
 git commit -m "feat(jobs): ingest registers a source without transcoding it"
 ```
 
@@ -653,7 +653,7 @@ git commit -m "feat(jobs): ingest registers a source without transcoding it"
 ### Task 6: the build_proxy job
 
 **Files:**
-- Modify: `bootleg/jobs/handlers.py`
+- Modify: `splitstep/jobs/handlers.py`
 - Test: `tests/test_handlers.py`
 
 **Interfaces:**
@@ -665,7 +665,7 @@ git commit -m "feat(jobs): ingest registers a source without transcoding it"
 ```python
 # tests/test_handlers.py -- append
 
-from bootleg.jobs.handlers import handle_build_proxy
+from splitstep.jobs.handlers import handle_build_proxy
 
 
 def _registered(library, sample_video, name="IMG_1000.MOV"):
@@ -681,10 +681,10 @@ def test_build_proxy_passes_the_stored_rotation(library, sample_video, monkeypat
     set_source_rotation(conn, row["id"], 270)
     seen = {}
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda src, dst, rotation_deg=0: seen.update(rotation_deg=rotation_deg) or dst.touch(),
     )
-    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr("splitstep.jobs.handlers.make_thumbs", lambda *a, **k: None)
 
     handle_build_proxy(library, {"source_id": row["id"]})
 
@@ -694,9 +694,9 @@ def test_build_proxy_passes_the_stored_rotation(library, sample_video, monkeypat
 def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
     conn, row = _registered(library, sample_video, name="IMG_1001.MOV")
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
+        "splitstep.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
     )
-    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr("splitstep.jobs.handlers.make_thumbs", lambda *a, **k: None)
 
     handle_build_proxy(library, {"source_id": row["id"]})
 
@@ -775,7 +775,7 @@ Expected: PASS, ruff clean
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py tests/test_handlers.py
+git add splitstep/jobs/handlers.py tests/test_handlers.py
 git commit -m "feat(jobs): add build_proxy, the transcode ingest used to do"
 ```
 
@@ -784,7 +784,7 @@ git commit -m "feat(jobs): add build_proxy, the transcode ingest used to do"
 ### Task 7: queue_setup, shared by API and CLI
 
 **Files:**
-- Create: `bootleg/setup.py`
+- Create: `splitstep/setup.py`
 - Test: `tests/test_setup.py`
 
 **Interfaces:**
@@ -797,13 +797,13 @@ git commit -m "feat(jobs): add build_proxy, the transcode ingest used to do"
 # tests/test_setup.py -- new file
 
 import pytest
-from bootleg.db.presets import create_preset
-from bootleg.db.schema import connect, migrate
-from bootleg.detect.geometry import Quad
-from bootleg.db.sessions import (
+from splitstep.db.presets import create_preset
+from splitstep.db.schema import connect, migrate
+from splitstep.detect.geometry import Quad
+from splitstep.db.sessions import (
     add_source, find_or_create_session_for_date, get_source, set_source_status,
 )
-from bootleg.setup import queue_setup
+from splitstep.setup import queue_setup
 
 
 @pytest.fixture
@@ -824,7 +824,7 @@ def _source(conn, status="needs_setup"):
 
 
 def _preset(conn):
-    # create_preset takes a Quad, not raw points -- see bootleg/db/presets.py.
+    # create_preset takes a Quad, not raw points -- see splitstep/db/presets.py.
     return create_preset(conn, "court", Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))))
 
 
@@ -869,12 +869,12 @@ def test_queue_setup_refuses_a_source_mid_job(conn):
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_setup.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'bootleg.setup'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'splitstep.setup'`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# bootleg/setup.py
+# splitstep/setup.py
 """Applying a setup decision: rotation plus play region, then a rebuild.
 
 One function, called by both the API route and the CLI, so the two cannot
@@ -884,9 +884,9 @@ whether it arrives over HTTP or from a terminal.
 
 import sqlite3
 
-from bootleg.db import jobs as jobq
-from bootleg.db.presets import get_preset
-from bootleg.db.sessions import get_source, set_source_preset, set_source_rotation
+from splitstep.db import jobs as jobq
+from splitstep.db.presets import get_preset
+from splitstep.db.sessions import get_source, set_source_preset, set_source_rotation
 
 # A source whose proxy is being written, or whose features are being
 # extracted, cannot have either input changed underneath the running job.
@@ -917,7 +917,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/setup.py tests/test_setup.py
+git add splitstep/setup.py tests/test_setup.py
 git commit -m "feat: add queue_setup, the one path that applies a setup decision"
 ```
 
@@ -926,7 +926,7 @@ git commit -m "feat: add queue_setup, the one path that applies a setup decision
 ### Task 8: preview frames from the original
 
 **Files:**
-- Modify: `bootleg/media/frames.py`, `bootleg/api/routes.py`
+- Modify: `splitstep/media/frames.py`, `splitstep/api/routes.py`
 - Test: `tests/test_frames.py`, `tests/test_api.py`
 
 **Interfaces:**
@@ -938,8 +938,8 @@ git commit -m "feat: add queue_setup, the one path that applies a setup decision
 ```python
 # tests/test_frames.py -- append
 
-from bootleg.media.frames import extract_frame
-from bootleg.media.probe import probe
+from splitstep.media.frames import extract_frame
+from splitstep.media.probe import probe
 
 
 def test_extract_frame_applies_a_rotation(tmp_path, sample_video):
@@ -1030,7 +1030,7 @@ Keep the existing argument order for `src, dst, at_ms, width` so current call si
 - [ ] **Step 4: Implement the route**
 
 ```python
-# bootleg/api/routes.py
+# splitstep/api/routes.py
 
 import threading
 
@@ -1099,7 +1099,7 @@ Expected: PASS, ruff clean
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bootleg/media/frames.py bootleg/api/routes.py tests/test_frames.py tests/test_api.py
+git add splitstep/media/frames.py splitstep/api/routes.py tests/test_frames.py tests/test_api.py
 git commit -m "feat(api): serve rotated preview frames from the original"
 ```
 
@@ -1108,7 +1108,7 @@ git commit -m "feat(api): serve rotated preview frames from the original"
 ### Task 9: setup and source API routes
 
 **Files:**
-- Modify: `bootleg/api/routes.py`
+- Modify: `splitstep/api/routes.py`
 - Test: `tests/test_api.py`
 
 **Interfaces:**
@@ -1217,28 +1217,28 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/api/routes.py tests/test_api.py
+git add splitstep/api/routes.py tests/test_api.py
 git commit -m "feat(api): add source fetch and setup routes"
 ```
 
 ---
 
-### Task 10: bootleg setup, and doctor reports orientation
+### Task 10: splitstep setup, and doctor reports orientation
 
 **Files:**
-- Modify: `bootleg/cli.py`
+- Modify: `splitstep/cli.py`
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
 - Consumes: `queue_setup` (Task 7)
-- Produces: `bootleg setup <source_id> --rotation N [--preset ID] [--now]`
+- Produces: `splitstep setup <source_id> --rotation N [--preset ID] [--now]`
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_cli.py -- append
 
-from bootleg.cli import main
+from splitstep.cli import main
 
 
 def test_setup_command_queues_a_build(library, registered_source, a_preset, capsys):
@@ -1284,7 +1284,7 @@ def cmd_setup(args) -> int:
         ).fetchone()
         preset_id = row["court_preset_id"] if row else None
         if not preset_id:
-            print("no --preset given and none assigned; see `bootleg preset list`",
+            print("no --preset given and none assigned; see `splitstep preset list`",
                   file=sys.stderr)
             return 1
     try:
@@ -1335,8 +1335,8 @@ Expected: PASS, ruff clean, whole Python suite green
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bootleg/cli.py tests/test_cli.py
-git commit -m "feat(cli): add bootleg setup and report rotation in doctor"
+git add splitstep/cli.py tests/test_cli.py
+git commit -m "feat(cli): add splitstep setup and report rotation in doctor"
 ```
 
 ---
@@ -1352,14 +1352,14 @@ The backend is now complete without any UI. Run the actual footage through it be
 The 608x1080 proxy is unusable for drawing a region, so create the quad from the CLI using the trapezoid the UI defaults to, then refine it in the wizard later:
 
 ```bash
-conda run -n bootleg bootleg --library /Volumes/SanDisk_2TB/BootlegVision \
+conda run -n splitstep splitstep --library /Volumes/SanDisk_2TB/SplitStep \
   preset add --name "2026-08-19 source 1" --quad "0.35,0.35 0.65,0.35 0.98,1.0 0.02,1.0"
 ```
 
 - [ ] **Step 2: Rebuild the proxy landscape and re-detect**
 
 ```bash
-conda run -n bootleg bootleg --library /Volumes/SanDisk_2TB/BootlegVision \
+conda run -n splitstep splitstep --library /Volumes/SanDisk_2TB/SplitStep \
   setup 0926ad87101b40dc9cd63a915858147c --rotation 0 --preset <preset_id_from_step_1> --now
 ```
 
@@ -1367,7 +1367,7 @@ Expected: ~7 minutes of transcode, then ~5 minutes of detection.
 
 - [ ] **Step 3: Verify the proxy orientation**
 
-Run: `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /Volumes/SanDisk_2TB/BootlegVision/sessions/2026-08-19/sources/01/proxy.mp4`
+Run: `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /Volumes/SanDisk_2TB/SplitStep/sessions/2026-08-19/sources/01/proxy.mp4`
 Expected: `1920,1080` — not `608,1080`
 
 - [ ] **Step 4: Compare detection against the recorded baseline**
@@ -1375,13 +1375,13 @@ Expected: `1920,1080` — not `608,1080`
 ```bash
 python3 - <<'EOF'
 import json
-p = "/Volumes/SanDisk_2TB/BootlegVision/sessions/2026-08-19/sources/01/features.jsonl"
+p = "/Volumes/SanDisk_2TB/SplitStep/sessions/2026-08-19/sources/01/features.jsonl"
 rows = [json.loads(l) for l in open(p)]
 print("frames", len(rows))
 print("n>=1", sum(1 for d in rows if d["n"] >= 1))
 print("n>=2", sum(1 for d in rows if d["n"] >= 2))
 EOF
-sqlite3 /Volumes/SanDisk_2TB/BootlegVision/library.db "SELECT COUNT(*) FROM rallies;"
+sqlite3 /Volumes/SanDisk_2TB/SplitStep/library.db "SELECT COUNT(*) FROM rallies;"
 ```
 
 Baseline from the portrait proxy, for comparison: 5875 frames, `n>=1` 668, `n>=2` 55, 0 rallies. A landscape proxy that still produces `n>=2` in under 5% of frames means the play region or the camera angle is the problem, not orientation — stop and re-diagnose before continuing to the UI tasks.
@@ -1867,7 +1867,7 @@ git commit -m "feat(web): surface sources waiting on setup"
 - [ ] **Step 1: Build the SPA and start the server**
 
 ```bash
-cd web && npm run build && cd .. && conda run -n bootleg bootleg --library /Volumes/SanDisk_2TB/BootlegVision serve
+cd web && npm run build && cd .. && conda run -n splitstep splitstep --library /Volumes/SanDisk_2TB/SplitStep serve
 ```
 
 - [ ] **Step 2: Drop a real clip into the inbox and watch it register**
@@ -1880,7 +1880,7 @@ Confirm: the grid shows nine non-black frames; rotating flips all nine; clicking
 
 - [ ] **Step 4: Confirm the pipeline runs to completion**
 
-Run: `sqlite3 /Volumes/SanDisk_2TB/BootlegVision/library.db "SELECT idx,status,width,height,rotation_deg FROM sources;"`
+Run: `sqlite3 /Volumes/SanDisk_2TB/SplitStep/library.db "SELECT idx,status,width,height,rotation_deg FROM sources;"`
 Expected: `ready`, landscape dimensions, the rotation chosen in the wizard.
 
 - [ ] **Step 5: Full suite and status flip**
@@ -1901,4 +1901,4 @@ git commit -m "docs: mark the import setup wizard spec implemented"
 
 **Spec coverage:** §3 pipeline → Tasks 5, 6. §4 rotation → Tasks 2, 3, 4. §5 preview → Task 8, 12. §6 wizard → Tasks 13, 14, 15. §7 API → Tasks 8, 9. §8 CLI → Task 10. §9 existing data → Tasks 4 (migration), 11 (rebuild). §10 failure handling → Tasks 6, 8, 9. §11 testing → distributed through every task. §12 deferred → not implemented, by design.
 
-**Known ordering constraint:** Task 11 runs the real footage through a backend that has no wizard yet, using `bootleg preset add` for the quad. That is deliberate — it validates the rotation fix a full day of UI work before the UI exists, and if detection does not recover, Tasks 12–16 are the wrong next thing to build.
+**Known ordering constraint:** Task 11 runs the real footage through a backend that has no wizard yet, using `splitstep preset add` for the quad. That is deliberate — it validates the rotation fix a full day of UI work before the UI exists, and if detection does not recover, Tasks 12–16 are the wrong next thing to build.

@@ -1,8 +1,8 @@
-# BootlegVision — Review UX Fixes
+# SplitStep — Review UX Fixes
 
 **Date:** 2026-08-20
 **Status:** Approved, ready for implementation
-**Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` (§6 UI)
+**Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` (§6 UI)
 
 ---
 
@@ -54,7 +54,7 @@ on every clip, that would mark the whole session reviewed just for walking
 through it.
 
 No backend change is needed: `set_star` and `set_rejected` in
-`bootleg/db/rallies.py` already write `reviewed_at = COALESCE(reviewed_at, ?)`,
+`splitstep/db/rallies.py` already write `reviewed_at = COALESCE(reviewed_at, ?)`,
 so `S` and `X` stamp it server-side today. The fix is to make `persistAction`'s
 `skip` case a no-op that reports success without calling the API.
 

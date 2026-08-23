@@ -11,10 +11,10 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-08-21-clip-export-and-reels-design.md`. **Read §2, §5 and §6 before Task 1.** §2 records three defects it corrects in an older design document; that reasoning is load-bearing. This plan covers §5–§6 only; §3–§4 shipped as Plan A (`docs/superpowers/plans/2026-08-21-clip-export.md`).
-- Python runs from the `bootleg` conda env by path: `~/miniconda3/envs/bootleg/bin/pytest`, `~/miniconda3/envs/bootleg/bin/ruff`.
+- Python runs from the `splitstep` conda env by path: `~/miniconda3/envs/splitstep/bin/pytest`, `~/miniconda3/envs/splitstep/bin/ruff`.
 - ruff line-length 100. **ruff defaults here are broader than the classic set** — `I001` (import ordering), `BLE001` (blind except), `PLW1510` (`subprocess.run` without `check=`) are active.
 - `pytest` runs with `filterwarnings = ["error"]` — a new warning fails the suite.
-- Migrations are numbered `.sql` applied by `PRAGMA user_version`. Add **`006_reel_items_by_span.sql`** and nothing else; `001`–`005` are applied to the user's real library and **must never be edited**. `migrate()` skips any file numbered `<= user_version`, so a duplicate number is silently ignored forever — this project has already lost a round to that. Before writing, run `ls bootleg/db/migrations/` and confirm `006` is free.
+- Migrations are numbered `.sql` applied by `PRAGMA user_version`. Add **`006_reel_items_by_span.sql`** and nothing else; `001`–`005` are applied to the user's real library and **must never be edited**. `migrate()` skips any file numbered `<= user_version`, so a duplicate number is silently ignored forever — this project has already lost a round to that. Before writing, run `ls splitstep/db/migrations/` and confirm `006` is free.
 - **The locked clip profile may never change**: `mp4 · H.264 High · yuv420p · 3840×2160 · 30 fps CFR · CRF 20 · AAC 128k 48 kHz stereo`. Every reel concatenating clips depends on every clip sharing it exactly.
 - **Never auto-enqueue encoding.** A button labelled "render" must not start half an hour of work. Render refuses while any clip is missing, naming the count; cutting stays an explicit, separate action.
 - API routes are `def`, not `async def`.
@@ -36,19 +36,19 @@
 
 | File | Responsibility |
 |---|---|
-| `bootleg/db/migrations/006_reel_items_by_span.sql` | Replace `reel_items` with the span-keyed table |
-| `bootleg/db/reels.py` | Pure SQL: reel CRUD, slug allocation, membership, ordering, dirty/rendered |
-| `bootleg/media/concat.py` | `-c copy` concat + duration verification + re-encode fallback |
-| `bootleg/reels.py` | Library-aware: resolve items to clip status + rally metadata, plan the cut |
+| `splitstep/db/migrations/006_reel_items_by_span.sql` | Replace `reel_items` with the span-keyed table |
+| `splitstep/db/reels.py` | Pure SQL: reel CRUD, slug allocation, membership, ordering, dirty/rendered |
+| `splitstep/media/concat.py` | `-c copy` concat + duration verification + re-encode fallback |
+| `splitstep/reels.py` | Library-aware: resolve items to clip status + rally metadata, plan the cut |
 
 **Python — modified**
 
 | File | Change |
 |---|---|
-| `bootleg/media/probe.py` | extract `ffprobe_json()` so concat can read stream params |
-| `bootleg/db/jobs.py` | `has_pending_reel()` |
-| `bootleg/jobs/handlers.py` | `handle_reel`, `HANDLERS` entry, `handle_clip` tolerates a missing `rally_id` |
-| `bootleg/api/routes.py` | Nine reel routes |
+| `splitstep/media/probe.py` | extract `ffprobe_json()` so concat can read stream params |
+| `splitstep/db/jobs.py` | `has_pending_reel()` |
+| `splitstep/jobs/handlers.py` | `handle_reel`, `HANDLERS` entry, `handle_clip` tolerates a missing `rally_id` |
+| `splitstep/api/routes.py` | Nine reel routes |
 
 **Frontend — created**
 
@@ -77,21 +77,21 @@ Three things from that follow-up bear on this plan:
 - **The concat demuxer validates nothing** (spec §4.2, measured). See the Global Constraints note; Task 2 is built around it.
 - **`find_orphan_clips` / `parse_clip_name`** already establish that anything reading `clips/` gates on the exact name pattern, never a bare glob. This plan resolves clips by exact path, which sidesteps it — Task 3 has the test that keeps it that way.
 
-Verified on the live library at `/Volumes/SanDisk_2TB/BootlegVision` before this plan was revised: all 24 cut clips are uniform — `h264 High / 3840x2160 / SAR 1:1 / yuv420p / 30fps`, `aac 48000 stereo`, no rotation side data. Task 2's pre-flight will pass on them and the first real render will take the `-c copy` path. (The 24 `._*` files beside them are macOS AppleDouble sidecars on exFAT, not encode temps; `parse_clip_name` already rejects them.)
+Verified on the live library at `/Volumes/SanDisk_2TB/SplitStep` before this plan was revised: all 24 cut clips are uniform — `h264 High / 3840x2160 / SAR 1:1 / yuv420p / 30fps`, `aac 48000 stereo`, no rotation side data. Task 2's pre-flight will pass on them and the first real render will take the `-c copy` path. (The 24 `._*` files beside them are macOS AppleDouble sidecars on exFAT, not encode temps; `parse_clip_name` already rejects them.)
 
-**Out of scope:** a `bootleg reels` CLI. The spec's §6 is UI-only, and every reel operation has a route. `bootleg clips export` exists because cutting is slow and worth scripting; composing a reel is not.
+**Out of scope:** a `splitstep reels` CLI. The spec's §6 is UI-only, and every reel operation has a route. `splitstep clips export` exists because cutting is slow and worth scripting; composing a reel is not.
 
 ---
 
 ### Task 1: The span-keyed `reel_items` table
 
 **Files:**
-- Create: `bootleg/db/migrations/006_reel_items_by_span.sql`
-- Create: `bootleg/db/reels.py`
+- Create: `splitstep/db/migrations/006_reel_items_by_span.sql`
+- Create: `splitstep/db/reels.py`
 - Test: `tests/test_db_reels.py` (create)
 
 **Interfaces:**
-- Consumes: `bootleg.db.schema.migrate`, the `library`/`conn` fixtures in `tests/conftest.py`.
+- Consumes: `splitstep.db.schema.migrate`, the `library`/`conn` fixtures in `tests/conftest.py`.
 - Produces:
   - `slugify(name: str) -> str`
   - `unique_slug(conn, base: str) -> str`
@@ -110,14 +110,14 @@ Verified on the live library at `/Volumes/SanDisk_2TB/BootlegVision` before this
 - [ ] **Step 1: Confirm the migration number is free**
 
 ```bash
-ls bootleg/db/migrations/
+ls splitstep/db/migrations/
 ```
 
 Expected: `001_init.sql 002_rotation.sql 003_rally_labels.sql 004_label_retraction.sql 005_point_flag.sql` — and no `006_*`. If a `006` already exists, **stop and ask**: `migrate()` skips any file numbered `<= user_version`, so a second `006` would be ignored forever and the table would silently keep its cascade.
 
 - [ ] **Step 2: Write the migration**
 
-Create `bootleg/db/migrations/006_reel_items_by_span.sql`:
+Create `splitstep/db/migrations/006_reel_items_by_span.sql`:
 
 ```sql
 -- reel_items keyed on the SPAN, not on a rally.
@@ -166,7 +166,7 @@ Create `tests/test_db_reels.py`:
 ```python
 import pytest
 
-from bootleg.db.reels import (
+from splitstep.db.reels import (
     add_items,
     create_reel,
     find_reel_by_name,
@@ -181,9 +181,9 @@ from bootleg.db.reels import (
     slugify,
     unique_slug,
 )
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -378,12 +378,12 @@ def test_lookup_helpers(conn):
 - [ ] **Step 4: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_db_reels.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_db_reels.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.db.reels'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.db.reels'`.
 
-- [ ] **Step 5: Write `bootleg/db/reels.py`**
+- [ ] **Step 5: Write `splitstep/db/reels.py`**
 
 ```python
 import re
@@ -617,7 +617,7 @@ def mark_rendered(conn: sqlite3.Connection, reel_id: str, rendered_path: str) ->
 - [ ] **Step 6: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_db_reels.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_db_reels.py -q
 ```
 
 Expected: PASS, 17 tests.
@@ -625,7 +625,7 @@ Expected: PASS, 17 tests.
 - [ ] **Step 7: Run the full suite and the linter**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all green. Nothing else reads `reel_items` yet, so a failure here means the `DROP TABLE` hit something unexpected — read the error rather than adjusting the migration.
@@ -633,7 +633,7 @@ Expected: all green. Nothing else reads `reel_items` yet, so a failure here mean
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/db/migrations/006_reel_items_by_span.sql bootleg/db/reels.py tests/test_db_reels.py
+git add splitstep/db/migrations/006_reel_items_by_span.sql splitstep/db/reels.py tests/test_db_reels.py
 git commit -m "feat(reels): key reel_items on the span, not the rally"
 ```
 
@@ -642,8 +642,8 @@ git commit -m "feat(reels): key reel_items on the span, not the rally"
 ### Task 2: `-c copy` concat, guarded by a pre-flight parameter check and a duration check
 
 **Files:**
-- Modify: `bootleg/media/probe.py` (extract `ffprobe_json`)
-- Create: `bootleg/media/concat.py`
+- Modify: `splitstep/media/probe.py` (extract `ffprobe_json`)
+- Create: `splitstep/media/concat.py`
 - Test: `tests/test_concat.py` (create)
 
 **Why there are two checks, not one.** §5.1 specifies the duration check, and it stays exactly as written. But §4.2's measured correction — added after §5.1 — says the concat demuxer does **not** refuse mismatched codec parameters on ffmpeg 9.0.1: it exits 0 with empty stderr and reads every input through the *first* clip's parameters. That produces three failure modes and the duration check sees only one of them:
@@ -657,7 +657,7 @@ git commit -m "feat(reels): key reel_items on the span, not the rally"
 Container duration is video duration in both blind cases, so a pre-flight comparison of the inputs is the only thing that can see them. It is the loud refusal ffmpeg declines to give.
 
 **Interfaces:**
-- Consumes: `bootleg.media.transcode.run_ffmpeg` / `CLIP_FPS` / `CLIP_CRF` / `ProgressFn` / `TranscodeError`, `bootleg.media.probe.probe`.
+- Consumes: `splitstep.media.transcode.run_ffmpeg` / `CLIP_FPS` / `CLIP_CRF` / `ProgressFn` / `TranscodeError`, `splitstep.media.probe.probe`.
 - Produces:
   - `ffprobe_json(path: Path, timeout: float | None = None) -> dict` (in `probe.py`)
   - `ConcatError(Exception)`
@@ -667,7 +667,7 @@ Container duration is video duration in both blind cases, so a pre-flight compar
   - `tolerance_ms(n_inputs: int) -> int`
   - `concat_clips(paths: list[Path], dst: Path, on_progress: ProgressFn | None = None) -> str` — returns `"copy"` or `"reencode"`
 
-- [ ] **Step 1: Extract `ffprobe_json` in `bootleg/media/probe.py`**
+- [ ] **Step 1: Extract `ffprobe_json` in `splitstep/media/probe.py`**
 
 `probe()` already shells out to `ffprobe -show_format -show_streams` and then throws the raw JSON away. Concat needs different fields out of that same document (`pix_fmt`, `profile`, audio rate and channels), and a second ffprobe implementation in this codebase would be two things to keep in agreement. Pure extraction, no behaviour change.
 
@@ -720,14 +720,14 @@ import subprocess
 
 import pytest
 
-from bootleg.media.concat import (
+from splitstep.media.concat import (
     ConcatError,
     clip_params,
     concat_clips,
     divergences,
     tolerance_ms,
 )
-from bootleg.media.probe import probe
+from splitstep.media.probe import probe
 
 
 def _clip(path, seconds=1.0, size="320x240", sar=None, silent=False, crf=23):
@@ -869,7 +869,7 @@ def test_a_short_copy_falls_back_to_a_reencode(tmp_path, monkeypatch):
     what is under test is the DECISION, which cannot be provoked on demand
     with real ffmpeg.
     """
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / f"{i}.mp4") for i in range(3)]
     dst = tmp_path / "reel.mp4"
@@ -893,7 +893,7 @@ def test_a_short_copy_falls_back_to_a_reencode(tmp_path, monkeypatch):
 
 
 def test_a_failed_copy_leaves_no_partial_output(tmp_path, monkeypatch):
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / "a.mp4")]
     dst = tmp_path / "reel.mp4"
@@ -951,12 +951,12 @@ def test_tolerance_grows_with_the_input_count():
 - [ ] **Step 3: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_concat.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_concat.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.media.concat'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.media.concat'`.
 
-- [ ] **Step 4: Write `bootleg/media/concat.py`**
+- [ ] **Step 4: Write `splitstep/media/concat.py`**
 
 ```python
 import contextlib
@@ -966,8 +966,8 @@ import uuid
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from bootleg.media.probe import ffprobe_json, probe
-from bootleg.media.transcode import (
+from splitstep.media.probe import ffprobe_json, probe
+from splitstep.media.transcode import (
     CLIP_CRF,
     CLIP_FPS,
     ProgressFn,
@@ -1234,7 +1234,7 @@ __all__ = [
 - [ ] **Step 5: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_concat.py tests/test_probe.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_concat.py tests/test_probe.py -q
 ```
 
 Expected: PASS. `test_probe.py` passing untouched is the evidence Step 1 was a pure extraction.
@@ -1242,7 +1242,7 @@ Expected: PASS. `test_probe.py` passing untouched is the evidence Step 1 was a p
 - [ ] **Step 6: Full suite and lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all green.
@@ -1250,7 +1250,7 @@ Expected: all green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bootleg/media/concat.py bootleg/media/probe.py tests/test_concat.py
+git add splitstep/media/concat.py splitstep/media/probe.py tests/test_concat.py
 git commit -m "feat(reels): concat clips with -c copy, guarded on both sides"
 ```
 
@@ -1259,13 +1259,13 @@ git commit -m "feat(reels): concat clips with -c copy, guarded on both sides"
 ### Task 3: Resolving a reel's items to clip status and a cut plan
 
 **Files:**
-- Create: `bootleg/reels.py`
-- Modify: `bootleg/db/jobs.py` (add `has_pending_reel`)
-- Modify: `bootleg/jobs/handlers.py` (`handle_clip` tolerates a payload with no `rally_id`)
+- Create: `splitstep/reels.py`
+- Modify: `splitstep/db/jobs.py` (add `has_pending_reel`)
+- Modify: `splitstep/jobs/handlers.py` (`handle_clip` tolerates a payload with no `rally_id`)
 - Test: `tests/test_reels.py` (create), `tests/test_handler_clip.py` (append one test)
 
 **Interfaces:**
-- Consumes: `bootleg.export.ExportPlan`, `bootleg.media.clips.clip_relpath`, `bootleg.db.reels.list_items`, `bootleg.db.jobs.has_pending_clip`.
+- Consumes: `splitstep.export.ExportPlan`, `splitstep.media.clips.clip_relpath`, `splitstep.db.reels.list_items`, `splitstep.db.jobs.has_pending_clip`.
 - Produces:
   - `ReelItem` frozen dataclass with fields `source_id, session_id, source_idx, start_ms, end_ms, position, clip_relpath, clip_ready, rally`
   - `resolve_items(library, conn, reel_id) -> list[ReelItem]`
@@ -1279,13 +1279,13 @@ git commit -m "feat(reels): concat clips with -c copy, guarded on both sides"
 Create `tests/test_reels.py`:
 
 ```python
-from bootleg.db.jobs import enqueue, has_pending_reel
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import add_items, create_reel
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.media.clips import clip_relpath
-from bootleg.reels import (
+from splitstep.db.jobs import enqueue, has_pending_reel
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.reels import add_items, create_reel
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.media.clips import clip_relpath
+from splitstep.reels import (
     clip_paths,
     missing_clip_count,
     plan_reel_export,
@@ -1489,12 +1489,12 @@ def test_handle_clip_without_a_rally_id_still_cuts(library, conn, a_rally):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_reels.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_reels.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'bootleg.reels'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'splitstep.reels'`.
 
-- [ ] **Step 3: Add `has_pending_reel` to `bootleg/db/jobs.py`**
+- [ ] **Step 3: Add `has_pending_reel` to `splitstep/db/jobs.py`**
 
 Place it directly after `has_pending_clip`:
 
@@ -1518,7 +1518,7 @@ def has_pending_reel(conn: sqlite3.Connection, reel_id: str) -> bool:
 
 - [ ] **Step 4: Make `rally_id` optional in `handle_clip`**
 
-In `bootleg/jobs/handlers.py`, replace the last line of `handle_clip`:
+In `splitstep/jobs/handlers.py`, replace the last line of `handle_clip`:
 
 ```python
     make_clip(src, dst, start_ms=start_ms, end_ms=end_ms,
@@ -1534,18 +1534,18 @@ In `bootleg/jobs/handlers.py`, replace the last line of `handle_clip`:
         set_clip_path(conn, rally_id, str(dst.relative_to(library.root)))
 ```
 
-- [ ] **Step 5: Write `bootleg/reels.py`**
+- [ ] **Step 5: Write `splitstep/reels.py`**
 
 ```python
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db.jobs import has_pending_clip
-from bootleg.db.reels import list_items
-from bootleg.export import ExportPlan
-from bootleg.media.clips import clip_relpath
+from splitstep.config import Library
+from splitstep.db.jobs import has_pending_clip
+from splitstep.db.reels import list_items
+from splitstep.export import ExportPlan
+from splitstep.media.clips import clip_relpath
 
 
 @dataclass(frozen=True)
@@ -1687,7 +1687,7 @@ def plan_reel_export(
 - [ ] **Step 6: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_reels.py tests/test_handler_clip.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_reels.py tests/test_handler_clip.py -q
 ```
 
 Expected: PASS.
@@ -1695,7 +1695,7 @@ Expected: PASS.
 - [ ] **Step 7: Full suite and lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all green.
@@ -1703,7 +1703,7 @@ Expected: all green.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/reels.py bootleg/db/jobs.py bootleg/jobs/handlers.py tests/test_reels.py tests/test_handler_clip.py
+git add splitstep/reels.py splitstep/db/jobs.py splitstep/jobs/handlers.py tests/test_reels.py tests/test_handler_clip.py
 git commit -m "feat(reels): resolve reel items to clip status and a cut plan"
 ```
 
@@ -1712,14 +1712,14 @@ git commit -m "feat(reels): resolve reel items to clip status and a cut plan"
 ### Task 4: The `reel` job
 
 **Files:**
-- Modify: `bootleg/jobs/handlers.py` (add `handle_reel`, register it in `HANDLERS`)
+- Modify: `splitstep/jobs/handlers.py` (add `handle_reel`, register it in `HANDLERS`)
 - Test: `tests/test_handler_reel.py` (create)
 
 **Interfaces:**
-- Consumes: `bootleg.reels.resolve_items`, `bootleg.reels.clip_paths`, `bootleg.reels.missing_clip_count`, `bootleg.media.concat.concat_clips`, `bootleg.db.reels.get_reel`, `bootleg.db.reels.mark_rendered`.
+- Consumes: `splitstep.reels.resolve_items`, `splitstep.reels.clip_paths`, `splitstep.reels.missing_clip_count`, `splitstep.media.concat.concat_clips`, `splitstep.db.reels.get_reel`, `splitstep.db.reels.mark_rendered`.
 - Produces: `handle_reel(library, payload: dict, progress: ProgressFn = no_progress) -> None` — payload is `{"reel_id": str}`; `HANDLERS["reel"]`.
 
-**The handler signature is three arguments now.** `Handler = Callable[[Library, dict, ProgressFn], None]` (`bootleg/jobs/worker.py`); every handler takes a third `progress` arg defaulting to `no_progress`, and the CLI and tests call handlers directly with two. A two-argument `handle_reel` will not satisfy the type and will break when the Worker calls it.
+**The handler signature is three arguments now.** `Handler = Callable[[Library, dict, ProgressFn], None]` (`splitstep/jobs/worker.py`); every handler takes a third `progress` arg defaulting to `no_progress`, and the CLI and tests call handlers directly with two. A two-argument `handle_reel` will not satisfy the type and will break when the Worker calls it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1730,14 +1730,14 @@ import subprocess
 
 import pytest
 
-from bootleg.config import NotEnoughSpace
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import add_items, create_reel, get_reel
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.jobs.handlers import HANDLERS, handle_reel
-from bootleg.media.clips import clip_relpath
-from bootleg.media.probe import probe
+from splitstep.config import NotEnoughSpace
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.reels import add_items, create_reel, get_reel
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.jobs.handlers import HANDLERS, handle_reel
+from splitstep.media.clips import clip_relpath
+from splitstep.media.probe import probe
 
 
 def _real_clip(path, seconds=1.0):
@@ -1868,7 +1868,7 @@ def test_a_reencode_fallback_still_marks_the_reel_rendered(
     # The fallback is a slower success, not a failure: the reel is rendered
     # and dirty is cleared. It is logged so a silent -c copy problem leaves a
     # trace rather than only a slower render nobody notices.
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     _cut_all(library, reel_of_two)
     real_run = concat_mod.run_ffmpeg
@@ -1897,21 +1897,21 @@ def test_a_reencode_fallback_still_marks_the_reel_rendered(
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_handler_reel.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_handler_reel.py -q
 ```
 
 Expected: FAIL — `ImportError: cannot import name 'handle_reel'`.
 
-- [ ] **Step 3: Add the imports to `bootleg/jobs/handlers.py`**
+- [ ] **Step 3: Add the imports to `splitstep/jobs/handlers.py`**
 
 Add to the existing import block (ruff `I001` sorts these — run the linter after):
 
 ```python
-from bootleg.db.reels import get_reel, mark_rendered
-from bootleg.media.concat import concat_clips
-from bootleg.reels import clip_paths, missing_clip_count, resolve_items
+from splitstep.db.reels import get_reel, mark_rendered
+from splitstep.media.concat import concat_clips
+from splitstep.reels import clip_paths, missing_clip_count, resolve_items
 
-`ProgressFn` and `no_progress` are already imported at the top of `handlers.py` (`from bootleg.jobs.worker import Handler, no_progress`, `from bootleg.media.transcode import ... ProgressFn ...`) — check before adding a duplicate line.
+`ProgressFn` and `no_progress` are already imported at the top of `handlers.py` (`from splitstep.jobs.worker import Handler, no_progress`, `from splitstep.media.transcode import ... ProgressFn ...`) — check before adding a duplicate line.
 ```
 
 - [ ] **Step 4: Write `handle_reel` immediately after `handle_clip`**
@@ -1982,7 +1982,7 @@ HANDLERS: dict[str, Handler] = {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_handler_reel.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_handler_reel.py -q
 ```
 
 Expected: PASS, 9 tests.
@@ -1990,15 +1990,15 @@ Expected: PASS, 9 tests.
 - [ ] **Step 7: Full suite and lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
-Expected: all green. If ruff flags `I001`, run `~/miniconda3/envs/bootleg/bin/ruff check --fix bootleg` and re-read the diff.
+Expected: all green. If ruff flags `I001`, run `~/miniconda3/envs/splitstep/bin/ruff check --fix splitstep` and re-read the diff.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/jobs/handlers.py tests/test_handler_reel.py
+git add splitstep/jobs/handlers.py tests/test_handler_reel.py
 git commit -m "feat(reels): add the reel job"
 ```
 
@@ -2007,11 +2007,11 @@ git commit -m "feat(reels): add the reel job"
 ### Task 5: The reel API
 
 **Files:**
-- Modify: `bootleg/api/routes.py`
+- Modify: `splitstep/api/routes.py`
 - Test: `tests/test_api_reels.py` (create)
 
 **Interfaces:**
-- Consumes: everything from Tasks 1, 3 and 4; `bootleg.export.column_for`, `bootleg.export.SETS`.
+- Consumes: everything from Tasks 1, 3 and 4; `splitstep.export.column_for`, `splitstep.export.SETS`.
 - Produces nine routes:
 
 | Method | Path | Body | Returns |
@@ -2034,12 +2034,12 @@ Create `tests/test_api_reels.py`:
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.rallies import replace_rallies, set_point, set_star
-from bootleg.db.reels import create_reel, get_reel_by_slug
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.media.clips import clip_relpath
+from splitstep.api.app import create_app
+from splitstep.db.rallies import replace_rallies, set_point, set_star
+from splitstep.db.reels import create_reel, get_reel_by_slug
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.media.clips import clip_relpath
 
 
 @pytest.fixture
@@ -2330,15 +2330,15 @@ def test_a_generated_slug_yields_to_one_already_taken(client, conn, session):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_api_reels.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_api_reels.py -q
 ```
 
-Expected: FAIL — 404s everywhere, and `ImportError` for `bootleg.db.reels` names if a typo crept in.
+Expected: FAIL — 404s everywhere, and `ImportError` for `splitstep.db.reels` names if a typo crept in.
 
-- [ ] **Step 3: Add imports to `bootleg/api/routes.py`**
+- [ ] **Step 3: Add imports to `splitstep/api/routes.py`**
 
 ```python
-from bootleg.db.reels import (
+from splitstep.db.reels import (
     add_items,
     create_reel,
     find_reel_by_name,
@@ -2347,11 +2347,11 @@ from bootleg.db.reels import (
     remove_item,
     set_order,
 )
-from bootleg.export import SETS, column_for, plan_export
-from bootleg.reels import missing_clip_count, plan_reel_export, resolve_items
+from splitstep.export import SETS, column_for, plan_export
+from splitstep.reels import missing_clip_count, plan_reel_export, resolve_items
 ```
 
-(`from bootleg.export import SETS, plan_export` already exists — extend it rather than adding a second line, or ruff `I001` will complain.)
+(`from splitstep.export import SETS, plan_export` already exists — extend it rather than adding a second line, or ruff `I001` will complain.)
 
 - [ ] **Step 4: Add the request bodies**
 
@@ -2414,7 +2414,7 @@ class SessionReelBody(BaseModel):
         return v
 ```
 
-- [ ] **Step 5: Add the routes, at the end of `bootleg/api/routes.py`**
+- [ ] **Step 5: Add the routes, at the end of `splitstep/api/routes.py`**
 
 ```python
 def _reel_or_404(conn: sqlite3.Connection, slug: str) -> sqlite3.Row:
@@ -2603,12 +2603,12 @@ def api_session_reel(session_id: str, body: SessionReelBody, request: Request):
     }
 ```
 
-Note `column_for(body.which)` is called even though `SessionReelBody` already validated `which`: that is the second, independent gate `bootleg/export.py` documents, and the value is interpolated into the WHERE clause through an f-string. Do not remove either one.
+Note `column_for(body.which)` is called even though `SessionReelBody` already validated `which`: that is the second, independent gate `splitstep/export.py` documents, and the value is interpolated into the WHERE clause through an f-string. Do not remove either one.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest tests/test_api_reels.py -q
+~/miniconda3/envs/splitstep/bin/pytest tests/test_api_reels.py -q
 ```
 
 Expected: PASS, 21 tests.
@@ -2616,7 +2616,7 @@ Expected: PASS, 21 tests.
 - [ ] **Step 7: Full suite and lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all green.
@@ -2624,7 +2624,7 @@ Expected: all green.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add bootleg/api/routes.py tests/test_api_reels.py
+git add splitstep/api/routes.py tests/test_api_reels.py
 git commit -m "feat(reels): the reel API"
 ```
 
@@ -4515,7 +4515,7 @@ Edit `web/src/lib/export.ts`:
  * `queued` is always shown, even at zero, and the other three only appear
  * when nonzero -- so a second press mid-encode reads as "0 queued, 3 in
  * flight" rather than the false "0 queued, 3 already cut" that the four
- * separate counts exist to prevent (see ExportPlan in bootleg/export.py).
+ * separate counts exist to prevent (see ExportPlan in splitstep/export.py).
  * One implementation, called from the reviewed panel and from the reel
  * builder: two copies of this would be two chances to collapse the buckets
  * back into one, which is the mistake that once made a second press
@@ -5298,7 +5298,7 @@ At the time of writing it reads:
 ```
 Reel building via `-c copy` concat and the cross-session rally browser are
 Plan 3. The `reels`/`reel_items` tables exist unused. 4K clip export shipped —
-`bootleg clips export`, the `clip` handler, and `clips_dir` are live.
+`splitstep clips export`, the `clip` handler, and `clips_dir` are live.
 ```
 
 Replace the first two sentences (leave the Reclaim Space paragraph and the clip-export sentence exactly as they are):
@@ -5309,7 +5309,7 @@ it is a filter UI over one session's rallies until a second session exists.
 Reels shipped: `reel_items` is keyed on `(source_id, start_ms, end_ms)` by
 migration 006, the `reel` handler concatenates with `-c copy`, and `/reels`
 plus `/reels/:slug` build and preview them. 4K clip export shipped —
-`bootleg clips export`, the `clip` handler, and `clips_dir` are live.
+`splitstep clips export`, the `clip` handler, and `clips_dir` are live.
 ```
 
 - [ ] **Step 2: Add a Reels section to `CLAUDE.md`'s Architecture**
@@ -5351,7 +5351,7 @@ is the duration probe's job); what it shows exactly is timing.
 - [ ] **Step 3: Run the whole Python suite and lint**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q && ~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q && ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Expected: all green. Record the test count — Step 5 updates `CLAUDE.md` with it.
@@ -5362,12 +5362,12 @@ Expected: all green. Record the test count — Step 5 updates `CLAUDE.md` with i
 cd web && npx vitest run && npm run check && npm run build
 ```
 
-Expected: all pass, 0 svelte-check errors, `web/dist` written. The build matters: `bootleg serve` mounts `web/dist`, so a route that only works under `npm run dev` is not shipped.
+Expected: all pass, 0 svelte-check errors, `web/dist` written. The build matters: `splitstep serve` mounts `web/dist`, so a route that only works under `npm run dev` is not shipped.
 
 - [ ] **Step 5: Update the test count in `CLAUDE.md`**
 
 ```
-~/miniconda3/envs/bootleg/bin/pytest -q                              # NNN tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # NNN tests
 ```
 
 Use the number Step 3 printed. The baseline before Plan B is **511 pytest / 326 vitest** at `3e924c8`; if Step 3 prints fewer than 511, something was deleted — stop and find out what.
@@ -5375,9 +5375,9 @@ Use the number Step 3 printed. The baseline before Plan B is **511 pytest / 326 
 - [ ] **Step 6: Verify the migration applies to a fresh library**
 
 ```bash
-~/miniconda3/envs/bootleg/bin/python -c "
+~/miniconda3/envs/splitstep/bin/python -c "
 import sqlite3, tempfile, pathlib
-from bootleg.db.schema import connect, migrate
+from splitstep.db.schema import connect, migrate
 p = pathlib.Path(tempfile.mkdtemp()) / 'library.db'
 c = connect(p); migrate(c)
 print('user_version', c.execute('PRAGMA user_version').fetchone()[0])
@@ -5401,8 +5401,8 @@ git commit -m "docs: reels shipped"
 
 Report to the user:
 - the Python and frontend test counts,
-- that migration `006` has **not** been applied to their real library and will run on the next `bootleg serve` restart,
-- that `npm run build` has been run, so `bootleg serve` will pick up the new routes on that same restart,
+- that migration `006` has **not** been applied to their real library and will run on the next `splitstep serve` restart,
+- that `npm run build` has been run, so `splitstep serve` will pick up the new routes on that same restart,
 - anything a real 24-item reel would exercise that the tests do not: the actual `-c copy` of 24 locked-profile 4K clips, and how long the concat takes on the real drive.
 
 ---
@@ -5442,7 +5442,7 @@ Report to the user:
 
 §8's clip-profile, rotation and `replace_rallies`-carries-`point` tests, and §8's span-derived clip path test, all shipped with Plan A.
 
-**Not covered, deliberately:** §9's out-of-scope list (cross-session browser, Reclaim Space — now rejected outright in `CLAUDE.md` — per-reel trim overrides, music/titles/transitions, vertical export, chaining clip files). A `bootleg reels` CLI: §6 is UI-only and every operation has a route.
+**Not covered, deliberately:** §9's out-of-scope list (cross-session browser, Reclaim Space — now rejected outright in `CLAUDE.md` — per-reel trim overrides, music/titles/transitions, vertical export, chaining clip files). A `splitstep reels` CLI: §6 is UI-only and every operation has a route.
 
 **Known limits to state rather than discover**
 

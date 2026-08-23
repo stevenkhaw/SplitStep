@@ -1,8 +1,8 @@
-# BootlegVision — Clip Export and Reels
+# SplitStep — Clip Export and Reels
 
 **Date:** 2026-08-21
 **Status:** Approved, ready for implementation
-**Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` §7
+**Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` §7
 **Corrects that document in three places** — see §2.
 
 **Implemented in two plans.** The first covers §3 (the point flag) and §4
@@ -18,7 +18,7 @@ what real footage teaches about the first.
 
 Review produces judgements and nothing else. A session can be fully reviewed,
 every good point marked, and there is still no way to get a single second of
-video out of the library. `bootleg` has never cut a clip.
+video out of the library. `splitstep` has never cut a clip.
 
 The original design covers this as Plan 3 and covers it well: a locked clip
 profile, software encoding so `-c copy` concat stays valid forever, `clip` and
@@ -35,7 +35,7 @@ and "this is a point" was the thing worth recording. That leaves no way to say
 ## 2. What this corrects in the original design
 
 **Rotation is absent from it entirely.** The word does not appear in
-`2026-08-19-bootlegvision-design.md`. That document predates migration `002`,
+`2026-08-19-splitstep-design.md`. That document predates migration `002`,
 which added `sources.rotation_deg`. Meanwhile CLAUDE.md is unambiguous:
 rotation never comes from the file's display matrix, `make_proxy` passes
 `-noautorotate` and applies the stored angle, and `rotation_filter()` is the
@@ -241,7 +241,7 @@ Source is `original.*` (via `find_original`) when `sources.has_original`, else
 `proxy.mp4`, which the same scale/pad chain upscales to the locked profile.
 
 **Nothing flags such a clip as 1080p-sourced, and this section used to say it
-did** — as does §7 of `2026-08-19-bootlegvision-design.md`, which it inherited
+did** — as does §7 of `2026-08-19-splitstep-design.md`, which it inherited
 the claim from. No badge was ever built: `has_original` reaches the frontend as
 a field on the source type and no component reads it. The claim was repeated in
 `handle_clip` and in that handler's test, so a comment this codebase treats as
@@ -279,9 +279,9 @@ Two rules keep it from claiming more than it should.
 Two commands, and the destructive one says so:
 
 ```
-bootleg clips orphans <session_id>          # list: name, source, span, size
-bootleg clips prune   <session_id>          # dry run — lists, deletes nothing
-bootleg clips prune   <session_id> --yes    # actually deletes
+splitstep clips orphans <session_id>          # list: name, source, span, size
+splitstep clips prune   <session_id>          # dry run — lists, deletes nothing
+splitstep clips prune   <session_id> --yes    # actually deletes
 ```
 
 `prune` takes the list `orphans` produced rather than re-deriving it, so what

@@ -5,28 +5,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Local tennis rally cutter. Phone footage goes in, rally intervals come out, a
-keyboard-driven Svelte UI reviews them. One process (`bootleg serve`) is the
+keyboard-driven Svelte UI reviews them. One process (`splitstep serve`) is the
 API, the media server, the job worker, the inbox watcher, and the SPA host.
 
-Python 3.12 package `bootleg/` + Svelte 5 app `web/`. No cloud, no services,
+Python 3.12 package `splitstep/` + Svelte 5 app `web/`. No cloud, no services,
 no CI — a single sqlite database and a folder tree on an external drive.
 
 ## Commands
 
-Python lives in the `bootleg` conda env; it is not the shell's default env, so
-invoke its interpreter by path (or `conda activate bootleg` first):
+Python lives in the `splitstep` conda env; it is not the shell's default env, so
+invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/bootleg/bin/pytest -q                              # 612 tests
-~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py -q        # one file
-~/miniconda3/envs/bootleg/bin/pytest tests/test_segment.py::test_x   # one test
-~/miniconda3/envs/bootleg/bin/ruff check bootleg tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 680 tests
+~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
+~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
+~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
 ```
 
 Frontend (`cd web`):
 
 ```bash
-npm run build      # -> web/dist, what `bootleg serve` mounts at /
+npm run build      # -> web/dist, what `splitstep serve` mounts at /
 npm run check      # svelte-check: types + a11y
 npx vitest run                       # all test files in web/tests/
 npx vitest run tests/queue.test.ts   # one file
@@ -35,11 +35,11 @@ npx vitest run tests/queue.test.ts   # one file
 Running it (library path is required on every command; there is no default):
 
 ```bash
-bootleg --library /Volumes/SanDisk_2TB/BootlegVision doctor
-bootleg --library /Volumes/SanDisk_2TB/BootlegVision serve   # :8420
+splitstep --library /Volumes/SanDisk_2TB/SplitStep doctor
+splitstep --library /Volumes/SanDisk_2TB/SplitStep serve   # :8420
 ```
 
-UI iteration wants two terminals — `bootleg serve` for API/media, `npm run dev`
+UI iteration wants two terminals — `splitstep serve` for API/media, `npm run dev`
 for Vite on :5173 (it proxies `/api` and `/media` to :8420). Anything else:
 `npm run build` once, then `serve` alone.
 
@@ -54,7 +54,7 @@ detector output is fixtured or mocked everywhere.
 A library is a folder (normally an external SSD) holding `library.db`,
 `_inbox/`, `sessions/<date>/sources/NN/{original.*,proxy.mp4,thumbs.jpg,features.jsonl}`,
 and `reels/`. `Library.open()` refuses to run unless `library.db` already
-exists; only `bootleg init` (`Library.create`) may create one, and it refuses
+exists; only `splitstep init` (`Library.create`) may create one, and it refuses
 if one is there. This is load-bearing: an unclean eject leaves an empty
 mountpoint that passes `is_dir`/`os.access`, and without the guard sqlite would
 silently create a second library on the internal SSD.
@@ -74,7 +74,7 @@ Source statuses: `ingesting` → `needs_setup` → `building` → `ingested` →
 `detecting` → `ready`, plus `failed`. A session is `needs_setup` if any source
 is, `ready` when all are; `reviewed` is a session-only status.
 
-Both the API route and the CLI call one function, `bootleg/setup.py::queue_setup`,
+Both the API route and the CLI call one function, `splitstep/setup.py::queue_setup`,
 so HTTP and terminal cannot drift on validation.
 
 ### Detection is deliberately two-stage
@@ -82,7 +82,7 @@ so HTTP and terminal cannot drift on validation.
 Expensive stage (YOLO11 persons at 5 fps + audio impact detection) writes
 `features.jsonl`. Cheap pure function `segment()` (~200 ms) turns frames into
 intervals. The split exists so a threshold sweep costs milliseconds and no GPU
-— `bootleg segment <source_id> --threshold X --dry-run`, or the UI's re-segment
+— `splitstep segment <source_id> --threshold X --dry-run`, or the UI's re-segment
 slider. `detect --reuse-features` skips straight to re-segmenting cached
 features, so it will NOT pick up a newly assigned play region.
 
@@ -131,7 +131,7 @@ that ground truth is the venue's activity, not the player's.
 
 Without a court quad, detection runs whole-frame, `w_outside` never fires, and
 players on the adjacent court score as your opponent. One manual step per
-source (wizard or `bootleg preset add` + `bootleg setup`). Re-run detect after
+source (wizard or `splitstep preset add` + `splitstep setup`). Re-run detect after
 assigning one — existing rallies do not change retroactively.
 
 The quad still matters in `subject` mode, just differently. `w_outside` never
@@ -241,7 +241,7 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   pre-flight shares it so the two layers cannot disagree. Synthetic test
   sources must be tagged via the `hlg_setparams` fixture — with a lavfi input
   the `-color_*` output flags silently drop primaries and transfer.
-- **Migrations** are numbered `.sql` files in `bootleg/db/migrations/`, applied
+- **Migrations** are numbered `.sql` files in `splitstep/db/migrations/`, applied
   by `PRAGMA user_version`. Add a file; never edit an applied one.
 - **`replace_rallies`** runs as one transaction and carries starred/rejected
   across by >50% overlap. Manual boundary edits are intentionally lost — the
@@ -277,14 +277,14 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   rather than reverted; a failure with nothing behind it restores the last
   state the server accepted. Two tabs on one rally are still unordered — that
   would need a server-side revision.
-- **`bootleg labels score <source_id> --threshold X` is the tuning loop.**
+- **`splitstep labels score <source_id> --threshold X` is the tuning loop.**
   It re-runs `segment()` over cached features (~200 ms, no GPU) and scores it
   against the corpus, matching candidates to labelled spans by the same >50%
   overlap rule `replace_rallies` uses. Its recall figure is `span recall
   (labelled spans only)` and cannot see play the detector never proposed —
   every label sits on a span it did. Do not rename it to plain "recall";
   letting a metric imply coverage it lacks is what cost the last round.
-  `bootleg labels export <source_id>` writes the corpus as JSON for
+  `splitstep labels export <source_id>` writes the corpus as JSON for
   `tests/fixtures/`.
 - **`features.jsonl` floats are quantized to 4dp** so read/write cycles are
   byte-stable. Round-tripping is exact only for already-quantized values.
@@ -301,7 +301,7 @@ it is a filter UI over one session's rallies until a second session exists.
 Reels shipped: `reel_items` is keyed on `(source_id, start_ms, end_ms)` by
 migration 007, the `reel` handler concatenates with `-c copy`, and `/reels`
 plus `/reels/:slug` build and preview them. 4K clip export shipped —
-`bootleg clips export`, the `clip` handler, and `clips_dir` are live.
+`splitstep clips export`, the `clip` handler, and `clips_dir` are live.
 
 **Reclaim Space is rejected, not deferred.** The library sits on a 2TB external
 drive that holds ~110 hours of play keeping everything, so deleting originals

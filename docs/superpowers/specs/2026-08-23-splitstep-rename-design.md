@@ -3,7 +3,7 @@
 **Date:** 2026-08-23
 **Status:** approved, not yet implemented
 **Supersedes the name established in:** `docs/superpowers/specs/2026-08-19-splitstep-design.md`
-(that file is `2026-08-19-bootlegvision-design.md` until this work lands)
+(named `2026-08-19-bootlegvision-design.md` until this work landed)
 
 The app is renamed from BootlegVision to **SplitStep**, everywhere, in one pass.
 This document records what changes, in what order, and — more usefully — the

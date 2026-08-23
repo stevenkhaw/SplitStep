@@ -1,4 +1,4 @@
-# BootlegVision — Rally Notes and Burned-In Captions
+# SplitStep — Rally Notes and Burned-In Captions
 
 **Date:** 2026-08-21
 **Status:** Approved, ready for implementation
@@ -103,7 +103,7 @@ no artifact to notice.
 
 ### 5.2 What happens instead
 
-`bootleg/media/caption.py`:
+`splitstep/media/caption.py`:
 
 ```python
 def render_caption(text: str, width: int, height: int) -> Image.Image | None
@@ -177,7 +177,7 @@ What this buys, all of it from mechanisms that already exist:
 - Edit a note, and the rally implies a path that is missing, so the next
   export re-cuts it. No staleness flag anywhere.
 - The old file stops being claimed by any rally, so `find_orphan_clips`
-  reports it and `bootleg clips sweep` deletes it — the same handling a moved
+  reports it and `splitstep clips sweep` deletes it — the same handling a moved
   boundary already gets.
 - An orphan stays self-identifying: `parse_clip_name` gains one optional group
   and still reads source index and span straight off the name.
@@ -193,8 +193,8 @@ phases with a hard boundary between them.
 
 **Phase 1 — capture and storage.** Migration `006`, `POST /api/rallies/{id}/note`,
 the `note` field on the rally type, the queue-mode field and `✎` indicator,
-`lib/notes.ts`, and the `replace_rallies` carry-over. Touches `bootleg/db/`,
-`bootleg/api/`, `web/`. Touches none of `export.py`, `jobs/handlers.py`,
+`lib/notes.ts`, and the `replace_rallies` carry-over. Touches `splitstep/db/`,
+`splitstep/api/`, `web/`. Touches none of `export.py`, `jobs/handlers.py`,
 `media/transcode.py`, `media/clips.py`. Can land immediately.
 
 **Phase 2 — burn-in.** `media/caption.py`, the `caption_png` parameter on

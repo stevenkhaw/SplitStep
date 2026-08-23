@@ -1,8 +1,8 @@
-# BootlegVision — Import Setup Wizard and Source Rotation
+# SplitStep — Import Setup Wizard and Source Rotation
 
 **Date:** 2026-08-20
 **Status:** Approved, ready for implementation planning
-**Extends:** `docs/superpowers/specs/2026-08-19-bootlegvision-design.md` (§3 pipeline, §5 detection, §6 UI)
+**Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` (§3 pipeline, §5 detection, §6 UI)
 
 ---
 
@@ -179,12 +179,12 @@ Re-running setup on a `ready` source is explicitly allowed: that is how a source
 ## 8. CLI
 
 ```
-bootleg setup <source_id> --rotation <0|90|180|270> [--preset <preset_id>]
+splitstep setup <source_id> --rotation <0|90|180|270> [--preset <preset_id>]
 ```
 
 Sets both fields and enqueues `build_proxy`, printing the queued job id. Same validation as the API route, sharing one function rather than duplicating the checks. This ships before the wizard UI, so the existing session can be rebuilt while the frontend is still being written.
 
-`bootleg doctor` additionally prints each source's `rotation_deg` and proxy dimensions, since a mismatch between them is now the single most diagnostic fact about a broken session.
+`splitstep doctor` additionally prints each source's `rotation_deg` and proxy dimensions, since a mismatch between them is now the single most diagnostic fact about a broken session.
 
 ## 9. Existing data
 
