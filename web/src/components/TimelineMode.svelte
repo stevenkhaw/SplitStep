@@ -14,7 +14,7 @@
     zoomWindow,
   } from '../lib/timeline'
   import type { BoundsEdit } from '../lib/timeline'
-  import { applyMerge, applySplit, canMerge, canSplit } from '../lib/split'
+  import { applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../lib/split'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
@@ -104,15 +104,11 @@
     [...detail.sources].sort((a, b) => a.idx - b.idx).map((s) => s.id),
   )
 
-  // The rally immediately before the current one in the same source, which
-  // is what `U` would merge into. Computed here so the key hint can be
-  // greyed before the request rather than after a 400.
-  const mergePrev = $derived.by(() => {
-    if (!rally) return undefined
-    return rallies
-      .filter((r) => r.source_id === rally.source_id && r.end_ms === rally.start_ms)
-      .find((r) => r.id !== rally.id)
-  })
+  // The rally immediately before the current one, which is what `U` would
+  // merge into -- see split.ts::findMergePrev for why this must be the same
+  // lookup applyMerge uses rather than a scan re-derived here. Computed here
+  // so the key hint can be greyed before the request rather than after a 400.
+  const mergePrev = $derived(rally ? findMergePrev(rallies, rally, sourceOrder) : undefined)
 
   function onZoomDragStart(): void {
     frozenWindow = { startMs: win.startMs, endMs: win.endMs }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMerge, applySplit, canMerge, canSplit } from '../src/lib/split'
+import { applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../src/lib/split'
 import type { Rally } from '../src/lib/types'
 
 function rally(overrides: Partial<Rally> = {}): Rally {
@@ -135,6 +135,35 @@ describe('applySplit', () => {
   })
 })
 
+describe('findMergePrev', () => {
+  // A manual drag can leave two rallies in one source sharing an end_ms --
+  // /bounds only checks end_ms > start_ms for the row being dragged, not
+  // that it stays clear of its neighbours. When that end_ms also equals the
+  // target's start_ms, both rows "abut" by a raw scan and only sorted
+  // adjacency -- the server's own tiebreak -- picks the one actually next
+  // to the target. Proven both ways round so a regression that quietly goes
+  // back to array order shows up regardless of which row happens first in
+  // `rallies`.
+  const early = rally({ id: 'early', source_id: 'src1', start_ms: 1000, end_ms: 5000 })
+  const late = rally({ id: 'late', source_id: 'src1', start_ms: 3000, end_ms: 5000 })
+  const target = rally({
+    id: 'target',
+    source_id: 'src1',
+    start_ms: 5000,
+    end_ms: 9000,
+    det_start_ms: null,
+    det_end_ms: null,
+  })
+
+  it('picks the later-starting of two tied predecessors -- late first in the array', () => {
+    expect(findMergePrev([late, early, target], target, ['src1'])?.id).toBe('late')
+  })
+
+  it('picks the later-starting of two tied predecessors -- late last in the array', () => {
+    expect(findMergePrev([target, early, late], target, ['src1'])?.id).toBe('late')
+  })
+})
+
 describe('applyMerge', () => {
   it('absorbs the half into its predecessor and renumbers', () => {
     const rallies = applySplit([rally()], 'r1', 5000, 'new', ['src1'])
@@ -147,5 +176,29 @@ describe('applyMerge', () => {
   it('leaves the list alone when the merge is not allowed', () => {
     const input = [rally()]
     expect(applyMerge(input, 'r1', ['src1'])).toEqual(input)
+  })
+
+  // Same tied setup as findMergePrev above: if applyMerge and the picker
+  // it now shares ever drifted apart, this would merge into `early` while
+  // the component landed the reviewer on `late` (or vice versa) -- silently
+  // wrong on a row that looks perfectly normal afterwards.
+  it('merges into the later-starting predecessor when two rows tie on end_ms, leaving the earlier one untouched', () => {
+    const early = rally({ id: 'early', idx: 1, source_id: 'src1', start_ms: 1000, end_ms: 5000 })
+    const late = rally({ id: 'late', idx: 2, source_id: 'src1', start_ms: 3000, end_ms: 5000 })
+    const target = rally({
+      id: 'target',
+      idx: 3,
+      source_id: 'src1',
+      start_ms: 5000,
+      end_ms: 9000,
+      det_start_ms: null,
+      det_end_ms: null,
+    })
+    const out = applyMerge([early, late, target], 'target', ['src1'])
+    expect(out).toHaveLength(2)
+    const merged = out.find((r) => r.id === 'late')
+    expect(merged && [merged.start_ms, merged.end_ms]).toEqual([3000, 9000])
+    const untouched = out.find((r) => r.id === 'early')
+    expect(untouched && [untouched.start_ms, untouched.end_ms]).toEqual([1000, 5000])
   })
 })

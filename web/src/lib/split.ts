@@ -113,21 +113,49 @@ export function applySplit(
   return renumber([...rest, first, second], sourceOrder)
 }
 
+/**
+ * The rally immediately before `rally` in `(source rank, start_ms)` order --
+ * the row `U` would merge into. This is the sorted-adjacency answer, not a
+ * scan for whatever abuts `rally.start_ms`: the two agree except when two
+ * rallies in the same source share an end_ms, which a manual drag can leave
+ * behind (`/bounds` only requires `end_ms > start_ms` on the row being
+ * moved, not clearance from its neighbours). In that state a raw scan
+ * returns whichever tied row happens to come first in `rallies`, an answer
+ * that depends on array order and not on the footage.
+ *
+ * It is exported, not inlined, because three places need the same row:
+ * `applyMerge` below rewrites the list around it, the component gates the
+ * `U` key with it before the request goes out, and on success the component
+ * points `currentId` at it so the reviewer lands on whichever rally actually
+ * absorbed the other. The server resolves the same tie with
+ * `ORDER BY start_ms DESC LIMIT 1` (merge_into_previous) -- if the client
+ * picked differently, the merge would land where the server put it while the
+ * screen pointed at the row it never touched, and nothing about that rally
+ * would look wrong afterwards.
+ */
+export function findMergePrev(
+  rallies: Rally[],
+  rally: Rally,
+  sourceOrder: string[],
+): Rally | undefined {
+  const ordered = renumber(rallies, sourceOrder)
+  const i = ordered.findIndex((r) => r.id === rally.id)
+  return i > 0 ? ordered[i - 1] : undefined
+}
+
 /** The local counterpart of merge_into_previous. */
 export function applyMerge(
   rallies: Rally[],
   rallyId: string,
   sourceOrder: string[],
 ): Rally[] {
-  const ordered = renumber(rallies, sourceOrder)
-  const i = ordered.findIndex((r) => r.id === rallyId)
-  if (i === -1) return rallies
-  const target = ordered[i]
-  const prev = i > 0 ? ordered[i - 1] : undefined
+  const target = rallies.find((r) => r.id === rallyId)
+  if (!target) return rallies
+  const prev = findMergePrev(rallies, target, sourceOrder)
   if (!canMerge(target, prev) || !prev) return rallies
   const merged: Rally = { ...prev, end_ms: target.end_ms }
   return renumber(
-    ordered.filter((r) => r.id !== rallyId && r.id !== prev.id).concat(merged),
+    rallies.filter((r) => r.id !== rallyId && r.id !== prev.id).concat(merged),
     sourceOrder,
   )
 }
