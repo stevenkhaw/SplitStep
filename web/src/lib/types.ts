@@ -67,6 +67,12 @@ export interface Job {
   status: string
   progress: number
   error: string | null
+  /** The two timestamps /api/jobs has always sent and the client used to
+   *  drop on the floor. `created_at` is when the work was asked for, which
+   *  is the only start the schema records -- claim() flips status without
+   *  stamping anything -- and is what lib/jobs.ts measures elapsed from. */
+  created_at: string
+  finished_at: string | null
 }
 
 // The four outcomes plan_export sorts a set's rallies into (splitstep/export.py
