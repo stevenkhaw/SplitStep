@@ -3,7 +3,7 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
-  import { editedBoundaryCount, resegmentConfirmMessage } from '../lib/resegment'
+  import { editedBoundaryCount, resegmentConfirmMessage, splitCount } from '../lib/resegment'
   import type { Rally, Source } from '../lib/types'
   import ScoreCurve from './ScoreCurve.svelte'
 
@@ -46,6 +46,7 @@
   // silently would make the tuning loop feel hostile, so run() names the
   // cost before paying it.
   const editedCount = $derived(editedBoundaryCount(rallies, sourceId))
+  const splits = $derived(splitCount(rallies, sourceId))
 
   function loadScores(id: string, th: number | null) {
     api
@@ -147,8 +148,8 @@
     // so this is a type-narrowing guard against a stale click racing the
     // response, not a path expected to fire in practice.
     if (!source || threshold === null) return
-    if (editedCount > 0) {
-      const ok = confirm(resegmentConfirmMessage(editedCount))
+    if (editedCount > 0 || splits > 0) {
+      const ok = confirm(resegmentConfirmMessage(editedCount, splits))
       if (!ok) return
     }
     busy = true

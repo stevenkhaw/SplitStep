@@ -63,6 +63,24 @@ function spanKey(sourceId: string, startMs: number, endMs: number): string {
 }
 
 /**
+ * A rally the detector proposed. `det_start_ms`/`det_end_ms` are non-null --
+ * unlike a hand-made rally (see `web/src/lib/split.ts`), which has nothing
+ * for `rally_labels` to anchor to, since that table keys on the detector's
+ * own span.
+ */
+export type DetectedRally = Rally & { det_start_ms: number; det_end_ms: number }
+
+/**
+ * Narrows a `Rally` to a `DetectedRally`. The single source of truth for
+ * "this rally has a detector span" -- `LabelController` uses it to filter at
+ * construction, and the label-mode fake-server test harness uses the same
+ * guard rather than re-deriving the check, so the two cannot drift.
+ */
+export function isDetected(r: Rally): r is DetectedRally {
+  return r.det_start_ms !== null
+}
+
+/**
  * The label-mode state machine.
  *
  * Deliberately pure, for the same reason QueueController is: no DOM, no
@@ -70,7 +88,7 @@ function spanKey(sourceId: string, startMs: number, endMs: number): string {
  * component would be untestable.
  */
 export class LabelController {
-  #rallies: Rally[]
+  #rallies: DetectedRally[]
   #verdicts = new Map<string, Verdict>()
   #flags = new Map<string, BoundaryFlag[]>()
   #index = 0
@@ -89,13 +107,26 @@ export class LabelController {
    * nobody watched.
    */
   constructor(rallies: Rally[], existing: LabelRecord[]) {
-    this.#rallies = rallies
+    // Hand-made rallies (det_start_ms null -- a half someone split off, see
+    // web/src/lib/split.ts) are dropped here, not skipped during
+    // next()/back(). rally_labels anchors on the detector's own span, so
+    // there is nothing for a judgement on one of these to attach to.
+    // Filtering at construction is what keeps `index` and `total` truthful:
+    // the counter must not promise judgements that can never be made. It is
+    // also why `jumpTo` needs no change -- it already no-ops on an id it
+    // cannot find, so a startAtRallyId naming a hand-made half lands on
+    // index 0.
+    //
+    // Deliberately narrower than QueueController's filtering: a REJECTED
+    // rally stays, because it is precisely the `not_play` the corpus is
+    // short of (see below).
+    this.#rallies = rallies.filter(isDetected)
     const bySpan = new Map<string, LabelRecord>()
     for (const rec of existing) {
       bySpan.set(spanKey(rec.source_id, rec.span_start_ms, rec.span_end_ms), rec)
     }
 
-    for (const r of rallies) {
+    for (const r of this.#rallies) {
       const rec = bySpan.get(spanKey(r.source_id, r.det_start_ms, r.det_end_ms))
       // A verdict-less row is a boundary correction from a drag, not a
       // judgement -- rendering it as one would invent a verdict the reviewer
@@ -106,7 +137,7 @@ export class LabelController {
     }
   }
 
-  get current(): Rally | undefined {
+  get current(): DetectedRally | undefined {
     return this.#rallies[this.#index]
   }
 

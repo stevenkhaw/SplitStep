@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { LabelController, LabelWriter, persistLabel } from '../src/lib/labels'
-import type { BoundaryFlag, LabelAction, Verdict } from '../src/lib/labels'
+import { isDetected, LabelController, LabelWriter, persistLabel } from '../src/lib/labels'
+import type { BoundaryFlag, DetectedRally, LabelAction, Verdict } from '../src/lib/labels'
 import type { LabelRecord, Rally } from '../src/lib/types'
 
 function rally(idx: number, over: Partial<Rally> = {}): Rally {
@@ -56,6 +56,37 @@ describe('LabelController', () => {
     const withRejected = new LabelController([rally(1, { rejected: 1 }), rally(2)], [])
     expect(withRejected.total).toBe(2)
     expect(withRejected.current?.id).toBe('r1')
+  })
+
+  it('leaves hand-made rallies out of the corpus queue entirely', () => {
+    // A rally with no detector span has nothing to anchor a corpus row to.
+    // Filtering at construction rather than skipping during next()/back() is
+    // what keeps index and total truthful -- the "12 / 121" counter must not
+    // promise judgements that can never be made.
+    const detected = rally(1)
+    const handMade = rally(2, { det_start_ms: null, det_end_ms: null })
+    const c = new LabelController([detected, handMade], [])
+    expect(c.total).toBe(1)
+    expect(c.current?.id).toBe('r1')
+  })
+
+  it('lands on index 0 when asked to start at a hand-made rally', () => {
+    // jumpTo already no-ops on an id it cannot find, so filtering at
+    // construction needs no change there -- this pins that it stays true.
+    const c = new LabelController(
+      [rally(1), rally(2, { det_start_ms: null, det_end_ms: null })], [])
+    c.jumpTo('r2')
+    expect(c.current?.id).toBe('r1')
+  })
+
+  it('does not seed a verdict from a hand-made rally', () => {
+    // The constructor's seeding loop must iterate the FILTERED list. A
+    // hand-made half inherits its parent's bounds-derived span only by
+    // accident; matching a stored record against it would attribute a verdict
+    // to a clip nobody judged.
+    const handMade = rally(1, { det_start_ms: null, det_end_ms: null })
+    const c = new LabelController([handMade], [record({ verdict: 'clean' })])
+    expect(c.total).toBe(0)
   })
 
   it('setVerdict returns an action carrying the previous state', () => {
@@ -308,9 +339,17 @@ function fakeServer(rallies: Rally[]) {
     flags: BoundaryFlag[]
   }
   const rows: Row[] = []
-  const spanOf = (rallyId: string) => {
+  // Every rally this fake server is constructed with, in these tests, is
+  // detector-proposed -- fakeServer stands in for the two label write
+  // routes, and a hand-made rally has no detector span for a label row to
+  // key on in the first place (see LabelController's constructor filter).
+  // isDetected narrows that at the type level instead of asserting it away,
+  // so a future test that hands fakeServer a hand-made rally fails loudly
+  // here rather than silently writing a row keyed on a null span.
+  const spanOf = (rallyId: string): DetectedRally => {
     const r = rallies.find((x) => x.id === rallyId)
     if (!r) throw new Error(`no rally ${rallyId}`)
+    if (!isDetected(r)) throw new Error(`rally ${rallyId} has no detector span`)
     return r
   }
   const key = (r: { source_id: string; span_start_ms: number; span_end_ms: number }) =>
