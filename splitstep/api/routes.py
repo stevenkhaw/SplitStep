@@ -25,6 +25,7 @@ from splitstep.db.presets import create_preset, get_preset, list_presets
 from splitstep.db.rallies import (
     NOTE_MAX_CHARS,
     list_rallies,
+    merge_into_previous,
     replace_rallies,
     set_bounds,
     set_note,
@@ -32,6 +33,7 @@ from splitstep.db.rallies import (
     set_rejected,
     set_seen,
     set_star,
+    split_rally,
 )
 from splitstep.db.reels import (
     add_items,
@@ -112,6 +114,10 @@ class BoundsBody(BaseModel):
         if self.end_ms <= self.start_ms:
             raise ValueError("end_ms must be greater than start_ms")
         return self
+
+
+class SplitBody(BaseModel):
+    at_ms: int
 
 
 class LabelBody(BaseModel):
@@ -344,12 +350,18 @@ def _session_id_for_rally(conn, rally_id: str) -> str:
 
 
 def _rally_det_span(conn, rally_id: str):
-    """The rally's immutable detector span, or 404.
+    """The rally's immutable detector span, `None` if it has none, or 404.
 
     Every label anchors to det_start_ms/det_end_ms rather than the editable
     start_ms/end_ms, so this is resolved server-side and clients never send a
     span -- a client that computed it from stale rally data could otherwise
     anchor a judgement to a span the detector never produced.
+
+    A hand-made half of a split rally has no detector span at all (see
+    split_rally). Returning None rather than a row of NULLs forces every
+    caller to decide what that means instead of writing a corpus row keyed
+    on (NULL, NULL) -- a key nothing can ever resolve against, accumulating
+    silently in an append-only table.
     """
     row = conn.execute(
         "SELECT source_id, det_start_ms, det_end_ms FROM rallies WHERE id = ?",
@@ -357,6 +369,8 @@ def _rally_det_span(conn, rally_id: str):
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Rally not found")
+    if row["det_start_ms"] is None:
+        return None
     return row
 
 
@@ -439,16 +453,60 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
     # milliseconds. It used to be destroyed by the next replace_rallies;
     # recording it here is the cheaper half of the whole corpus, and costs
     # the reviewer no extra keystrokes.
-    record_boundary_correction(
-        conn,
-        rally_id=rally_id,
-        source_id=span["source_id"],
-        det_start_ms=span["det_start_ms"],
-        det_end_ms=span["det_end_ms"],
-        true_start_ms=body.start_ms,
-        true_end_ms=body.end_ms,
-    )
+    # A hand-made half has no detector span, so there is no detector error
+    # for this drag to measure -- the whole point of the corpus write. The
+    # bounds edit itself still lands; only the label is skipped.
+    if span is not None:
+        record_boundary_correction(
+            conn,
+            rally_id=rally_id,
+            source_id=span["source_id"],
+            det_start_ms=span["det_start_ms"],
+            det_end_ms=span["det_end_ms"],
+            true_start_ms=body.start_ms,
+            true_end_ms=body.end_ms,
+        )
     set_bounds(conn, rally_id, body.start_ms, body.end_ms)
+    return {"ok": True}
+
+
+@router.post("/api/rallies/{rally_id}/split")
+def api_split(rally_id: str, body: SplitBody, request: Request):
+    """Cut one rally in two. The second half carries no detector span.
+
+    404 and 400 are separated deliberately: an unknown id is a stale client
+    (a re-segment in another tab already deleted the rally), while a bad
+    at_ms is a live client asking for something incoherent. The reviewer's
+    recovery differs -- reload versus move the playhead -- so the two must
+    not collapse into one status.
+    """
+    conn = _conn(request)
+    row = conn.execute("SELECT id FROM rallies WHERE id = ?", (rally_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rally not found")
+    try:
+        new_id = split_rally(conn, rally_id, body.at_ms)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "new_rally_id": new_id}
+
+
+@router.post("/api/rallies/{rally_id}/merge")
+def api_merge(rally_id: str, request: Request):
+    """Absorb a hand-made half back into the rally that abuts it.
+
+    Refused for a rally carrying a detector span -- see
+    merge_into_previous. Same 404/400 split as api_split, for the same
+    reason.
+    """
+    conn = _conn(request)
+    row = conn.execute("SELECT id FROM rallies WHERE id = ?", (rally_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rally not found")
+    try:
+        merge_into_previous(conn, rally_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
 
 
@@ -456,6 +514,12 @@ def api_bounds(rally_id: str, body: BoundsBody, request: Request):
 def api_label(rally_id: str, body: LabelBody, request: Request):
     conn = _conn(request)
     span = _rally_det_span(conn, rally_id)
+    if span is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This rally has no detector span to judge — it was made by hand, "
+                   "not proposed by the detector.",
+        )
     # Mirror of the carry-forward in record_boundary_correction: this route
     # always writes true_start_ms/true_end_ms=NULL, so without copying a
     # boundary correction already on record for this exact span forward, the
@@ -525,6 +589,21 @@ def api_label_retract(rally_id: str, request: Request):
     """
     conn = _conn(request)
     span = _rally_det_span(conn, rally_id)
+    # The "idempotent" claim above is about a span that exists and simply
+    # carries no verdict -- retracting nothing then is a legitimate no-op.
+    # A hand-made half has no span at all, which is a different state: there
+    # was never a verdict this call could be undoing, so reporting success
+    # would be reporting a retraction that could not have happened. Same
+    # refusal api_label gives for the same reason -- it and this route are
+    # the only two writers of a verdict onto rally_labels, and one of them
+    # accepting what the other refuses is exactly the drift queue_setup
+    # exists to rule out on the setup side.
+    if span is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This rally has no detector span to retract a verdict for — it was "
+                   "made by hand, not proposed by the detector.",
+        )
     label_id = retract_label(
         conn,
         source_id=span["source_id"],

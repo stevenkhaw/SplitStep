@@ -807,3 +807,61 @@ def test_point_does_not_touch_starred(client, conn, seeded):
         "SELECT starred, point FROM rallies WHERE id = ?", (rally_id,)
     ).fetchone()
     assert (row["starred"], row["point"]) == (1, 1)
+
+
+def _first_rally_id(conn):
+    return conn.execute("SELECT id FROM rallies ORDER BY idx").fetchone()["id"]
+
+
+def test_split_route_returns_the_new_rally_id(client, conn, seeded):
+    rally_id = _first_rally_id(conn)
+    r = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert isinstance(body["new_rally_id"], str) and body["new_rally_id"]
+    rows = conn.execute("SELECT start_ms, end_ms FROM rallies ORDER BY idx").fetchall()
+    assert [(r["start_ms"], r["end_ms"]) for r in rows] == [
+        (1000, 3000), (3000, 5000), (9000, 14000)]
+
+
+def test_split_route_400s_on_a_cut_outside_the_rally(client, conn, seeded):
+    rally_id = _first_rally_id(conn)
+    r = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 999_999})
+    assert r.status_code == 400
+    assert "strictly inside" in r.json()["detail"]
+
+
+def test_split_route_400s_on_a_cut_at_the_boundary(client, conn, seeded):
+    # 5000 is the rally's own end_ms. A zero-length half is incoherent, not
+    # merely short -- see split_rally on why the MIN_RALLY_MS floor is the
+    # client's job and this one is the server's.
+    rally_id = _first_rally_id(conn)
+    r = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 5000})
+    assert r.status_code == 400
+
+
+def test_split_route_404s_on_an_unknown_rally(client, seeded):
+    r = client.post("/api/rallies/nope/split", json={"at_ms": 3000})
+    assert r.status_code == 404
+
+
+def test_merge_route_puts_the_halves_back(client, conn, seeded):
+    rally_id = _first_rally_id(conn)
+    new_id = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000}).json()[
+        "new_rally_id"
+    ]
+    r = client.post(f"/api/rallies/{new_id}/merge")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    rows = conn.execute("SELECT start_ms, end_ms FROM rallies ORDER BY idx").fetchall()
+    assert [(r["start_ms"], r["end_ms"]) for r in rows] == [(1000, 5000), (9000, 14000)]
+
+
+def test_merge_route_400s_on_a_rally_with_a_detector_span(client, conn, seeded):
+    # The guard that keeps a keystroke from deleting a row the corpus is
+    # anchored to has to survive the trip through HTTP, not just the db call.
+    rally_id = _first_rally_id(conn)
+    r = client.post(f"/api/rallies/{rally_id}/merge")
+    assert r.status_code == 400
+    assert "detector span" in r.json()["detail"]

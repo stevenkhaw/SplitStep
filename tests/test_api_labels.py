@@ -328,3 +328,93 @@ def test_a_label_after_a_retraction_is_current_again(client, conn, seeded):
     rows = client.get(f"/api/sources/{seeded['source_id']}/labels").json()
     assert len(rows) == 1
     assert rows[0]["verdict"] == "not_play"
+
+
+def test_a_drag_on_a_hand_made_half_writes_no_corpus_row(client, conn, seeded):
+    # /bounds records every drag as a signed detector error, anchored to
+    # det_start_ms/det_end_ms. A hand-made half has none, so there is nothing
+    # to anchor to and no detector error to measure. Without this skip the
+    # route would write a row keyed on (NULL, NULL) -- a key nothing can ever
+    # resolve against, quietly accumulating in an append-only table.
+    rally_id = _first_rally(conn)["id"]
+    new_id = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000}).json()[
+        "new_rally_id"
+    ]
+    before = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+
+    # The new half spans 3000-5000; this drag trims both its edges.
+    r = client.post(f"/api/rallies/{new_id}/bounds", json={"start_ms": 3200, "end_ms": 4800})
+
+    assert r.status_code == 200
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == before
+    row = conn.execute("SELECT start_ms, end_ms FROM rallies WHERE id = ?", (new_id,)).fetchone()
+    assert (row["start_ms"], row["end_ms"]) == (3200, 4800)
+
+
+def test_a_drag_on_the_first_half_still_records_its_correction(client, conn, seeded):
+    # The other side of the same skip: the half that KEPT the detector span
+    # is still ordinary ground truth, and the split must not have cost the
+    # corpus that. Its det span is the parent's original 1000-5000.
+    rally_id = _first_rally(conn)["id"]
+    client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000})
+    before = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+
+    r = client.post(f"/api/rallies/{rally_id}/bounds", json={"start_ms": 1200, "end_ms": 3000})
+
+    assert r.status_code == 200
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == before + 1
+    row = conn.execute(
+        "SELECT span_start_ms, span_end_ms, true_start_ms FROM rally_labels"
+        " ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    assert (row["span_start_ms"], row["span_end_ms"]) == (1000, 5000)
+    assert row["true_start_ms"] == 1200
+
+
+def test_labelling_a_hand_made_half_is_refused(client, conn, seeded):
+    rally_id = _first_rally(conn)["id"]
+    new_id = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000}).json()[
+        "new_rally_id"
+    ]
+    r = client.post(f"/api/rallies/{new_id}/label", json={"verdict": "clean",
+                                                         "boundary_flags": []})
+    assert r.status_code == 400
+    assert "detector" in r.json()["detail"]
+
+
+def test_retracting_on_a_hand_made_half_is_refused(client, conn, seeded):
+    # api_label and api_label_retract are the only two writers of
+    # rally_labels rows carrying a verdict; a det-less rally has no
+    # detector span for either to anchor a verdict-shaped write to, so
+    # both must refuse it the same way or the corpus can drift depending
+    # on which route a reviewer happened to hit last -- see queue_setup
+    # for the same principle applied to setup validation.
+    rally_id = _first_rally(conn)["id"]
+    new_id = client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000}).json()[
+        "new_rally_id"
+    ]
+    r = client.post(f"/api/rallies/{new_id}/label/retract")
+    assert r.status_code == 400
+    assert "detector" in r.json()["detail"]
+
+
+def test_retracting_on_the_first_half_still_works(client, conn, seeded):
+    # The other side of the guard above: the half that kept the parent's
+    # detector span must be unaffected by the split, retract included --
+    # this is the case a careless guard (e.g. keyed on "was this rally
+    # ever part of a split" instead of "does it carry a det span now")
+    # would break silently.
+    rally_id = _first_rally(conn)["id"]
+    client.post(f"/api/rallies/{rally_id}/split", json={"at_ms": 3000})
+    client.post(f"/api/rallies/{rally_id}/label", json={"verdict": "clean", "boundary_flags": []})
+    before = conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0]
+
+    r = client.post(f"/api/rallies/{rally_id}/label/retract")
+    assert r.status_code == 200
+    assert r.json()["id"] is not None
+    assert conn.execute("SELECT COUNT(*) FROM rally_labels").fetchone()[0] == before + 1
+    # A retracted row carries neither a verdict nor a corrected span, so
+    # (like test_retract_route_leaves_the_span_unlabelled_for_readers) it
+    # drops out of the current-labels listing entirely -- the row count
+    # above is what actually proves the retraction landed, not this.
+    assert client.get(f"/api/sources/{seeded['source_id']}/labels").json() == []
