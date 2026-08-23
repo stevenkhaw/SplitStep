@@ -214,8 +214,12 @@ Session hosts QueueMode (autoplay + star/reject/undo) and TimelineMode
 (boundary editing, score curve, re-segment panel).
 
 All logic lives in pure TypeScript under `web/src/lib/` — queue state machine,
-undo stack, timeline math, quad geometry, persistence, polling, debounce — and
-that is what `web/tests/` covers. Components are thin shells over those modules
+undo stack, timeline math, quad geometry, persistence, polling, debounce,
+plus `shortcuts.ts` (the one place a keybinding is written down; the inline
+strip and the `?` overlay both render from it), `status.ts` (status → label +
+tone for the list cards), `jobs.ts` (job phase names and batch elapsed),
+`flash.ts` (the verdict confirmation) and `errors.ts` (`ApiError` →
+a sentence) — and that is what `web/tests/` covers. Components are thin shells over those modules
 and are verified by hand, because jsdom has no `<video>` implementation. Put
 new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 

@@ -184,6 +184,34 @@ artifact of two literals in `index.html`.
 
 F8 is a decision to make during F1, not a task of its own.
 
+### Outcome — all shipped, 2026-08-23
+
+Every finding above is done, in that order. What the plan did not predict:
+
+- **F1 reached further than a rename.** Once red stopped meaning "routine
+  dismissal", several sites turned out to be miscoloured the other way: the
+  re-segment data-loss warning and the `missing` clip badge were sharing amber
+  with `star`, "✓ saved" was celebrating the normal case in green, and the
+  ZoomBand playhead was red for a thing that is not a failure. The approved
+  `faint` also had to move from `#74747F` to `#82828E` — the original measured
+  4.26:1 and that token carries the keyboard legend.
+- **F3 needed a capture-phase listener, not a component.** Escape is also the
+  timeline's and label mode's "leave this mode" key, both bubble-phase on
+  `window`, so an Escape aimed at the overlay also exited the mode. Capture
+  beats every bubble listener regardless of mount order, which is what makes
+  `stopImmediatePropagation` reliable rather than a bet on registration order.
+- **F6 needed two API fields but no new media route.** `frame.jpg` already
+  reads the proxy and caches; what was missing was an idx to build the URL
+  from. `/api/sessions` gained `thumb_idx`, `/api/reels` gained `thumb`.
+- **F7's most valuable case has no status code.** `fetch()` rejects with a
+  bare `TypeError` when the server is stopped or the drive ejected under it,
+  which for a local app on an external SSD is the likely failure, and "Failed
+  to fetch" names nothing anyone can act on.
+
+Four tests were asserting on raw palette names and three on legend prose;
+both sets are retargeted onto tokens and real controls. The suites went from
+680/458 to 685/526.
+
 ## 5. What this document deliberately does not propose
 
 **Detector tuning.** The 2026-08-20 validation failed and the reasons are
