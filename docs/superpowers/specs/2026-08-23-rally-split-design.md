@@ -128,9 +128,21 @@ def merge_into_previous(conn, rally_id) -> None
 
 ### 5.1 `split_rally`
 
-Refuses unless `start_ms + MIN_RALLY_MS <= at_ms <= end_ms - MIN_RALLY_MS`,
-reusing the constant `clampMinGap` enforces client-side so the two layers
-cannot disagree about what a viable rally is.
+Refuses unless `start_ms < at_ms < end_ms`, strictly — two non-empty halves.
+
+The minimum-length floor (`MIN_RALLY_MS`) is deliberately **not** enforced
+here, and that is a deliberate match to how `/bounds` already behaves rather
+than an omission. `BoundsBody` validates only `end_ms > start_ms`; the floor
+lives in `clampMinGap` client-side. `media/concat.py` states the reason
+outright: "nothing else in the app enforces it on a span a reel can hold... A
+hand-trimmed clip well under 1.5s is a real reel input." A server-side floor on
+split would be the only place in the app that second-guesses a reviewer about
+how short a clip may be, and it would do so on the one operation where a very
+short lead-in half is a legitimate thing to want.
+
+So the two layers divide the same way `/bounds` does: the server rejects what
+is *incoherent* (a zero-length half), the client discourages what is merely
+*tiny* (`canSplit`, §7.1).
 
 | column | half 1 (the existing row) | half 2 (new row) |
 | --- | --- | --- |
@@ -243,9 +255,10 @@ the same input. Two implementations of one rule is a real cost; the
 alternative is a remount on every cut, and the rule is four lines and frozen
 by migration `001`'s `UNIQUE(session_id, idx)`.
 
-Session is still notified so its `detail.rallies` does not go stale for the
-return to queue mode. It refreshes without bumping `rallyRevision`, the same
-distinction `QuadEditor`'s `onassigned` already draws.
+No new callback to Session is needed. `closeTimeline` already refetches the
+session and bumps `rallyRevision` on every exit from timeline mode — it was
+written for bounds edits, and a split is the same class of change. The queue
+therefore picks up both halves on `Esc` with no wiring at all.
 
 `types.ts` widens `det_start_ms` and `det_end_ms` to `number | null`.
 
@@ -272,8 +285,13 @@ mirror pair, discoverable from one another and from the overlay:
 
 Trim, split, leave. A tighter grouping than the one it replaces.
 
-`U` is offered only when `canMerge` holds; the strip greys it otherwise rather
-than hiding it, so the inverse of `C` is visible before it is needed.
+`U` on a rally `canMerge` rejects surfaces the refusal in the toaster, naming
+which of the two conditions failed — a detector rally, or nothing abutting its
+start. That is the pattern `applyEdit` already established for `[` and `]`:
+"Refusals are surfaced, never silent." A greyed key hint would be nicer still,
+but `KeyHints` renders `primaryShortcuts(mode)` as static data with no
+per-rally state, and adding a disabled-set prop for one key is more mechanism
+than the toast is worth.
 
 ## 8. Fallout
 
@@ -302,11 +320,13 @@ accurately before it is paid.
 
 ### 8.2 Label mode
 
-A det-less rally has nothing to anchor a corpus row to, so `LabelMode` skips
-it when stepping with `←`/`→`, and states why if the reviewer lands on one
-directly rather than silently presenting an inert screen. This is §3's
-contract surfacing at the one place a reviewer would otherwise meet it as a
-bug.
+A det-less rally has nothing to anchor a corpus row to, so `LabelController`
+filters it out **in its constructor**, alongside the existing decision not to
+filter by `rejected`. Filtering at construction rather than skipping during
+`next()`/`back()` is what keeps `index` and `total` truthful: the "12 / 121"
+counter must not promise judgements that can never be made. `jumpTo` already
+no-ops on an id it cannot find, so a `startAtRallyId` naming a det-less half
+lands on index 0 rather than erroring.
 
 ### 8.3 Reels
 
