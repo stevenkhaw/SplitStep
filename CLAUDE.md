@@ -219,6 +219,41 @@ that is what `web/tests/` covers. Components are thin shells over those modules
 and are verified by hand, because jsdom has no `<video>` implementation. Put
 new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
+### Design tokens
+
+`web/src/app.css` holds the `@theme` block, and it is the only place a colour
+or a type size is chosen. A component reaching for a raw Tailwind palette step
+(`bg-neutral-800`, `text-blue-300`) or an arbitrary size (`text-[11px]`) has
+escaped the system — bring the value back to `app.css` instead.
+
+Colour: `bg` / `surface` / `surface-2` / `line`, text `fg` / `dim` / `faint`,
+and four semantic tokens — `star`, `point`, `accent`, `danger`. The base ramp
+is violet-shifted rather than neutral grey so the chrome sits with night-court
+footage. All three text tokens clear 4.5:1 on both `bg` and `surface`, which is
+what lets `faint` carry real functional text like the keyboard legend. Filled
+`accent` and `danger` buttons need an explicit `text-bg`: both tokens are light
+enough that a white label measures about 2:1.
+
+**Reject has no colour, deliberately.** Detection is recall-biased, so
+rejecting is the most frequent action in the app; red would state "error" about
+the routine case. Reject is `text-faint` plus a strikethrough — it recedes.
+That keeps `danger` meaning an actual failure (a failed job, a missing clip, a
+render refusing), which is how the re-segment warning and the `missing` clip
+badge are now coloured. `star` and `point` are different axes, not two grades
+of one, so they are warm and cool rather than one hue twice.
+
+Type: five roles — `display` / `title` / `body` / `data` / `caption` — not a
+size ramp. Naming sizes by magnitude is what let the whole app collapse into
+`text-xs` and `text-sm`. `font-data` is the mono role and carries
+`tabular-nums`; every timecode, duration, count, threshold and confidence
+belongs in it, or the status line jitters sideways as the playhead ticks.
+
+Video letterboxes stay literal `bg-black` — `bg` is `#0b0b0e` and shows as a
+seam around the frame.
+
+Tests that assert on a class name are asserting on a token, not a palette step;
+four had to be retargeted during the migration and would again.
+
 ## Conventions that matter
 
 - **Tuning constants are validated against `tests/fixtures/ground_level_source01.jsonl`**,
