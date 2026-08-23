@@ -34,8 +34,11 @@ export interface Rally {
   idx: number
   start_ms: number
   end_ms: number
-  det_start_ms: number
-  det_end_ms: number
+  // NULL on a rally a human made by splitting one in two: the detector
+  // never proposed it. See splitstep/db/migrations/009_rally_split.sql.
+  // Every consumer that asks "is this a detector proposal?" tests this.
+  det_start_ms: number | null
+  det_end_ms: number | null
   confidence: number
   starred: number
   rejected: number

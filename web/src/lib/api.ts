@@ -110,6 +110,14 @@ export const api = {
   seen: (id: string) => post(`/api/rallies/${id}/seen`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),
+  splitRally: (id: string, atMs: number) =>
+    req<{ ok: boolean; new_rally_id: string }>(`/api/rallies/${id}/split`, {
+      method: 'POST',
+      body: JSON.stringify({ at_ms: atMs }),
+    }),
+  // `req` rather than `post`: post's return type has no new_rally_id, and
+  // widening it would loosen every other rally write's shape for one caller.
+  mergeRally: (id: string) => post(`/api/rallies/${id}/merge`),
   label: (id: string, verdict: string, boundary_flags: string[]) =>
     post(`/api/rallies/${id}/label`, { verdict, boundary_flags }),
   // Withdraws the current verdict for the rally's detector span, appending a
