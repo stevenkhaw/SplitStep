@@ -64,13 +64,19 @@ export function canMerge(rally: Rally, prev: Rally | undefined): boolean {
  * migration 001's UNIQUE(session_id, idx). web/tests/split.test.ts pins the
  * parity.
  *
- * `sourceOrder` is the session's source ids in `sources.idx` order. When
- * omitted, first appearance in `rallies` is used -- correct for the
- * single-source case and for any list already in server order.
+ * `sourceOrder` -- the session's source ids in `sources.idx` order -- is
+ * required, not inferred, because the only inference available (first
+ * appearance in `rallies`) is right only sometimes: applySplit removes the
+ * split target before calling this, so when the target was its source's
+ * sole rally, that source's first appearance moves to wherever the two new
+ * halves land. An ordering that is correct on most inputs and wrong on one
+ * is worse than no fallback, because it fails exactly where nothing local
+ * flags it -- this must agree with splitstep/db/rallies.py::_renumber or
+ * the UI prints a rally number the server disagrees with, on a field the
+ * reviewer reads aloud.
  */
-function renumber(rallies: Rally[], sourceOrder?: string[]): Rally[] {
-  const order = sourceOrder ?? [...new Set(rallies.map((r) => r.source_id))]
-  const rank = new Map(order.map((id, i) => [id, i]))
+function renumber(rallies: Rally[], sourceOrder: string[]): Rally[] {
+  const rank = new Map(sourceOrder.map((id, i) => [id, i]))
   return [...rallies]
     .sort((a, b) => {
       const bySource = (rank.get(a.source_id) ?? 0) - (rank.get(b.source_id) ?? 0)
@@ -89,7 +95,7 @@ export function applySplit(
   rallyId: string,
   atMs: number,
   newId: string,
-  sourceOrder?: string[],
+  sourceOrder: string[],
 ): Rally[] {
   const target = rallies.find((r) => r.id === rallyId)
   if (!target) return rallies
@@ -110,7 +116,7 @@ export function applySplit(
 export function applyMerge(
   rallies: Rally[],
   rallyId: string,
-  sourceOrder?: string[],
+  sourceOrder: string[],
 ): Rally[] {
   const ordered = renumber(rallies, sourceOrder)
   const i = ordered.findIndex((r) => r.id === rallyId)

@@ -71,7 +71,7 @@ describe('canMerge', () => {
 
 describe('applySplit', () => {
   it('replaces one rally with two abutting halves', () => {
-    const out = applySplit([rally()], 'r1', 5000, 'new')
+    const out = applySplit([rally()], 'r1', 5000, 'new', ['src1'])
     expect(out).toHaveLength(2)
     expect([out[0].start_ms, out[0].end_ms]).toEqual([1000, 5000])
     expect([out[1].start_ms, out[1].end_ms]).toEqual([5000, 9000])
@@ -79,7 +79,7 @@ describe('applySplit', () => {
   })
 
   it('gives the new half no detector span and leaves the first half its own', () => {
-    const out = applySplit([rally()], 'r1', 5000, 'new')
+    const out = applySplit([rally()], 'r1', 5000, 'new', ['src1'])
     expect([out[0].det_start_ms, out[0].det_end_ms]).toEqual([1000, 9000])
     expect(out[1].det_start_ms).toBeNull()
     expect(out[1].det_end_ms).toBeNull()
@@ -88,7 +88,7 @@ describe('applySplit', () => {
   it('inherits review flags and nulls nothing the server keeps', () => {
     const out = applySplit(
       [rally({ starred: 1, point: 1, note: 'late backhand', seen_at: 'T0' })],
-      'r1', 5000, 'new',
+      'r1', 5000, 'new', ['src1'],
     )
     expect(out[1].starred).toBe(1)
     expect(out[1].point).toBe(1)
@@ -115,14 +115,30 @@ describe('applySplit', () => {
 
   it('returns the list unchanged for an unknown id', () => {
     const input = [rally()]
-    expect(applySplit(input, 'nope', 5000, 'new')).toEqual(input)
+    expect(applySplit(input, 'nope', 5000, 'new', ['src1'])).toEqual(input)
+  })
+
+  it('keeps server source order when the target is its source only rally', () => {
+    // The case the parity test above cannot see: with src1 contributing just
+    // the split target, a first-appearance ordering would move src1 behind
+    // src2, because applySplit removes the target before renumbering. That is
+    // why sourceOrder is required rather than inferred.
+    const rallies = [
+      rally({ id: 'a1', source_id: 'src1', idx: 1, start_ms: 1000, end_ms: 9000 }),
+      rally({ id: 'b1', source_id: 'src2', idx: 2, start_ms: 1000, end_ms: 4000 }),
+      rally({ id: 'b2', source_id: 'src2', idx: 3, start_ms: 8000, end_ms: 9000 }),
+    ]
+    const out = applySplit(rallies, 'a1', 5000, 'new', ['src1', 'src2'])
+    expect(out.map((r) => [r.id, r.idx])).toEqual([
+      ['a1', 1], ['new', 2], ['b1', 3], ['b2', 4],
+    ])
   })
 })
 
 describe('applyMerge', () => {
   it('absorbs the half into its predecessor and renumbers', () => {
-    const rallies = applySplit([rally()], 'r1', 5000, 'new')
-    const out = applyMerge(rallies, 'new')
+    const rallies = applySplit([rally()], 'r1', 5000, 'new', ['src1'])
+    const out = applyMerge(rallies, 'new', ['src1'])
     expect(out).toHaveLength(1)
     expect([out[0].id, out[0].start_ms, out[0].end_ms]).toEqual(['r1', 1000, 9000])
     expect(out[0].idx).toBe(1)
@@ -130,6 +146,6 @@ describe('applyMerge', () => {
 
   it('leaves the list alone when the merge is not allowed', () => {
     const input = [rally()]
-    expect(applyMerge(input, 'r1')).toEqual(input)
+    expect(applyMerge(input, 'r1', ['src1'])).toEqual(input)
   })
 })
