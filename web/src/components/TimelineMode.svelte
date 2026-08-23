@@ -14,6 +14,7 @@
     zoomWindow,
   } from '../lib/timeline'
   import type { BoundsEdit } from '../lib/timeline'
+  import { applyMerge, applySplit, canMerge, canSplit } from '../lib/split'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
@@ -94,6 +95,24 @@
         )
       : [],
   )
+
+  // The session's sources in their own idx order -- what split.ts's
+  // renumber needs to reproduce _renumber's ordering exactly. Derived from
+  // `detail.sources` rather than from the rally list, which may not contain
+  // a rally for every source.
+  const sourceOrder = $derived(
+    [...detail.sources].sort((a, b) => a.idx - b.idx).map((s) => s.id),
+  )
+
+  // The rally immediately before the current one in the same source, which
+  // is what `U` would merge into. Computed here so the key hint can be
+  // greyed before the request rather than after a 400.
+  const mergePrev = $derived.by(() => {
+    if (!rally) return undefined
+    return rallies
+      .filter((r) => r.source_id === rally.source_id && r.end_ms === rally.start_ms)
+      .find((r) => r.id !== rally.id)
+  })
 
   function onZoomDragStart(): void {
     frozenWindow = { startMs: win.startMs, endMs: win.endMs }
@@ -254,6 +273,64 @@
     commitBounds(edit.startMs, edit.endMs)
   }
 
+  // Both handlers update `rallies` locally rather than asking Session to
+  // remount: a remount resets the playhead (see the $effect on currentId),
+  // which would throw the reviewer back to the top of the rally at exactly
+  // the moment they want to trim the seam they just made. Session's
+  // closeTimeline already refetches on Esc, so the queue sees both halves
+  // with no wiring here.
+  async function splitHere(): Promise<void> {
+    if (!rally) return
+    const atMs = Math.round(deck?.currentMs() ?? rally.start_ms)
+    if (!canSplit(rally, atMs)) {
+      toaster.push('The playhead is too close to a boundary to split here.')
+      return
+    }
+    try {
+      const { new_rally_id } = await api.splitRally(rally.id, atMs)
+      rallies = applySplit(rallies, rally.id, atMs, new_rally_id, sourceOrder)
+      saveState = 'saved'
+      if (saveTimer !== undefined) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        saveState = 'idle'
+        saveTimer = undefined
+      }, SAVED_NOTICE_MS)
+      toaster.push(`Split at ${formatTs(atMs)} — U to merge back`)
+    } catch (e) {
+      console.error('failed to split rally', e)
+      saveState = 'error'
+      toaster.push('Could not split this rally — check that the server is running.')
+    }
+  }
+
+  async function mergeBack(): Promise<void> {
+    if (!rally) return
+    if (!canMerge(rally, mergePrev)) {
+      // Two different refusals, and the reviewer's next move differs, so
+      // they must not collapse into one sentence.
+      toaster.push(
+        rally.det_start_ms !== null
+          ? 'This rally came from the detector — only a half you split can be merged back.'
+          : 'Nothing abuts the start of this rally to merge it into.',
+      )
+      return
+    }
+    const merging = rally.id
+    try {
+      await api.mergeRally(merging)
+      // Land on the survivor before the row disappears, or `rally` falls
+      // back to rallies[0] and the reviewer is silently moved to the top of
+      // the session.
+      currentId = mergePrev!.id
+      rallies = applyMerge(rallies, merging, sourceOrder)
+      toaster.push('Merged back into the previous rally')
+    } catch (e) {
+      console.error('failed to merge rally', e)
+      saveState = 'error'
+      toaster.push('Could not merge this rally — check that the server is running.')
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (isEditableTarget(e.target)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -267,6 +344,14 @@
         break
       case ']':
         applyEdit(setOutPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.end_ms))
+        break
+      case 'c':
+      case 'C':
+        splitHere()
+        break
+      case 'u':
+      case 'U':
+        mergeBack()
         break
       case ',': {
         const ms = frameStep(deck?.currentMs() ?? 0, source.fps, -1)
