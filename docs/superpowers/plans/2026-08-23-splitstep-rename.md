@@ -587,6 +587,19 @@ mv ~/.claude/projects/-Users-stevenkhaw-Documents-GitHub-BootlegVision \
 
 The second directory holds 17 session transcripts and five memory files, and Claude Code keys it on the repo path. Renaming one without the other orphans them.
 
+**Then reinstall the package, which the `mv` also breaks.** An editable install
+does not follow the repo. `__editable___splitstep_0_1_0_finder.py` hardcodes the
+absolute path to the package directory, so after the move the `splitstep`
+console script dies with `ModuleNotFoundError: No module named 'splitstep'` —
+the script itself still exists on PATH, which makes this read as a broken
+install rather than a stale path.
+
+```bash
+cd ~/Documents/GitHub/SplitStep
+~/miniconda3/envs/splitstep/bin/pip install -e '.[dev]'
+~/miniconda3/envs/splitstep/bin/splitstep --help | head -2
+```
+
 **Then repair the worktree links, which the `mv` breaks.** This repo has three
 registered worktrees, and git stores the connection as an absolute path in both
 directions: `.git/worktrees/<name>/gitdir` points at the worktree's `.git` file,
