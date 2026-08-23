@@ -587,6 +587,34 @@ mv ~/.claude/projects/-Users-stevenkhaw-Documents-GitHub-BootlegVision \
 
 The second directory holds 17 session transcripts and five memory files, and Claude Code keys it on the repo path. Renaming one without the other orphans them.
 
+**Then repair the worktree links, which the `mv` breaks.** This repo has three
+registered worktrees, and git stores the connection as an absolute path in both
+directions: `.git/worktrees/<name>/gitdir` points at the worktree's `.git` file,
+and that `.git` file points back at `…/BootlegVision/.git/worktrees/<name>`.
+Moving the repo invalidates both halves and every worktree command starts
+failing.
+
+```bash
+cd ~/Documents/GitHub/SplitStep
+git worktree repair
+git worktree list
+```
+
+`git worktree repair` with no argument fixes the links for worktrees git can
+still find. One of the three — `~/Documents/GitHub/BootlegVision-reels`, a
+sibling directory rather than one under `.claude/worktrees/` — keeps its own
+old-name path, so pass it explicitly if it is not repaired by the bare call:
+
+```bash
+git worktree repair ~/Documents/GitHub/BootlegVision-reels
+```
+
+That sibling directory still carries the old name. Renaming it to
+`SplitStep-reels` is optional and needs the same repair afterwards. Its branch
+`feat/reel-delete-rename` is already merged into master, so removing the
+worktree entirely with `git worktree remove` is also reasonable — but that is a
+decision to raise, not to take.
+
 - [ ] **Step 7: Final verification from the new location**
 
 ```bash
