@@ -192,6 +192,72 @@ def replace_rallies(
     return len(intervals)
 
 
+def split_rally(conn: sqlite3.Connection, rally_id: str, at_ms: int) -> str:
+    """Cut one rally in two at `at_ms`. Returns the new (second) rally's id.
+
+    The second half carries NO detector span. rally_labels anchors on
+    (source_id, det_start_ms, det_end_ms) -- the detector's own span, which
+    is what lets the corpus survive replace_rallies -- so two halves
+    inheriting one det span would be the same row in the corpus, and
+    labelling the second would silently overwrite the judgement on the
+    first. Giving each half its own det span covering its own bounds is
+    worse: det_* is immutable and records what the detector ORIGINALLY
+    guessed, so spans it never produced are fabricated training data.
+
+    `at_ms` must sit strictly inside the rally, so both halves are
+    non-empty. The MIN_RALLY_MS floor is deliberately not enforced here --
+    the bounds route validates only end_ms > start_ms and leaves the floor
+    to clampMinGap client-side (see media/concat.py, which spells out that a
+    hand-trimmed clip well under 1.5s is a real input). This layer rejects
+    what is incoherent, not what is merely short.
+
+    Every review flag is inherited, which is not a fresh judgement call: it
+    is what replace_rallies' own carry-over produces for these two
+    intervals, since overlap_fraction divides by the shorter span and each
+    half sits fully inside the parent at a flat 1.0. A split rally therefore
+    behaves exactly as it would had the detector proposed both intervals.
+
+    clip_path is the one exception, for the same reason _carried_clip_path
+    demands an exact span match rather than an overlap: the file on disk was
+    cut at the old span and describes neither half. Both are nulled; the
+    orphaned file is `clips prune`'s job.
+    """
+    row = conn.execute("SELECT * FROM rallies WHERE id = ?", (rally_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"No such rally: {rally_id}")
+    if not row["start_ms"] < at_ms < row["end_ms"]:
+        raise ValueError(
+            f"Cut at {at_ms}ms is not strictly inside rally "
+            f"{row['start_ms']}-{row['end_ms']}ms"
+        )
+
+    new_id = uuid.uuid4().hex
+    try:
+        # A per-row-unique negative placeholder, the same technique
+        # replace_rallies uses: the real idx cannot be assigned until
+        # _renumber runs, and any positive value here risks colliding with a
+        # live row under UNIQUE(session_id, idx).
+        conn.execute(
+            "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+            "det_start_ms,det_end_ms,confidence,starred,rejected,point,"
+            "reviewed_at,clip_path,note,seen_at)"
+            " VALUES (?,?,?,?,?,?,NULL,NULL,?,?,?,?,?,NULL,?,?)",
+            (new_id, row["session_id"], row["source_id"], -1, at_ms, row["end_ms"],
+             row["confidence"], row["starred"], row["rejected"], row["point"],
+             row["reviewed_at"], row["note"], row["seen_at"]),
+        )
+        conn.execute(
+            "UPDATE rallies SET end_ms = ?, clip_path = NULL WHERE id = ?",
+            (at_ms, rally_id),
+        )
+        _renumber(conn, row["session_id"])
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return new_id
+
+
 def _renumber(conn: sqlite3.Connection, session_id: str) -> None:
     rows = conn.execute(
         "SELECT r.id FROM rallies r JOIN sources s ON s.id = r.source_id"
