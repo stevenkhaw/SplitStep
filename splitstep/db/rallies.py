@@ -258,6 +258,58 @@ def split_rally(conn: sqlite3.Connection, rally_id: str, at_ms: int) -> str:
     return new_id
 
 
+def merge_into_previous(conn: sqlite3.Connection, rally_id: str) -> None:
+    """Undo a split: absorb `rally_id` into the rally that abuts it.
+
+    Refuses unless the target carries NO detector span. That guard is the
+    whole safety story -- merge can only ever undo something a human made in
+    this session, and can never delete a row rally_labels is anchored to.
+    It is also why the inverse of split is not "merge any two adjacent
+    rallies": that more useful-sounding operation would let one keystroke
+    destroy detector provenance, and fixing detector OVER-segmentation is a
+    different feature with a different risk profile.
+
+    The predecessor must abut exactly. Once the reviewer has trimmed the
+    seam, the two rows no longer describe one contiguous stretch of footage
+    and rejoining them would invent play across the gap they opened.
+
+    The survivor's det_* is untouched -- merging back does not restore
+    provenance to a rally that never lost it, nor invent it for one that
+    never had it. Its clip_path is nulled for the same reason split_rally
+    nulls it: the row's span just changed. The target's flags are discarded
+    rather than merged, since split_rally made them inherited copies of the
+    survivor's own.
+    """
+    row = conn.execute("SELECT * FROM rallies WHERE id = ?", (rally_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"No such rally: {rally_id}")
+    if row["det_start_ms"] is not None:
+        raise ValueError(
+            f"Rally {rally_id} carries a detector span; only a hand-made "
+            f"rally can be merged back"
+        )
+    prev = conn.execute(
+        "SELECT id FROM rallies WHERE source_id = ? AND end_ms = ? AND id != ?",
+        (row["source_id"], row["start_ms"], rally_id),
+    ).fetchone()
+    if prev is None:
+        raise ValueError(
+            f"Rally {rally_id} has no rally abutting its start in the same source"
+        )
+
+    try:
+        conn.execute(
+            "UPDATE rallies SET end_ms = ?, clip_path = NULL WHERE id = ?",
+            (row["end_ms"], prev["id"]),
+        )
+        conn.execute("DELETE FROM rallies WHERE id = ?", (rally_id,))
+        _renumber(conn, row["session_id"])
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+
+
 def _renumber(conn: sqlite3.Connection, session_id: str) -> None:
     rows = conn.execute(
         "SELECT r.id FROM rallies r JOIN sources s ON s.id = r.source_id"

@@ -15,7 +15,9 @@ import pytest
 
 from splitstep.db.rallies import (
     list_rallies,
+    merge_into_previous,
     replace_rallies,
+    set_bounds,
     set_clip_path,
     set_note,
     set_point,
@@ -84,6 +86,7 @@ def test_split_inherits_every_review_flag(conn):
 
     second = list_rallies(conn, session_id)[1]
     assert second["starred"] == 1
+    assert second["rejected"] == 0
     assert second["point"] == 1
     assert second["note"] == "late backhand"
     assert second["confidence"] == 0.8
@@ -176,3 +179,114 @@ def test_split_leaves_the_set_untouched_when_it_fails(conn, monkeypatch):
     rows = list_rallies(conn, session_id)
     assert len(rows) == 1
     assert (rows[0]["start_ms"], rows[0]["end_ms"]) == (1000, 9000)
+
+
+def test_merge_puts_a_split_rally_back_together(conn):
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 9000, 0.8)])
+    rally_id = list_rallies(conn, session_id)[0]["id"]
+    new_id = split_rally(conn, rally_id, 5000)
+
+    merge_into_previous(conn, new_id)
+
+    rows = list_rallies(conn, session_id)
+    assert len(rows) == 1
+    assert (rows[0]["id"], rows[0]["start_ms"], rows[0]["end_ms"]) == (rally_id, 1000, 9000)
+    # Merging back does not restore provenance to a rally that never lost
+    # it: the survivor's det span is the one it always had.
+    assert (rows[0]["det_start_ms"], rows[0]["det_end_ms"]) == (1000, 9000)
+    assert rows[0]["idx"] == 1
+
+
+def test_merge_nulls_the_survivors_clip_path(conn):
+    # Same reason split does: the row's span just changed, so a file cut at
+    # the old span no longer describes it.
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 9000, 0.8)])
+    rally_id = list_rallies(conn, session_id)[0]["id"]
+    new_id = split_rally(conn, rally_id, 5000)
+    set_clip_path(conn, rally_id, "clips/01-1000-5000.mp4")
+
+    merge_into_previous(conn, new_id)
+
+    assert list_rallies(conn, session_id)[0]["clip_path"] is None
+
+
+def test_merge_refuses_a_rally_carrying_a_detector_span(conn):
+    # The whole safety story. Merge can only ever undo something a human
+    # made; it must never delete a row the label corpus is anchored to.
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id,
+                    [Interval(1000, 5000, 0.8), Interval(5000, 9000, 0.7)])
+    second = list_rallies(conn, session_id)[1]["id"]
+
+    with pytest.raises(ValueError):
+        merge_into_previous(conn, second)
+
+    assert len(list_rallies(conn, session_id)) == 2
+
+
+def test_merge_refuses_a_non_abutting_predecessor(conn):
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 9000, 0.8)])
+    rally_id = list_rallies(conn, session_id)[0]["id"]
+    new_id = split_rally(conn, rally_id, 5000)
+    # Trim the first half's tail, opening a gap. The two rows no longer
+    # describe one contiguous stretch of footage, so rejoining them would
+    # invent play across the gap.
+    set_bounds(conn, rally_id, 1000, 4000)
+
+    with pytest.raises(ValueError):
+        merge_into_previous(conn, new_id)
+
+
+def test_merge_refuses_when_the_previous_rally_is_another_source(conn):
+    session_id, src_a = _seeded(conn, "IMG_9100.MOV")
+    src_b, _idx = add_source(
+        conn, session_id, recorded_at="2026-08-21T11:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9101.MOV",
+    )
+    replace_rallies(conn, session_id, src_a, [Interval(1000, 5000, 0.8)])
+    replace_rallies(conn, session_id, src_b, [Interval(5000, 9000, 0.7)])
+    # Hand-make a det-less first rally on source B so the det guard passes
+    # and the source guard is what has to refuse.
+    b_first = list_rallies(conn, session_id)[1]["id"]
+    conn.execute(
+        "UPDATE rallies SET det_start_ms = NULL, det_end_ms = NULL WHERE id = ?",
+        (b_first,),
+    )
+    conn.commit()
+
+    with pytest.raises(ValueError):
+        merge_into_previous(conn, b_first)
+
+
+def test_merge_refuses_an_unknown_rally(conn):
+    _seeded(conn)
+    with pytest.raises(ValueError):
+        merge_into_previous(conn, "nope")
+
+
+def test_a_twice_split_rally_collapses_in_reverse(conn):
+    # Nested splits fall out of the rules rather than needing a case of
+    # their own: split_rally never reads det_*, and merge tests the TARGET's
+    # det span, not the previous rally's. The one row carrying provenance is
+    # never a legal merge target at any step.
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 9000, 0.8)])
+    original = list_rallies(conn, session_id)[0]["id"]
+    second = split_rally(conn, original, 5000)
+    third = split_rally(conn, second, 7000)
+
+    assert len(list_rallies(conn, session_id)) == 3
+
+    merge_into_previous(conn, third)
+    merge_into_previous(conn, second)
+
+    rows = list_rallies(conn, session_id)
+    assert len(rows) == 1
+    assert (rows[0]["id"], rows[0]["start_ms"], rows[0]["end_ms"]) == (original, 1000, 9000)
+
+    # And the one that still has provenance stays un-mergeable.
+    with pytest.raises(ValueError):
+        merge_into_previous(conn, original)
