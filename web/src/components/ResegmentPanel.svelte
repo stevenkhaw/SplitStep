@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { describeApiError } from '../lib/errors'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
@@ -28,7 +29,7 @@
   let threshold = $state<number | null>(null)
   let busy = $state(false)
   let lastCount = $state<number | null>(null)
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   // Collapsed by default: this is the threshold-tuning loop, opened
   // deliberately, not something a review pass touches. It also gates the
   // /scores fetch below -- that call parses the whole of features.jsonl, and
@@ -157,7 +158,7 @@
       lastCount = res.count ?? null
       onresegmented()
     } catch (e) {
-      error = String(e)
+      error = e
     } finally {
       busy = false
     }
@@ -228,7 +229,7 @@
       </p>
     {/if}
     {#if error}
-      <p class="mt-2 text-caption text-danger">{error}</p>
+      <p class="mt-2 text-caption text-danger">{describeApiError(error, 'source').message}</p>
     {/if}
   </div>
 </details>

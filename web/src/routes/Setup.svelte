@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorNote from '../components/ErrorNote.svelte'
   import QuadCanvas from '../components/QuadCanvas.svelte'
   import { api } from '../lib/api'
   import { previewTimestamps } from '../lib/preview'
@@ -25,7 +26,7 @@
   // diverged from.
   let selectedPresetId = $state<string | null>(null)
   let busy = $state(false)
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
 
   const timestamps = $derived(source ? previewTimestamps(source.duration_ms, source.fps) : [])
   const maxMs = $derived(source ? lastSafeFrameMs(source.duration_ms, source.fps) : 0)
@@ -67,7 +68,7 @@
         presets = p
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
 
     // Stricter here than on the session page, because this wizard writes.
@@ -127,7 +128,7 @@
       await api.setup(source.id, rotation, presetId)
       window.location.hash = `/s/${source.session_id}`
     } catch (e) {
-      error = String(e)
+      error = e
     } finally {
       busy = false
     }
@@ -135,7 +136,7 @@
 </script>
 
 {#if error}
-  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+  <ErrorNote {error} subject="source" />
 {/if}
 
 {#if !source}

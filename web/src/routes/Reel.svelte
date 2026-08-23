@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
+  import ErrorNote from '../components/ErrorNote.svelte'
   import AddRalliesPicker from '../components/AddRalliesPicker.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import ReelItemList from '../components/ReelItemList.svelte'
@@ -24,7 +25,7 @@
   let { slug }: { slug: string } = $props()
 
   let detail = $state<ReelDetail | null>(null)
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   let loading = $state(true)
   let showPicker = $state(false)
   let showPreview = $state(false)
@@ -64,7 +65,7 @@
         if (!cancelled) detail = d
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
       .finally(() => {
         if (!cancelled) loading = false
@@ -323,7 +324,7 @@
 </header>
 
 {#if error}
-  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+  <ErrorNote {error} subject="reel" />
 {:else if loading && !detail}
   <p class="text-body text-dim">Loading…</p>
 {:else if detail}

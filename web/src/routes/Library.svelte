@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
@@ -8,7 +9,7 @@
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   // Session.svelte already has a "Loading…" state for its in-flight fetch;
   // this didn't, so the empty-library copy ("Nothing yet...") was what a
   // user saw for the entire fetch, indistinguishable from a genuinely empty
@@ -32,7 +33,7 @@
         if (!cancelled) sessions = s
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
       .finally(() => {
         if (!cancelled) loading = false
@@ -98,7 +99,7 @@
 </header>
 
 {#if error}
-  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+  <ErrorNote {error} subject="session" />
 {:else if loading}
   <p class="text-body text-dim">Loading…</p>
 {:else if sessions.length === 0}

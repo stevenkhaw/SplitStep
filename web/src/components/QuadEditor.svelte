@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { describeApiError } from '../lib/errors'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { DEFAULT_QUAD_POINTS, assignedPresetLabel, clonePoints, defaultPresetName } from '../lib/quad'
@@ -54,7 +55,7 @@
   let name = $state('')
   let presets = $state<Preset[]>([])
   let status = $state<string | null>(null)
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   // Guards both `save` and `assignExisting`: without it, a double-click on
   // "Save & assign" fires createPreset twice before the first request's
   // response lands, creating two identically-shaped presets under
@@ -73,7 +74,7 @@
     try {
       presets = await api.listPresets()
     } catch (e) {
-      error = String(e)
+      error = e
     }
   }
 
@@ -121,7 +122,7 @@
         'region -- re-run detect (CLI: splitstep detect) for it to take effect.'
       onassigned()
     } catch (e) {
-      error = String(e)
+      error = e
     } finally {
       busy = false
     }
@@ -144,7 +145,7 @@
         'this region -- re-run detect (CLI: splitstep detect) for it to take effect.'
       onassigned()
     } catch (e) {
-      error = String(e)
+      error = e
     } finally {
       busy = false
     }
@@ -230,7 +231,7 @@
           <p class="mt-2 font-data text-caption text-accent">{status}</p>
         {/if}
         {#if error}
-          <p class="mt-2 font-data text-data text-danger">{error}</p>
+          <p class="mt-2 font-data text-data text-danger">{describeApiError(error, 'source').message}</p>
         {/if}
       {/if}
     </div>

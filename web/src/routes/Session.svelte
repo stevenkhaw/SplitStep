@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import LabelMode from '../components/LabelMode.svelte'
   import QueueMode from '../components/QueueMode.svelte'
@@ -15,7 +16,7 @@
   let { id }: Props = $props()
 
   let detail = $state<SessionDetail | null>(null)
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   let mode = $state<'queue' | 'timeline' | 'label'>('queue')
   let focusedRallyId = $state<string | null>(null)
   // The live-merged rallies QueueMode hands to openTimeline (see
@@ -76,7 +77,7 @@
         rallyRevision += 1
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
 
     // The teardown is what makes a superseded response inert. Without it a
@@ -178,7 +179,7 @@
 </header>
 
 {#if error}
-  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+  <ErrorNote {error} subject="session" />
 {:else if !detail}
   <p class="text-body text-dim">Loading…</p>
 {:else}

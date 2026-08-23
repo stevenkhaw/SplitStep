@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorNote from './ErrorNote.svelte'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { spanKey, spanRef } from '../lib/reels'
@@ -26,7 +27,7 @@
   let rallies = $state<Rally[]>([])
   let filter = $state<Filter>('points')
   let checked = $state(new Set<string>())
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   let loading = $state(true)
 
   const alreadyIn = $derived(new Set(existing.map(spanKey)))
@@ -44,7 +45,7 @@
         if (!sessionId && s.length > 0) sessionId = s[0].id
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
     return () => {
       cancelled = true
@@ -67,7 +68,7 @@
         checked = new Set()
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
       .finally(() => {
         if (!cancelled) loading = false
@@ -118,7 +119,7 @@
   </div>
 
   {#if error}
-    <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+    <ErrorNote {error} subject="session" />
   {:else}
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <select

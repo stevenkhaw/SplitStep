@@ -1,3 +1,4 @@
+import { ApiError } from './errors'
 import type {
   ExportResult,
   Job,
@@ -21,8 +22,28 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { 'content-type': 'application/json' } : undefined,
   })
   if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status} ${detail}`)
+    const raw = await res.text().catch(() => '')
+    // FastAPI wraps its messages as {"detail": "..."} and HTTPException's
+    // detail can itself be a string or an object. Unwrapped here, once, so
+    // lib/errors.ts and every banner see the server's actual sentence rather
+    // than a JSON envelope -- and a non-JSON body (a proxy error page, a
+    // truncated response) still passes through as itself.
+    let detail = raw
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed.detail === 'string') detail = parsed.detail
+    } catch {
+      // not JSON; `raw` is already the best available text
+    }
+    const method = init?.method ?? 'GET'
+    // The message keeps the old shape on purpose: it is what `String(e)`
+    // produces, which several call sites still log.
+    throw new ApiError(`${method} ${path} -> ${res.status} ${raw}`, {
+      status: res.status,
+      method,
+      path,
+      detail,
+    })
   }
   return res.json() as Promise<T>
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
@@ -8,7 +9,7 @@
   import type { Reel } from '../lib/types'
 
   let reels = $state<Reel[]>([])
-  let error = $state<string | null>(null)
+  let error = $state<unknown>(null)
   let loading = $state(true)
   let name = $state('')
   let creating = $state(false)
@@ -23,7 +24,7 @@
         if (!cancelled) reels = r
       })
       .catch((e) => {
-        if (!cancelled) error = String(e)
+        if (!cancelled) error = e
       })
       .finally(() => {
         if (!cancelled) loading = false
@@ -42,7 +43,7 @@
       const reel = await api.createReel(name.trim())
       navigate(`/reels/${reel.slug}`)
     } catch (e) {
-      error = String(e)
+      error = e
     } finally {
       creating = false
     }
@@ -75,7 +76,7 @@
 </form>
 
 {#if error}
-  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
+  <ErrorNote {error} subject="reel" />
 {:else if loading}
   <p class="text-body text-dim">Loading…</p>
 {:else if reels.length === 0}
