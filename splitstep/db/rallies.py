@@ -288,8 +288,20 @@ def merge_into_previous(conn: sqlite3.Connection, rally_id: str) -> None:
             f"Rally {rally_id} carries a detector span; only a hand-made "
             f"rally can be merged back"
         )
+    # ORDER BY ... LIMIT 1 makes this a total order, the same problem
+    # _carried_note's third tie-break exists for above: BoundsBody validates
+    # only end_ms > start_ms, so two manual drags can leave two live rallies
+    # in one source sharing an end_ms, and without an explicit order
+    # sqlite's pick between them is arbitrary. That matters here specifically
+    # because web/src/lib/split.ts::applyMerge always resolves the
+    # predecessor as the array-adjacent rally (the latest-starting one among
+    # candidates), so an arbitrary server pick can merge into a DIFFERENT row
+    # than the one the reviewer's screen just showed absorbing the split --
+    # the optimistic UI update would silently diverge from what the database
+    # actually did.
     prev = conn.execute(
-        "SELECT id FROM rallies WHERE source_id = ? AND end_ms = ? AND id != ?",
+        "SELECT id FROM rallies WHERE source_id = ? AND end_ms = ? AND id != ?"
+        " ORDER BY start_ms DESC LIMIT 1",
         (row["source_id"], row["start_ms"], rally_id),
     ).fetchone()
     if prev is None:

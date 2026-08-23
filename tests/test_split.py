@@ -290,3 +290,29 @@ def test_a_twice_split_rally_collapses_in_reverse(conn):
     # And the one that still has provenance stays un-mergeable.
     with pytest.raises(ValueError):
         merge_into_previous(conn, original)
+
+
+def test_merge_picks_the_latest_predecessor_when_two_share_an_end(conn):
+    # Two rallies in one source can end on the same millisecond: the bounds
+    # route enforces only end_ms > start_ms, so two manual drags can land
+    # there. Without a total order sqlite's choice between them is arbitrary,
+    # while web/src/lib/split.ts::applyMerge always takes the positionally
+    # adjacent one -- and a divergence would leave the reviewer looking at a
+    # merge the database did not perform.
+    session_id, source_id = _seeded(conn)
+    replace_rallies(conn, session_id, source_id,
+                    [Interval(1000, 9000, 0.8), Interval(12000, 16000, 0.7)])
+    rows = list_rallies(conn, session_id)
+    early, late = rows[0]["id"], rows[1]["id"]
+    new_id = split_rally(conn, early, 5000)
+    # Drag the later rally back so it also ends at 5000, the hand-made half's
+    # start. Both are now candidates; only the latest-starting one is correct.
+    set_bounds(conn, late, 3000, 5000)
+
+    merge_into_previous(conn, new_id)
+
+    survivors = {r["id"]: (r["start_ms"], r["end_ms"]) for r in list_rallies(conn, session_id)}
+    assert new_id not in survivors
+    # `late` starts at 3000, `early` at 1000 -- the later start wins.
+    assert survivors[late] == (3000, 9000)
+    assert survivors[early] == (1000, 5000)
