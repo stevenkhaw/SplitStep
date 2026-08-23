@@ -91,7 +91,7 @@
 <header class="mb-6 flex items-baseline justify-between">
   <h1 class="text-display font-semibold">Sessions</h1>
   <div class="flex items-center gap-4">
-    <button class="font-data text-data text-dim hover:text-fg"
+    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/reels')}>Reels</button>
     <JobsBadge />
   </div>
@@ -114,7 +114,7 @@
              clickable at all -- the whole page read as static text. -->
         <button
           class="flex w-full items-center gap-4 rounded-lg border border-line bg-surface p-3
-                 text-left hover:border-line hover:bg-surface-2"
+                 text-left hover:border-line hover:bg-surface-2 motion-safe:transition-colors"
           onclick={() => handleSessionClick(s)}
           aria-label={s.status === 'needs_setup' ? 'set up' : undefined}
         >

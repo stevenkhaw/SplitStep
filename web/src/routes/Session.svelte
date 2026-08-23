@@ -162,7 +162,7 @@
 
 <header class="mb-4 flex items-baseline justify-between">
   <div class="flex items-baseline gap-4">
-    <button class="text-body text-dim hover:text-fg" onclick={() => navigate('/')}>
+    <button class="text-body text-dim hover:text-fg motion-safe:transition-colors" onclick={() => navigate('/')}>
       ← library
     </button>
     <h1 class="text-display font-semibold">{detail?.session.title ?? id}</h1>
@@ -193,7 +193,7 @@
         {#each needsSetupSources as source (source.id)}
           <li>
             <button
-              class="inline-block rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110"
+              class="inline-block rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 motion-safe:transition-colors"
               onclick={() => openSetupWizard(source)}
             >
               Set up source {source.idx}

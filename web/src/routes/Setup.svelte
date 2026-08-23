@@ -157,7 +157,7 @@
   <section>
     <div class="flex items-center gap-3">
       <button
-        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2"
+        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => rotate(-1)}
         aria-label="rotate counter-clockwise"
       >
@@ -165,7 +165,7 @@
       </button>
       <span class="font-data text-data text-dim">{rotation}&deg;</span>
       <button
-        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2"
+        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => rotate(1)}
         aria-label="rotate clockwise"
       >
@@ -183,7 +183,7 @@
     <div class="mt-3 grid grid-cols-3 gap-2">
       {#each timestamps as t (t)}
         <button
-          class="overflow-hidden rounded border border-line hover:border-line"
+          class="overflow-hidden rounded border border-line hover:border-line motion-safe:transition-colors"
           onclick={() => seek(t)}
         >
           <img
@@ -206,7 +206,7 @@
 
     <div class="mt-3 flex flex-wrap items-center gap-2">
       <button
-        class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2"
+        class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => usePoints(DEFAULT_QUAD_POINTS)}
         aria-label="use default play region"
       >
@@ -214,7 +214,7 @@
       </button>
       {#each presets as p (p.id)}
         <button
-          class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2"
+          class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2 motion-safe:transition-colors"
           onclick={() => usePoints(p.points, p.id)}
           aria-label="use preset {p.name}"
         >
@@ -243,7 +243,7 @@
   </section>
 
   <button
-    class="mt-6 rounded bg-accent px-4 py-1.5 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40"
+    class="mt-6 rounded bg-accent px-4 py-1.5 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
     onclick={start}
     disabled={!points || busy}
     aria-label="start detection"

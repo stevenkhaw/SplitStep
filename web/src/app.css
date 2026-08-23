@@ -73,6 +73,34 @@
   --font-data: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/* The verdict confirmation over the video (QueueMode). It rises and fades
+   rather than merely fading, so a repeat of the same verdict reads as a
+   second event and not as one long one. Under 700ms on purpose: this fires
+   on a keypress the reviewer makes hundreds of times a session, and anything
+   slower would still be on screen when the next one lands.
+
+   Declared here rather than inline because Tailwind's arbitrary-animation
+   syntax can name a keyframe but cannot define one. `motion-safe:` at the
+   callsite is what honours prefers-reduced-motion: the label still appears
+   and still clears, it simply does not move. */
+@keyframes verdict {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
 /* Numbers must not reflow as they tick. The queue's status line updates its
    timecode several times a second and the timeline's rows are read as
    columns, so proportional figures made the layout jitter sideways and

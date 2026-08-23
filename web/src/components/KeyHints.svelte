@@ -99,7 +99,7 @@
           bind:this={closeButton}
           type="button"
           class="rounded border border-line px-2 py-1 font-data text-caption text-dim
-                 hover:bg-surface-2"
+                 hover:bg-surface-2 motion-safe:transition-colors"
           onclick={() => (open = false)}
         >
           Esc

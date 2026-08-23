@@ -116,7 +116,7 @@
     >
       <button
         data-drag-handle
-        class="cursor-grab select-none px-2 font-data text-faint hover:text-fg"
+        class="cursor-grab select-none px-2 font-data text-faint hover:text-fg motion-safe:transition-colors"
         aria-label="Reorder {i + 1}. Hold alt and press the up or down arrow."
         onpointerdown={(e) => startDrag(i, e)}
         onkeydown={(e) => onHandleKey(i, e)}
@@ -160,7 +160,7 @@
 
       <button
         data-remove
-        class="ml-auto px-2 font-data text-data text-faint hover:text-danger"
+        class="ml-auto px-2 font-data text-data text-faint hover:text-danger motion-safe:transition-colors"
         aria-label="Remove clip {i + 1}"
         onclick={() => onremove(item)}
       >✕</button>

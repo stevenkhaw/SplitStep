@@ -202,7 +202,7 @@
             aria-label="preset name"
           />
           <button
-            class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40"
+            class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
             onclick={save}
             disabled={busy}
           >
@@ -216,7 +216,7 @@
             {#each presets as p (p.id)}
               <button
                 class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2
-                       disabled:opacity-40"
+                       disabled:opacity-40 motion-safe:transition-colors"
                 onclick={() => assignExisting(p)}
                 disabled={busy}
               >

@@ -112,7 +112,7 @@
 <div class="rounded-lg border border-line p-4">
   <div class="mb-3 flex items-baseline justify-between">
     <h2 class="text-body font-semibold">Add rallies</h2>
-    <button class="font-data text-data text-dim hover:text-fg" onclick={onclose}>
+    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors" onclick={onclose}>
       close
     </button>
   </div>
@@ -137,7 +137,7 @@
           class="rounded border px-2 py-1 font-data text-data
                  {filter === f
                    ? 'border-accent text-accent'
-                   : 'border-line text-dim hover:bg-surface-2'}"
+                   : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
           onclick={() => (filter = f as Filter)}
         >{f}</button>
       {/each}
@@ -145,7 +145,7 @@
       <button
         data-select-all
         class="ml-auto font-data text-data text-dim hover:text-fg
-               disabled:opacity-40"
+               disabled:opacity-40 motion-safe:transition-colors"
         disabled={selectable.length === 0}
         onclick={selectAll}
       >select all</button>
@@ -187,7 +187,7 @@
       data-add
       class="mt-3 rounded border border-line px-3 py-1.5 font-data text-data
              text-fg hover:bg-surface-2 disabled:cursor-not-allowed
-             disabled:opacity-40"
+             disabled:opacity-40 motion-safe:transition-colors"
       disabled={selected.length === 0}
       onclick={add}
     >

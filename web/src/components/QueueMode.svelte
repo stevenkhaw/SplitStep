@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { describeExportResult, exportSetLabel } from '../lib/export'
+  import { flashFor } from '../lib/flash'
   import { isEditableTarget } from '../lib/keyboard'
   import { NOTE_MAX_CHARS, NoteWriter, seedNotes } from '../lib/notes'
   import { describePersistFailure, persistAction } from '../lib/persist'
@@ -10,6 +11,7 @@
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
+  import type { VerdictFlash } from '../lib/flash'
   import type { QueueAction } from '../lib/queue'
   import type { Rally, SessionDetail, Source } from '../lib/types'
   import KeyHints from './KeyHints.svelte'
@@ -69,6 +71,14 @@
   const initialRallyId = untrack(() => startAtRallyId)
   if (initialRallyId) queue.jumpTo(initialRallyId)
   const toaster = createToaster()
+
+  // Reject takes the receding tone here too, not danger.
+  const FLASH_TONE = {
+    star: 'text-star',
+    point: 'text-point',
+    reject: 'text-faint',
+    neutral: 'text-dim',
+  } as const
 
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)
@@ -163,9 +173,32 @@
     return detail.rallies.find((r) => r.id === rallyId)?.idx
   }
 
+  // The confirmation shown over the video. `seq` is what re-triggers the CSS
+  // animation on a repeat of the same verdict -- keying only on the flash
+  // object would leave a second identical press silent, and holding X down
+  // through a run of false positives is exactly when the feedback matters.
+  let flash = $state<VerdictFlash | null>(null)
+  let flashSeq = $state(0)
+  let flashTimer: ReturnType<typeof setTimeout> | undefined
+
+  function showFlash(action: QueueAction): void {
+    const next = flashFor(action)
+    if (!next) return
+    flash = next
+    flashSeq += 1
+    clearTimeout(flashTimer)
+    flashTimer = setTimeout(() => (flash = null), 700)
+  }
+
+  $effect(() => () => clearTimeout(flashTimer))
+
   async function apply(action: QueueAction | null): Promise<void> {
     version += 1
     if (!action) return
+    // Before the await, not after: the point is to confirm the keypress at
+    // the moment it lands. persistAction is a round trip, and a failure
+    // still surfaces through the toaster below.
+    showFlash(action)
     const outcome = await persistAction(action, api)
     if (!outcome.ok) {
       // A failed persist must not silently diverge local state from the
@@ -445,7 +478,7 @@
     <div class="mt-4 flex items-center justify-center gap-3">
       <button
         class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
         disabled={stats.pointCount === 0}
         onclick={() => exportSet('points')}
       >
@@ -453,7 +486,7 @@
       </button>
       <button
         class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
         disabled={stats.starredCount === 0}
         onclick={() => exportSet('starred')}
       >
@@ -463,7 +496,7 @@
     <div class="mt-2 flex items-center justify-center gap-3">
       <button
         class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
         disabled={stats.pointCount === 0}
         onclick={() => buildReel('points')}
       >
@@ -471,7 +504,7 @@
       </button>
       <button
         class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
         disabled={stats.starredCount === 0}
         onclick={() => buildReel('starred')}
       >
@@ -503,6 +536,29 @@
     >
       {stats.index + 1} / {stats.total}
     </div>
+
+    {#if flash}
+      <!-- Centred over the video rather than in the status line, because
+           that is where the eye already is during a pass. aria-live so the
+           confirmation is not purely visual; pointer-events-none so it can
+           never swallow a click meant for the deck. -->
+      {#key flashSeq}
+        <div
+          class="pointer-events-none absolute inset-0 flex items-center justify-center"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            class="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 font-data text-data
+                   motion-safe:animate-[verdict_700ms_ease-out_forwards]
+                   {FLASH_TONE[flash.tone]}"
+          >
+            <span aria-hidden="true">{flash.glyph}</span>
+            {flash.label}
+          </span>
+        </div>
+      {/key}
+    {/if}
   </div>
 
   <!--

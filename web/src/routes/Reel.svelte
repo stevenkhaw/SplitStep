@@ -278,7 +278,7 @@
 
 <header class="mb-6 flex items-baseline justify-between">
   <div>
-    <button class="font-data text-data text-dim hover:text-fg"
+    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/reels')}>← Reels</button>
     {#if editingName}
       <div class="mt-1 flex items-center gap-2">
@@ -297,12 +297,12 @@
           data-rename-save
           class="rounded border border-line px-2 py-1 font-data text-data
                  text-fg hover:bg-surface-2 disabled:cursor-not-allowed
-                 disabled:opacity-40"
+                 disabled:opacity-40 motion-safe:transition-colors"
           disabled={busy || normalizedReelName(nameBuffer) === null}
           onclick={saveName}
         >Save</button>
         <button
-          class="font-data text-data text-dim hover:text-fg"
+          class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
           onclick={cancelRename}
         >Cancel</button>
       </div>
@@ -312,7 +312,7 @@
         {#if detail}
           <button
             data-rename
-            class="font-data text-data font-normal text-dim hover:text-fg"
+            class="font-data text-data font-normal text-dim hover:text-fg motion-safe:transition-colors"
             onclick={startRename}
           >rename</button>
         {/if}
@@ -330,14 +330,14 @@
   <div class="mb-4 flex flex-wrap items-center gap-3">
     <button
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-             hover:bg-surface-2"
+             hover:bg-surface-2 motion-safe:transition-colors"
       onclick={() => (showPicker = !showPicker)}
     >Add rallies</button>
 
     <button
       data-preview
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
       disabled={items.length === 0}
       onclick={() => (showPreview = !showPreview)}
     >{showPreview ? 'Hide preview' : 'Preview'}</button>
@@ -351,7 +351,7 @@
       <button
         data-watch
         class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-               hover:bg-surface-2"
+               hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => (showWatch = !showWatch)}
       >{showWatch ? 'Hide watch' : 'Watch'}</button>
     {/if}
@@ -366,7 +366,7 @@
     <button
       data-cut
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
       disabled={items.length === 0 || busy}
       onclick={cutMissing}
     >{busy ? 'Working…' : 'Cut missing clips'}</button>
@@ -374,7 +374,7 @@
     <button
       data-render
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
       disabled={blocked !== null || busy}
       title={blocked ?? ''}
       onclick={render}
@@ -391,12 +391,12 @@
         <button
           data-delete-confirm-yes
           class="rounded border border-danger px-2 py-1 text-danger hover:bg-danger/40
-                 disabled:cursor-not-allowed disabled:opacity-40"
+                 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
           disabled={busy}
           onclick={confirmDelete}
         >Yes, delete</button>
         <button
-          class="text-dim hover:text-fg"
+          class="text-dim hover:text-fg motion-safe:transition-colors"
           onclick={() => (confirmingDelete = false)}
         >Cancel</button>
       </span>
@@ -404,7 +404,7 @@
       <button
         data-delete
         class="rounded border border-danger/60 px-3 py-1.5 font-data text-data text-danger
-               hover:bg-danger/40 disabled:cursor-not-allowed disabled:opacity-40"
+               hover:bg-danger/40 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
         disabled={busy}
         onclick={() => (confirmingDelete = true)}
       >Delete reel</button>
@@ -465,7 +465,7 @@
               ? 'rendered 4K · last render, not current membership'
               : 'rendered 4K file'}
           </span>
-          <button class="hover:text-fg" onclick={() => (showWatch = false)}>
+          <button class="hover:text-fg motion-safe:transition-colors" onclick={() => (showWatch = false)}>
             close
           </button>
         </div>

@@ -156,7 +156,7 @@
 <div class="mt-2 flex items-center gap-2">
   <button
     class="rounded border border-line px-2 py-0.5 font-data text-data
-           hover:bg-surface-2"
+           hover:bg-surface-2 motion-safe:transition-colors"
     onclick={() => onseek(timeMs - 1000)}
     aria-label="back one second"
   >
@@ -164,7 +164,7 @@
   </button>
   <button
     class="rounded border border-line px-2 py-0.5 font-data text-data
-           hover:bg-surface-2"
+           hover:bg-surface-2 motion-safe:transition-colors"
     onclick={() => stepFrames(-1)}
     aria-label="previous frame"
   >
@@ -183,7 +183,7 @@
   />
   <button
     class="rounded border border-line px-2 py-0.5 font-data text-data
-           hover:bg-surface-2"
+           hover:bg-surface-2 motion-safe:transition-colors"
     onclick={() => stepFrames(1)}
     aria-label="next frame"
   >
@@ -191,7 +191,7 @@
   </button>
   <button
     class="rounded border border-line px-2 py-0.5 font-data text-data
-           hover:bg-surface-2"
+           hover:bg-surface-2 motion-safe:transition-colors"
     onclick={() => onseek(timeMs + 1000)}
     aria-label="forward one second"
   >

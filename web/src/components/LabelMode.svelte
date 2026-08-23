@@ -337,7 +337,7 @@
         class="rounded border px-3 py-1 font-data text-body
                {verdict === v
           ? 'border-accent bg-accent/20 text-accent'
-          : 'border-line text-dim hover:bg-surface-2'}"
+          : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.setVerdict(v) ?? null)}
       >
         {v} <span class="text-faint">{key}</span>
@@ -352,7 +352,7 @@
         class="rounded border px-3 py-1 font-data text-data disabled:opacity-30
                {flags.includes(f)
           ? 'border-accent bg-accent/20 text-accent'
-          : 'border-line text-dim hover:bg-surface-2'}"
+          : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.toggleFlag(f) ?? null)}
       >
         {FLAG_LABELS[f]}

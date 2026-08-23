@@ -52,7 +52,7 @@
 <header class="mb-6 flex items-baseline justify-between">
   <h1 class="text-display font-semibold">Reels</h1>
   <div class="flex items-center gap-4">
-    <button class="font-data text-data text-dim hover:text-fg"
+    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/')}>Sessions</button>
     <JobsBadge />
   </div>
@@ -67,7 +67,7 @@
   />
   <button
     class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-           hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+           hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
     disabled={creating || !name.trim()}
   >
     New reel
@@ -88,7 +88,7 @@
       <li>
         <button
           class="flex w-full items-center gap-4 rounded-lg border border-line bg-surface p-3
-                 text-left hover:bg-surface-2"
+                 text-left hover:bg-surface-2 motion-safe:transition-colors"
           onclick={() => navigate(`/reels/${r.slug}`)}
         >
           <!-- The cover is the reel's first clip, which is the frame that

@@ -57,7 +57,7 @@
       <span class="tabular-nums">
         {Math.min(position.index + 1, position.total)} / {position.total}
       </span>
-      <button class="hover:text-fg" onclick={onclose}>close</button>
+      <button class="hover:text-fg motion-safe:transition-colors" onclick={onclose}>close</button>
     </div>
   </div>
 
@@ -78,7 +78,7 @@
       {#if position.total > 0}
         <button
           class="rounded border border-line px-3 py-1.5 font-data text-data
-                 text-fg hover:bg-surface-2"
+                 text-fg hover:bg-surface-2 motion-safe:transition-colors"
           onclick={restart}
         >
           Play again
