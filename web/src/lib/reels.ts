@@ -86,19 +86,6 @@ export function renderBlockedReason(items: ReelItem[]): string | null {
 }
 
 /**
- * A reel's render state for the list page.
- *
- * Three states, not two: `rendered_path` survives a membership change (see
- * mark_dirty), because the file is still on disk and still watchable, it is
- * merely out of date. Collapsing "never rendered" and "stale" would hide
- * that there is something to watch right now.
- */
-export function reelStateLabel(reel: Reel): string {
-  if (!reel.rendered_path) return 'not rendered'
-  return reel.dirty ? 'needs re-render' : 'rendered'
-}
-
-/**
  * Whether the builder should offer a Watch control for this reel.
  *
  * True even while `dirty`: mark_rendered deliberately leaves `rendered_path`

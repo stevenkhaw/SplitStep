@@ -5,6 +5,11 @@ const mockNavigate = vi.fn()
 const mockApi = {
   listSessions: vi.fn(),
   getSession: vi.fn(),
+  // The card renders a still through Thumb.svelte now; without this the
+  // component throws on mount and the whole list fails to render, which is
+  // what these assertions were actually catching.
+  frameUrl: () => 'about:blank',
+  jobs: vi.fn().mockResolvedValue([]),
 }
 
 vi.mock('../src/lib/router.svelte', () => ({
@@ -414,13 +419,16 @@ describe('Library', () => {
     // session row renders its summary into -- the header control is a
     // button, not a span.
     const summary = target.querySelector('span.font-data')
-    expect(summary?.textContent).toContain('P24')
-    expect(summary?.textContent).toContain('★0')
+    // `●` and `★` rather than `P` and `★`: the card now uses the same two
+    // markers the queue's own tally does, so the same glyph means the same
+    // thing on both screens.
+    expect(summary?.textContent).toContain('● 24')
+    expect(summary?.textContent).toContain('★ 0')
     // Points is the structural fact (a session has points); starred is a
     // highlight subset of that. The count that reads first should be the
     // more numerous, more structural one.
-    expect(summary!.textContent!.indexOf('P24')).toBeLessThan(
-      summary!.textContent!.indexOf('★0')
+    expect(summary!.textContent!.indexOf('● 24')).toBeLessThan(
+      summary!.textContent!.indexOf('★ 0')
     )
   })
 })

@@ -40,6 +40,29 @@ def _span(session, start, end):
     return {"source_id": session["source_id"], "start_ms": start, "end_ms": end}
 
 
+def test_list_reels_carries_a_cover_frame_from_the_first_clip(client, session):
+    reel = client.post("/api/reels", json={"name": "Cover"}).json()
+    # Added out of order: the cover comes from position 1, not from
+    # whichever row was inserted first.
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [
+        _span(session, 9000, 14000), _span(session, 1000, 5000),
+    ]})
+
+    row = next(r for r in client.get("/api/reels").json() if r["id"] == reel["id"])
+    assert row["thumb"] == {
+        "session_id": session["id"], "idx": session["idx"], "at_ms": 9000,
+    }
+
+
+def test_list_reels_thumb_is_null_while_a_reel_is_empty(client):
+    reel = client.post("/api/reels", json={"name": "Empty"}).json()
+    row = next(r for r in client.get("/api/reels").json() if r["id"] == reel["id"])
+    # A new reel is created empty and stays that way until the builder adds
+    # to it, so this is the state the list renders most often on a fresh
+    # library -- not an edge case.
+    assert row["thumb"] is None
+
+
 def test_create_and_list_a_reel(client):
     created = client.post("/api/reels", json={"name": "Best of July"}).json()
     assert created["slug"] == "best-of-july"

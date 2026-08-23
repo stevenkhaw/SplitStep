@@ -26,11 +26,11 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
 const sessions: Session[] = [
   {
     id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed',
-    rally_count: 4, starred_count: 1, point_count: 2,
+    rally_count: 4, starred_count: 1, point_count: 2, thumb_idx: 1,
   },
   {
     id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed',
-    rally_count: 1, starred_count: 0, point_count: 1,
+    rally_count: 1, starred_count: 0, point_count: 1, thumb_idx: 1,
   },
 ]
 

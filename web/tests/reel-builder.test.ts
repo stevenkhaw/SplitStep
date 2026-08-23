@@ -29,7 +29,7 @@ function detail(
       id: 'r1', name: '2026-08-18 points', slug: '2026-08-18-points',
       rendered_path: renderedPath, rendered_at: renderedPath ? '2026-08-21T10:00:00Z' : null, dirty,
       created_at: '2026-08-21T10:00:00Z', item_count: items.length,
-      rendered_bytes: renderedBytes,
+      rendered_bytes: renderedBytes, thumb: null,
     },
     items,
   }

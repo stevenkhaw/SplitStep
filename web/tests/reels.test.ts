@@ -6,7 +6,6 @@ import {
   missingClipCount,
   normalizedReelName,
   reelMembershipKey,
-  reelStateLabel,
   renderBlockedReason,
   shouldPollReel,
   spanKey,
@@ -39,6 +38,7 @@ function reel(overrides: Partial<Reel> = {}): Reel {
     slug: 'r',
     rendered_path: null,
     rendered_at: null,
+    thumb: null,
     dirty: 1,
     created_at: '2026-08-21T10:00:00Z',
     item_count: 0,
@@ -128,27 +128,6 @@ describe('renderBlockedReason', () => {
 
   it('returns null when every clip is ready', () => {
     expect(renderBlockedReason([item(), item()])).toBeNull()
-  })
-})
-
-describe('reelStateLabel', () => {
-  it('reads "not rendered" before the first render', () => {
-    expect(reelStateLabel(reel())).toBe('not rendered')
-  })
-
-  it('distinguishes a stale render from no render at all', () => {
-    // rendered_path survives a membership change on purpose (see
-    // mark_dirty): the file is still on disk and still watchable, it is
-    // merely out of date, and collapsing the two states would hide that.
-    expect(reelStateLabel(reel({
-      rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 1,
-    }))).toBe('needs re-render')
-  })
-
-  it('reads "rendered" when clean', () => {
-    expect(reelStateLabel(reel({
-      rendered_path: 'reels/r.mp4', rendered_at: '2026-08-21T12:00:00Z', dirty: 0,
-    }))).toBe('rendered')
   })
 })
 

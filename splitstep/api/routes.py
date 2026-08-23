@@ -274,11 +274,26 @@ def api_list_sessions(request: Request):
             " FROM rallies WHERE session_id = ? AND rejected = 0",
             (s["id"],),
         ).fetchone()
+        # Which source the library card takes its still from.
+        # /media/{session_id}/{idx}/frame.jpg can already render one, but the
+        # list carried no idx to build that URL with, and a client guessing
+        # 1 would be wrong for any session whose first source was never
+        # added. The lowest idx is the footage the session opens on.
+        #
+        # Deliberately not filtered by status: frame.jpg 404s cleanly when
+        # there is no proxy yet, and the card falls back to a placeholder on
+        # the image's own error. Encoding "which statuses have a proxy" here
+        # too would be a second copy of the status vocabulary to keep in
+        # step with jobs/handlers.py.
+        thumb = conn.execute(
+            "SELECT MIN(idx) AS idx FROM sources WHERE session_id = ?", (s["id"],)
+        ).fetchone()
         out.append({
             **dict(s),
             "rally_count": counts["total"],
             "starred_count": counts["starred"],
             "point_count": counts["point"],
+            "thumb_idx": thumb["idx"],
         })
     return out
 
@@ -943,7 +958,29 @@ def _item_json(item) -> dict:
 
 @router.get("/api/reels")
 def api_list_reels(request: Request):
-    return [dict(r) for r in list_reels(_conn(request))]
+    conn = _conn(request)
+    # The cover still for each reel card: its first clip's own frame.
+    # `reel_items` keys on (source_id, start_ms, end_ms) and not on rally_id,
+    # so the session and idx that /media/.../frame.jpg needs come from the
+    # source join rather than from a rally -- the same reason resolve_items
+    # joins them, and the reason this works for an orphaned item too.
+    #
+    # One grouped query rather than a lookup per reel: this route renders
+    # every reel on the list page, and it already runs on a shared worker
+    # thread.
+    covers = {
+        r["reel_id"]: {"session_id": r["session_id"], "idx": r["idx"], "at_ms": r["start_ms"]}
+        for r in conn.execute(
+            "SELECT i.reel_id, i.start_ms, s.session_id, s.idx FROM reel_items i"
+            " JOIN sources s ON s.id = i.source_id"
+            " WHERE i.position = ("
+            "   SELECT MIN(position) FROM reel_items WHERE reel_id = i.reel_id"
+            " )"
+        ).fetchall()
+    }
+    # None while a reel is empty, which is every reel between being created
+    # and the builder adding to it.
+    return [{**dict(r), "thumb": covers.get(r["id"])} for r in list_reels(conn)]
 
 
 @router.post("/api/reels")

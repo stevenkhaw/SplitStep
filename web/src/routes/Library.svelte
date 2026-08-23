@@ -1,7 +1,10 @@
 <script lang="ts">
   import JobsBadge from '../components/JobsBadge.svelte'
+  import StatusBadge from '../components/StatusBadge.svelte'
+  import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
   import { navigate } from '../lib/router.svelte'
+  import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
@@ -103,18 +106,32 @@
     Nothing yet. Drop a video into <code>_inbox/</code> and it will appear here.
   </p>
 {:else}
-  <ul class="divide-y divide-line">
+  <ul class="space-y-2">
     {#each sessions as s (s.id)}
       <li>
+        <!-- A bordered card rather than a divided list row. The rows carried
+             no hover state and no border, so nothing said they were
+             clickable at all -- the whole page read as static text. -->
         <button
-          class="flex w-full items-baseline justify-between py-3 text-left hover:bg-surface"
+          class="flex w-full items-center gap-4 rounded-lg border border-line bg-surface p-3
+                 text-left hover:border-line hover:bg-surface-2"
           onclick={() => handleSessionClick(s)}
           aria-label={s.status === 'needs_setup' ? 'set up' : undefined}
         >
-          <span class="font-medium">{s.title}</span>
-          <span class="font-data text-data text-dim">
-            {s.rally_count} rallies · P{s.point_count} · ★{s.starred_count} · {s.status}
+          <Thumb
+            session_id={s.id}
+            idx={s.thumb_idx}
+            alt="first frame of {s.title}"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-title font-semibold">{s.title}</span>
+            <span class="mt-1 flex flex-wrap items-center gap-x-3 font-data text-data text-dim">
+              <span>{s.rally_count} rallies</span>
+              <span class="text-point">● {s.point_count}</span>
+              <span class="text-star">★ {s.starred_count}</span>
+            </span>
           </span>
+          <StatusBadge badge={sessionStatus(s)} />
         </button>
       </li>
     {/each}

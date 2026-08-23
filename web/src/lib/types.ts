@@ -6,6 +6,9 @@ export interface Session {
   rally_count: number
   starred_count: number
   point_count: number
+  /** Lowest source idx, for the card's still via `api.frameUrl`. Null when
+   *  the session has no sources yet. */
+  thumb_idx: number | null
 }
 
 export interface Source {
@@ -43,7 +46,12 @@ export interface Rally {
 }
 
 export interface SessionDetail {
-  session: Omit<Session, 'rally_count' | 'starred_count' | 'point_count'>
+  // The list-only fields are omitted because /api/sessions/{id} genuinely
+  // does not return them: the counts are computed per row by the list
+  // endpoint, and thumb_idx exists for the library card. Widening Session
+  // instead of extending this list is what makes a field look available on
+  // the detail page when it is always undefined there.
+  session: Omit<Session, 'rally_count' | 'starred_count' | 'point_count' | 'thumb_idx'>
   sources: Source[]
   rallies: Rally[]
 }
@@ -106,6 +114,9 @@ export interface Reel {
   dirty: number
   created_at: string
   item_count: number
+  /** The first clip's own frame, for the card's cover. Null while the reel
+   *  is empty -- which every reel is between creation and its first add. */
+  thumb: { session_id: string; idx: number; at_ms: number } | null
 }
 
 /**

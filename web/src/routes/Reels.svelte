@@ -1,8 +1,10 @@
 <script lang="ts">
   import JobsBadge from '../components/JobsBadge.svelte'
+  import StatusBadge from '../components/StatusBadge.svelte'
+  import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
-  import { reelStateLabel } from '../lib/reels'
   import { navigate } from '../lib/router.svelte'
+  import { reelStatus } from '../lib/status'
   import type { Reel } from '../lib/types'
 
   let reels = $state<Reel[]>([])
@@ -81,17 +83,29 @@
     No reels yet. Finish reviewing a session and compile its points, or name one above.
   </p>
 {:else}
-  <ul class="divide-y divide-line">
+  <ul class="space-y-2">
     {#each reels as r (r.id)}
       <li>
         <button
-          class="flex w-full items-baseline justify-between py-3 text-left hover:bg-surface"
+          class="flex w-full items-center gap-4 rounded-lg border border-line bg-surface p-3
+                 text-left hover:bg-surface-2"
           onclick={() => navigate(`/reels/${r.slug}`)}
         >
-          <span class="font-medium">{r.name}</span>
-          <span class="font-data text-data text-dim">
-            {r.item_count} clips · {reelStateLabel(r)}
+          <!-- The cover is the reel's first clip, which is the frame that
+               actually opens the file -- not a generic reel icon. -->
+          <Thumb
+            session_id={r.thumb?.session_id ?? null}
+            idx={r.thumb?.idx ?? null}
+            atMs={r.thumb?.at_ms ?? 0}
+            alt="first clip of {r.name}"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-title font-semibold">{r.name}</span>
+            <span class="mt-1 block font-data text-data text-dim">
+              {r.item_count} clip{r.item_count === 1 ? '' : 's'}
+            </span>
           </span>
+          <StatusBadge badge={reelStatus(r)} />
         </button>
       </li>
     {/each}

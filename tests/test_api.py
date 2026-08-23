@@ -69,6 +69,37 @@ def test_list_sessions_reports_point_count(client, conn, seeded):
     assert body[0]["rally_count"] == 1
 
 
+def test_list_sessions_names_a_source_to_take_a_thumbnail_from(client, seeded):
+    # The library card wants a still, and /media/{session}/{idx}/frame.jpg
+    # can produce one -- but the list had no idx to build that URL from, and
+    # the client guessing 1 would be wrong for any session whose first
+    # source was never added or was removed. The lowest idx is the one whose
+    # footage opens the session.
+    body = client.get("/api/sessions").json()
+    assert body[0]["thumb_idx"] == seeded["idx"]
+
+
+def test_list_sessions_thumb_idx_is_the_lowest_source_not_the_newest(client, conn, seeded):
+    add_source(
+        conn, seeded["session_id"], recorded_at="2026-08-19T12:00:00Z",
+        duration_ms=60_000, width=3840, height=2160, fps=30.0,
+        original_name="IMG_0002.MOV",
+    )
+    body = client.get("/api/sessions").json()
+    assert body[0]["thumb_idx"] == 1
+
+
+def test_list_sessions_thumb_idx_is_null_with_no_sources(client, conn):
+    find_or_create_session_for_date(conn, "2026-08-20")
+    body = client.get("/api/sessions").json()
+    empty = [s for s in body if s["id"] != "2026-08-19"]
+    assert len(empty) == 1
+    # Not 1-with-a-hope: the client renders a placeholder for null, whereas
+    # a guessed idx would render a broken image request against a source
+    # that does not exist.
+    assert empty[0]["thumb_idx"] is None
+
+
 def test_get_session_returns_sources_and_rallies(client, seeded):
     r = client.get(f"/api/sessions/{seeded['session_id']}")
     assert r.status_code == 200
