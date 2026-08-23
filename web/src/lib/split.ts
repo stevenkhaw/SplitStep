@@ -79,6 +79,7 @@ function renumber(rallies: Rally[], sourceOrder: string[]): Rally[] {
   const rank = new Map(sourceOrder.map((id, i) => [id, i]))
   return [...rallies]
     .sort((a, b) => {
+      // Default to 0 (ranks unlisted sources first) only as a fallback for missing sourceOrder entries; this is a caller bug.
       const bySource = (rank.get(a.source_id) ?? 0) - (rank.get(b.source_id) ?? 0)
       return bySource !== 0 ? bySource : a.start_ms - b.start_ms
     })

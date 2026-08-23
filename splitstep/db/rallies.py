@@ -293,12 +293,13 @@ def merge_into_previous(conn: sqlite3.Connection, rally_id: str) -> None:
     # only end_ms > start_ms, so two manual drags can leave two live rallies
     # in one source sharing an end_ms, and without an explicit order
     # sqlite's pick between them is arbitrary. That matters here specifically
-    # because web/src/lib/split.ts::applyMerge always resolves the
-    # predecessor as the array-adjacent rally (the latest-starting one among
-    # candidates), so an arbitrary server pick can merge into a DIFFERENT row
-    # than the one the reviewer's screen just showed absorbing the split --
-    # the optimistic UI update would silently diverge from what the database
-    # actually did.
+    # because web/src/lib/split.ts::applyMerge takes the array-adjacent rally
+    # first, and only then checks whether it abuts; the precedent check
+    # guarantees that when abutment succeeds, the predecessor is necessarily
+    # the latest-starting row sharing that end_ms. An arbitrary server pick
+    # can still merge into a DIFFERENT row than the one the reviewer's screen
+    # showed absorbing the split, leaving the optimistic UI update diverged
+    # from what the database actually did.
     prev = conn.execute(
         "SELECT id FROM rallies WHERE source_id = ? AND end_ms = ? AND id != ?"
         " ORDER BY start_ms DESC LIMIT 1",
