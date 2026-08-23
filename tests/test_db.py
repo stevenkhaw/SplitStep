@@ -713,7 +713,9 @@ def test_migration_009_allows_a_null_det_span(conn):
 def test_migration_009_rejects_a_half_present_det_span(conn):
     # Both or neither. A half-present span is a third state nothing knows how
     # to read: every consumer asks `det_start_ms IS NULL` and that question
-    # must answer for the pair.
+    # must answer for the pair. Before 009, the same insert raised IntegrityError
+    # from the old NOT NULL constraint, so the bare raises() passed for the wrong
+    # reason; match= verifies the CHECK is what now fires.
     conn.execute(
         "INSERT INTO sessions (id,title,played_on,status,created_at)"
         " VALUES ('s3','t','2026-08-19','ready','now')"
@@ -723,7 +725,7 @@ def test_migration_009_rejects_a_half_present_det_span(conn):
         "width,height,fps,rotation_deg,original_name,status)"
         " VALUES ('src3','s3',1,'now',0,1000,1920,1080,30.0,0,'c.mov','ready')"
     )
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
         conn.execute(
             "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
             "det_start_ms,det_end_ms,confidence) VALUES"
