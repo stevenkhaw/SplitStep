@@ -1,5 +1,5 @@
 [project]
-name = "bootleg"
+name = "splitstep"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
@@ -16,11 +16,21 @@ dependencies = [
 dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
 
 [project.scripts]
-bootleg = "bootleg.cli:main"
+splitstep = "splitstep.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+# Name the package instead of letting setuptools guess. Flat-layout
+# auto-discovery treats every top-level directory as a package candidate, so it
+# sees `web/` and the stray root `node_modules/` alongside `splitstep/` and
+# refuses to build rather than pick one. This is not a consequence of the
+# rename -- the candidate set is the same whatever the package is called. It
+# only surfaced now because the editable install predated both directories and
+# nothing had reinstalled since.
+[tool.setuptools.packages.find]
+include = ["splitstep*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

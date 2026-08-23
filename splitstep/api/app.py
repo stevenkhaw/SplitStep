@@ -5,8 +5,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from bootleg.config import Library
-from bootleg.db.schema import connect, migrate
+from splitstep.config import Library
+from splitstep.db.schema import connect, migrate
 
 from .routes import router
 from .spa import mount_spa
@@ -76,7 +76,7 @@ def create_app(library: Library, spa_dist: Path | None = None) -> FastAPI:
         yield
         conns.close_all()
 
-    app = FastAPI(title="BootlegVision", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="SplitStep", version="0.1.0", lifespan=lifespan)
     app.state.library = library
     app.state.conns = conns
     app.include_router(router)

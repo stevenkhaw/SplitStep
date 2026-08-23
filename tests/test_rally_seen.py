@@ -14,7 +14,7 @@ judgement writers (set_star/set_point/set_rejected) stamp seen_at alongside
 reviewed_at through the same COALESCE, so a rally that was starred but never
 skipped still reads as seen.
 """
-from bootleg.db.rallies import (
+from splitstep.db.rallies import (
     list_rallies,
     replace_rallies,
     set_point,
@@ -22,8 +22,8 @@ from bootleg.db.rallies import (
     set_seen,
     set_star,
 )
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 def _rallies(conn, session_id):

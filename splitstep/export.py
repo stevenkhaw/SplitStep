@@ -2,10 +2,10 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db.jobs import has_pending_clip
-from bootleg.db.sessions import get_source
-from bootleg.media.clips import clip_relpath, parse_clip_name
+from splitstep.config import Library
+from splitstep.db.jobs import has_pending_clip
+from splitstep.db.sessions import get_source
+from splitstep.media.clips import clip_relpath, parse_clip_name
 
 SETS = ("points", "starred")
 

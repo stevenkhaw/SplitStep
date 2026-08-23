@@ -2,7 +2,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
-from bootleg.detect.geometry import Quad
+from splitstep.detect.geometry import Quad
 
 
 def _now() -> str:

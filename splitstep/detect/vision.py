@@ -6,10 +6,10 @@ from pathlib import Path
 
 import numpy as np
 
-from bootleg.accel import detect_accel
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.geometry import Quad
-from bootleg.media.probe import probe
+from splitstep.accel import detect_accel
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.geometry import Quad
+from splitstep.media.probe import probe
 
 
 @dataclass(frozen=True)

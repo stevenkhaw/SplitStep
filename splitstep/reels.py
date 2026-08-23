@@ -2,11 +2,11 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db.jobs import has_pending_clip
-from bootleg.db.reels import list_items
-from bootleg.export import ExportPlan
-from bootleg.media.clips import clip_relpath
+from splitstep.config import Library
+from splitstep.db.jobs import has_pending_clip
+from splitstep.db.reels import list_items
+from splitstep.export import ExportPlan
+from splitstep.media.clips import clip_relpath
 
 
 @dataclass(frozen=True)

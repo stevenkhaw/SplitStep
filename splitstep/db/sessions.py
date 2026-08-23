@@ -2,7 +2,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
-from bootleg.media.transcode import rotation_filter
+from splitstep.media.transcode import rotation_filter
 
 
 def _now() -> str:
@@ -175,7 +175,7 @@ def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> 
 
     This is one guarded UPDATE, not a read-then-write. Every HTTP request
     runs on its own thread with its own connection (see
-    ThreadLocalConnections in bootleg/api/app.py), so two review actions on
+    ThreadLocalConnections in splitstep/api/app.py), so two review actions on
     the last two rallies in a session -- the normal way every session ends
     -- can land on separate connections at the same instant. A separate
     SELECT-then-UPDATE could let both read a stale "still unseen" count and
@@ -242,7 +242,7 @@ def set_source_dimensions(conn: sqlite3.Connection, source_id: str, width: int, 
     handle_build_proxy's own status write ever touch them again, so a
     source seeded at one rotation and later corrected by the wizard keeps
     reporting its stale ingest-time pair even though the proxy build
-    changed its actual shape -- exactly the mismatch `bootleg doctor`
+    changed its actual shape -- exactly the mismatch `splitstep doctor`
     prints as its headline diagnostic. Call this with dimensions probed
     from the proxy itself, not recomputed from rotation_deg: the proxy is
     the artifact everything downstream (the player, doctor, this row)

@@ -4,17 +4,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from bootleg import cli
-from bootleg.cli import _format_ts, main
-from bootleg.db.rallies import list_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep import cli
+from splitstep.cli import _format_ts, main
+from splitstep.db.rallies import list_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     set_session_status,
 )
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.detect.segment import SegmentParams
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.detect.segment import SegmentParams
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def test_doctor_on_missing_library_returns_2_and_does_not_raise(tmp_path, capsys
 
 
 def test_doctor_on_an_uninitialized_directory_returns_2(tmp_path, capsys):
-    """A directory that exists but was never `bootleg init`-ed (the leftover
+    """A directory that exists but was never `splitstep init`-ed (the leftover
     mountpoint case) must not be silently treated as a fresh empty library.
     """
     tmp_path.mkdir(exist_ok=True)  # tmp_path already exists; this is a no-op
@@ -351,7 +351,7 @@ def test_setup_existing_source_no_assigned_preset(library, registered_source, ca
 
 def test_setup_now_with_failing_job(library, registered_source, a_preset, capsys, monkeypatch):
     """--now should return non-zero if a queued job fails."""
-    from bootleg.jobs import handlers
+    from splitstep.jobs import handlers
 
     # Make make_proxy raise to simulate a job failure
     def failing_make_proxy(*args, **kwargs):
@@ -416,7 +416,7 @@ def test_segment_leaves_the_session_review_status_consistent(
     session that read 'reviewed' before the call has nothing seen in it
     afterwards. The API route already refreshes the status for exactly this
     reason (see the comment in api/routes.py::api_resegment); the CLI has
-    never done so, which let `bootleg segment` strand a session showing
+    never done so, which let `splitstep segment` strand a session showing
     'reviewed' with a full set of never-seen rallies -- invisible in the
     Library, so the user is never prompted to review them.
 
@@ -440,9 +440,9 @@ def test_segment_leaves_the_session_review_status_consistent(
 def test_labels_export_writes_the_corpus_as_json(library, conn, capsys, tmp_path):
     # json, main, add_source, find_or_create_session_for_date and
     # write_features are already imported at the top of this file.
-    from bootleg.db.labels import add_label
-    from bootleg.db.rallies import replace_rallies
-    from bootleg.detect.segment import Interval
+    from splitstep.db.labels import add_label
+    from splitstep.db.rallies import replace_rallies
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -473,7 +473,7 @@ def test_labels_export_omits_a_retracted_span(library, conn, capsys, tmp_path):
     # span whose verdict the reviewer took back carries no judgement, and
     # writing it out as a null-verdict entry would put a span nobody judges
     # into a committed fixture where the scorer would count it as covered.
-    from bootleg.db.labels import add_label, retract_label
+    from splitstep.db.labels import add_label, retract_label
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -512,7 +512,7 @@ def test_labels_score_reports_the_recall_caveat_and_the_unknown_count(
     round, and a precision figure with the unknown count hidden conceals a
     sweep that matched three candidates and missed forty.
     """
-    from bootleg.db.labels import add_label
+    from splitstep.db.labels import add_label
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, idx = add_source(
@@ -549,8 +549,8 @@ def test_labels_score_without_features_fails(library, conn, capsys):
 
 
 def test_clips_export_queues_a_job_per_point(library, conn, capsys):
-    from bootleg.db.rallies import replace_rallies, set_point
-    from bootleg.detect.segment import Interval
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -572,8 +572,8 @@ def test_clips_export_queues_a_job_per_point(library, conn, capsys):
 
 
 def test_clips_export_a_second_time_queues_nothing_and_says_so(library, conn, capsys):
-    from bootleg.db.rallies import replace_rallies, set_point
-    from bootleg.detect.segment import Interval
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -627,8 +627,8 @@ def test_clips_export_when_everything_is_unavailable_says_so(library, conn, caps
     # The one rally in the set points at a source that no longer exists --
     # different from "in flight" and from a genuinely empty set, and the
     # message must say which of the three it actually is.
-    from bootleg.db.rallies import replace_rallies, set_point
-    from bootleg.detect.segment import Interval
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, _ = add_source(
@@ -667,9 +667,9 @@ def stranded(library, conn):
     Three clips cut, then a sweep moves the middle span: the file at the old
     bounds is what nothing enumerates and nothing removes.
     """
-    from bootleg.db.rallies import replace_rallies
-    from bootleg.detect.segment import Interval
-    from bootleg.media.clips import clip_relpath
+    from splitstep.db.rallies import replace_rallies
+    from splitstep.detect.segment import Interval
+    from splitstep.media.clips import clip_relpath
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, idx = add_source(

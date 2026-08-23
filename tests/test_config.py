@@ -1,12 +1,12 @@
 import pytest
 
-from bootleg.config import (
+from splitstep.config import (
     Library,
     LibraryAlreadyInitialized,
     LibraryNotMounted,
     NotEnoughSpace,
 )
-from bootleg.db.schema import connect, migrate
+from splitstep.db.schema import connect, migrate
 
 
 def _init_db(root) -> None:
@@ -44,7 +44,7 @@ def test_open_does_not_create_the_root(tmp_path):
 def test_open_raises_when_library_db_is_missing(tmp_path):
     """The leftover-mountpoint scenario: a directory exists, is writable,
     and even has the full _inbox/sessions/reels tree (e.g. a stale, empty
-    `/Volumes/BootlegVision` mountpoint after an unclean eject looks exactly
+    `/Volumes/SplitStep` mountpoint after an unclean eject looks exactly
     like this from the filesystem's point of view) -- but was never actually
     initialized. Before this guard, Library.open() only checked is_dir() and
     W_OK, and the first sqlite3.connect() anywhere downstream silently
@@ -85,7 +85,7 @@ def test_require_free_raises_before_a_write_that_cannot_fit(tmp_path):
     assert "space" in str(exc.value).lower()
 
 
-# -- Library.create() / `bootleg init` --------------------------------------
+# -- Library.create() / `splitstep init` --------------------------------------
 
 def test_create_builds_the_tree_and_an_openable_database(tmp_path):
     lib = Library.create(tmp_path)

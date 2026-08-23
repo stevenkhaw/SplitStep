@@ -100,7 +100,7 @@ def _display_rotation(video: dict) -> int:
 
     ffprobe reports the Display Matrix angle counter-clockwise, so the sign
     flips here. Anything that is not a quarter turn (a matrix carrying a
-    flip, or a stream with no matrix at all) reads as 0: BootlegVision only
+    flip, or a stream with no matrix at all) reads as 0: SplitStep only
     ever encodes right angles, and a bogus value must not reach
     `rotation_filter`, which raises on one.
     """

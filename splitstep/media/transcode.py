@@ -6,8 +6,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from bootleg.accel import Accel, detect_accel
-from bootleg.media.probe import MediaInfo, probe
+from splitstep.accel import Accel, detect_accel
+from splitstep.media.probe import MediaInfo, probe
 
 
 class TranscodeError(Exception):

@@ -1,7 +1,7 @@
 import pytest
 
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import (
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.reels import (
     add_items,
     create_reel,
     delete_reel,
@@ -18,8 +18,8 @@ from bootleg.db.reels import (
     slugify,
     unique_slug,
 )
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from bootleg.db.schema import connect, migrate
+from splitstep.db.schema import connect, migrate
 
 
 class LibraryNotMounted(Exception):
@@ -39,7 +39,7 @@ class Library:
             # silent second library on internal storage -- sqlite3.connect()
             # would otherwise create it right here.
             raise LibraryNotMounted(
-                f"No library.db at {root} -- run `bootleg --library {root} init` "
+                f"No library.db at {root} -- run `splitstep --library {root} init` "
                 f"first, or check that the right drive is mounted."
             )
         return cls(root=root)
@@ -47,7 +47,7 @@ class Library:
     @classmethod
     def create(cls, root: Path) -> "Library":
         """Initialize a new library tree and database at an already-mounted
-        root. This is `bootleg init`; nothing else is allowed to do this --
+        root. This is `splitstep init`; nothing else is allowed to do this --
         refuses if a library already exists here.
         """
         root = Path(root)

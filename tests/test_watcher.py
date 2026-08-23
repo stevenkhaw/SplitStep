@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from bootleg.db.schema import connect, migrate
-from bootleg.watcher import is_stable, scan_inbox
+from splitstep.db.schema import connect, migrate
+from splitstep.watcher import is_stable, scan_inbox
 
 
 @pytest.fixture

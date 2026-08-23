@@ -1,12 +1,12 @@
 import pytest
 
-from bootleg.db.jobs import enqueue
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import add_items, create_reel, get_reel, mark_rendered
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.media.clips import clip_relpath
-from bootleg.reels import (
+from splitstep.db.jobs import enqueue
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.reels import add_items, create_reel, get_reel, mark_rendered
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.media.clips import clip_relpath
+from splitstep.reels import (
     clip_paths,
     delete_rendered_file,
     missing_clip_count,

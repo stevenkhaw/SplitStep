@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from bootleg.config import Library
-from bootleg.db.presets import create_preset
-from bootleg.db.schema import connect, migrate
-from bootleg.detect.features import FeatureFrame, read_features
-from bootleg.detect.geometry import Quad
-from bootleg.jobs.handlers import handle_ingest
+from splitstep.config import Library
+from splitstep.db.presets import create_preset
+from splitstep.db.schema import connect, migrate
+from splitstep.detect.features import FeatureFrame, read_features
+from splitstep.detect.geometry import Quad
+from splitstep.jobs.handlers import handle_ingest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

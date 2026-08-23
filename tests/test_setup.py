@@ -1,15 +1,15 @@
 import pytest
 
-from bootleg.db.presets import create_preset
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.db.presets import create_preset
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     get_source,
     set_source_status,
 )
-from bootleg.detect.geometry import Quad
-from bootleg.setup import queue_setup
+from splitstep.detect.geometry import Quad
+from splitstep.setup import queue_setup
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def _source(conn, status="needs_setup"):
 
 
 def _preset(conn):
-    # create_preset takes a Quad, not raw points -- see bootleg/db/presets.py.
+    # create_preset takes a Quad, not raw points -- see splitstep/db/presets.py.
     return create_preset(conn, "court", Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))))
 
 

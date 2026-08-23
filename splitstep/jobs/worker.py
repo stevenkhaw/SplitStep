@@ -6,10 +6,10 @@ import traceback
 from collections.abc import Callable
 from typing import Self
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.schema import connect, migrate
-from bootleg.media.transcode import ProgressFn
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.schema import connect, migrate
+from splitstep.media.transcode import ProgressFn
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class _Heartbeat:
 
     Without this, heartbeat_at freezes at claim time and reclaim_stale()
     cannot tell an abandoned job from one three minutes into a fifteen-minute
-    detect -- a second `bootleg serve` instance against the same library
+    detect -- a second `splitstep serve` instance against the same library
     would requeue and duplicate-run still-live work. The thread is started
     and stopped around exactly one handler invocation, via context manager,
     so it cannot outlive the call whether the handler returns or raises.

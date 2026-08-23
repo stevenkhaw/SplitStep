@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.labels import add_label
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.api.app import create_app
+from splitstep.db.labels import add_label
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -147,7 +147,7 @@ def test_a_boundary_drags_label_survives_a_failed_bounds_write(client, conn, see
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated failure between the two commits")
 
-    monkeypatch.setattr("bootleg.api.routes.set_bounds", _boom)
+    monkeypatch.setattr("splitstep.api.routes.set_bounds", _boom)
 
     with pytest.raises(RuntimeError):
         client.post(f"/api/rallies/{rally['id']}/bounds",

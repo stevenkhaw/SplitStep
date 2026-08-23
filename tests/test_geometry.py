@@ -1,6 +1,6 @@
 import pytest
 
-from bootleg.detect.geometry import Quad
+from splitstep.detect.geometry import Quad
 
 
 @pytest.fixture

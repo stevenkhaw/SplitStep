@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from bootleg.media.transcode import rotation_filter, run_ffmpeg
+from splitstep.media.transcode import rotation_filter, run_ffmpeg
 
 FFMPEG_TIMEOUT_S = 20.0
 

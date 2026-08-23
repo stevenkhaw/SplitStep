@@ -1,4 +1,4 @@
-from bootleg.detect.features import FeatureFrame, Player, read_features, write_features
+from splitstep.detect.features import FeatureFrame, Player, read_features, write_features
 
 
 def test_frame_json_round_trip():

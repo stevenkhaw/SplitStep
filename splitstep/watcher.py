@@ -5,9 +5,9 @@ import threading
 import time
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.schema import connect, migrate
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.schema import connect, migrate
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class InboxWatcher:
             self._stop.wait(SCAN_INTERVAL_S)
 
     def start(self) -> None:
-        # No mkdir here: `bootleg init` owns creating the tree. Auto-creating
+        # No mkdir here: `splitstep init` owns creating the tree. Auto-creating
         # part of it would recreate the exact hazard Finding 3 closed --
         # this thread starting happily against a library that was never
         # actually initialized.

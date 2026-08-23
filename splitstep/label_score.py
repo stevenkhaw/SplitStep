@@ -3,8 +3,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 
-from bootleg.db.rallies import STAR_OVERLAP_MIN, overlap_fraction
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import STAR_OVERLAP_MIN, overlap_fraction
+from splitstep.detect.segment import Interval
 
 # The same floor replace_rallies uses to carry a star across a re-segment.
 # Aliased rather than re-declared so the two can never drift apart.

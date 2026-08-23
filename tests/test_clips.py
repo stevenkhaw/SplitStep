@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from bootleg.media.clips import clip_relpath, parse_clip_name
-from bootleg.media.probe import probe
-from bootleg.media.transcode import (
+from splitstep.media.clips import clip_relpath, parse_clip_name
+from splitstep.media.probe import probe
+from splitstep.media.transcode import (
     CLIP_COLOR_PRIMARIES,
     CLIP_COLOR_RANGE,
     CLIP_COLOR_SPACE,
@@ -109,7 +109,7 @@ def test_make_clip_passes_the_colour_flags_to_ffmpeg(sample_video, tmp_path, mon
         captured_args.extend(args)
         Path(args[-1]).write_bytes(b"encoded output")
 
-    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr("splitstep.media.transcode.run_ffmpeg", fake_run_ffmpeg)
     make_clip(src, dst, start_ms=500, end_ms=1500)
 
     # Checked pairwise -- a flag present but paired with the wrong value
@@ -322,7 +322,7 @@ def test_make_clip_does_not_expose_dst_until_ffmpeg_succeeds(sample_video, tmp_p
         dst_existed_mid_encode.append(dst.exists())
         out.write_bytes(b"encoded output")
 
-    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr("splitstep.media.transcode.run_ffmpeg", fake_run_ffmpeg)
     make_clip(src, dst, start_ms=1000, end_ms=3000)
 
     assert dst_existed_mid_encode == [False]
@@ -347,7 +347,7 @@ def test_make_clip_leaves_no_temp_file_and_reraises_on_ffmpeg_failure(
     def boom(args, timeout=None, on_progress=None, total_ms=None):
         raise TranscodeError("ffmpeg exploded")
 
-    monkeypatch.setattr("bootleg.media.transcode.run_ffmpeg", boom)
+    monkeypatch.setattr("splitstep.media.transcode.run_ffmpeg", boom)
 
     with pytest.raises(TranscodeError, match="exploded"):
         make_clip(src, dst, start_ms=1000, end_ms=3000)

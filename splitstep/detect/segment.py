@@ -2,8 +2,8 @@ import logging
 import statistics
 from dataclasses import dataclass, replace
 
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.viewpoint import Profile, ViewGeometry, analyze_view
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.viewpoint import Profile, ViewGeometry, analyze_view
 
 log = logging.getLogger(__name__)
 

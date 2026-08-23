@@ -6,8 +6,8 @@ hand-written data, and this file fits no constant. It checks that overlap
 matching, medians and the unknown count are computed the way the spec says.
 """
 
-from bootleg.detect.segment import Interval
-from bootleg.label_score import LabelRow, score_against_labels
+from splitstep.detect.segment import Interval
+from splitstep.label_score import LabelRow, score_against_labels
 
 
 def label(start, end, verdict="clean", true_start=None, true_end=None):

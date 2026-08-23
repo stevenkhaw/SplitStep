@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from bootleg.db.jobs import (
+from splitstep.db.jobs import (
     claim,
     enqueue,
     enqueue_reel_once,
@@ -16,8 +16,8 @@ from bootleg.db.jobs import (
     reclaim_stale,
     set_progress,
 )
-from bootleg.db.schema import connect, migrate
-from bootleg.jobs.worker import Worker
+from splitstep.db.schema import connect, migrate
+from splitstep.jobs.worker import Worker
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ def test_worker_fails_unknown_job_types(library, conn):
 def test_worker_heartbeats_a_running_job_on_a_timer(library, conn):
     """Before this fix, heartbeat_at froze at claim time -- reclaim_stale()
     could not tell an abandoned job from one partway through a long-running
-    handler, so a second `bootleg serve` instance against the same library
+    handler, so a second `splitstep serve` instance against the same library
     would requeue and double-run still-live work. This drives a handler that
     outlives several heartbeat ticks and asserts heartbeat_at actually
     advances while it runs, and that the heartbeat thread is gone once the
@@ -209,7 +209,7 @@ def _claim_after_barrier(db_path, idx, barrier, results):
 
 
 def test_claim_is_atomic_across_connections(library):
-    """A second machine running `bootleg worker` against the same library is an
+    """A second machine running `splitstep worker` against the same library is an
     explicitly designed-for deployment (see task-10-brief.md's discussion of
     reclaim_stale and stale heartbeats) -- this is the code that breaks first.
     Before claim() took the write lock with BEGIN IMMEDIATE, two connections

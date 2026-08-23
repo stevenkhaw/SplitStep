@@ -2,14 +2,14 @@ import subprocess
 
 import pytest
 
-from bootleg.config import Library, NotEnoughSpace
-from bootleg.db.jobs import enqueue, has_pending_clip
-from bootleg.db.rallies import replace_rallies
-from bootleg.detect.segment import Interval
-from bootleg.jobs.handlers import handle_clip
-from bootleg.media.clips import clip_relpath
-from bootleg.media.probe import probe
-from bootleg.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
+from splitstep.config import Library, NotEnoughSpace
+from splitstep.db.jobs import enqueue, has_pending_clip
+from splitstep.db.rallies import replace_rallies
+from splitstep.detect.segment import Interval
+from splitstep.jobs.handlers import handle_clip
+from splitstep.media.clips import clip_relpath
+from splitstep.media.probe import probe
+from splitstep.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
 
 
 @pytest.fixture

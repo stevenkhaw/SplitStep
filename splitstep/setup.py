@@ -7,10 +7,10 @@ whether it arrives over HTTP or from a terminal.
 
 import sqlite3
 
-from bootleg.db import jobs as jobq
-from bootleg.db.presets import get_preset
-from bootleg.db.sessions import get_source, set_source_setup
-from bootleg.media.transcode import rotation_filter
+from splitstep.db import jobs as jobq
+from splitstep.db.presets import get_preset
+from splitstep.db.sessions import get_source, set_source_setup
+from splitstep.media.transcode import rotation_filter
 
 # A source whose proxy is being written, or whose features are being
 # extracted, cannot have either input changed underneath the running job.

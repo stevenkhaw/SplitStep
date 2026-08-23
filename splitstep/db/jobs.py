@@ -190,7 +190,7 @@ def get_failed_jobs_for_source(
 
     `since` (an ISO timestamp, as produced by `_now()`) restricts the
     result to jobs created at or after it. Without it, a caller like
-    `bootleg setup --now` would report failure -- and exit non-zero --
+    `splitstep setup --now` would report failure -- and exit non-zero --
     forever after a single failed run, even once a later run of the very
     same source's jobs succeeds outright: the source's job history is
     cumulative, but "did THIS invocation's jobs succeed" is a question

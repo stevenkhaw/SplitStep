@@ -1,8 +1,8 @@
 import pytest
 
-from bootleg.db.rallies import list_rallies, replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.rallies import list_rallies, replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture
@@ -109,7 +109,7 @@ def test_a_note_alone_keeps_a_rally_in_the_carry_over_read_back(conn, seeded):
 
 
 def test_set_note_writes_and_overwrites(conn, seeded):
-    from bootleg.db.rallies import set_note
+    from splitstep.db.rallies import set_note
 
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])
@@ -127,7 +127,7 @@ def test_set_note_does_not_stamp_reviewed_at(conn, seeded):
     # a note is not one. "check this later" is a perfectly ordinary note, and
     # flipping the session to reviewed because someone typed it would report a
     # judgement nobody made.
-    from bootleg.db.rallies import set_note
+    from splitstep.db.rallies import set_note
 
     replace_rallies(conn, seeded["session_id"], seeded["source_id"],
                     [Interval(1000, 5000, 0.8)])

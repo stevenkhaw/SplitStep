@@ -1,7 +1,7 @@
 import pytest
 
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.viewpoint import analyze_view
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.viewpoint import analyze_view
 
 
 def test_ground_fixture_has_the_expected_shape(ground_features):

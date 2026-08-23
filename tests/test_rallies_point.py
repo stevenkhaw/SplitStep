@@ -1,14 +1,14 @@
 import pytest
 
-from bootleg.db.rallies import (
+from splitstep.db.rallies import (
     list_rallies,
     replace_rallies,
     set_point,
     set_rejected,
     set_star,
 )
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
 
 
 @pytest.fixture

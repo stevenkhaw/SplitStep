@@ -4,8 +4,8 @@ import statistics
 
 import pytest
 
-from bootleg.detect.features import FeatureFrame, Player
-from bootleg.detect.segment import (
+from splitstep.detect.features import FeatureFrame, Player
+from splitstep.detect.segment import (
     SegmentParams,
     params_for_frames,
     score_series,
@@ -406,7 +406,7 @@ def test_params_for_frames_warns_on_low_confidence_classification(caplog):
     That has to reach a human somehow, since the caller (detect handler, CLI,
     API) has no other signal that the source might need a look, e.g. a wrong
     court quad silently starving it of near-player boxes."""
-    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+    with caplog.at_level(logging.WARNING, logger="splitstep.detect.segment"):
         params_for_frames(frames("O" * 10))
     assert any("low-confidence" in r.message for r in caplog.records)
 
@@ -420,14 +420,14 @@ def test_params_for_frames_warns_on_pair_scarce_low_confidence(caplog):
     50-frame floor) but pairs_measured at 15 (under the 20-pair floor), so a
     warning that only ever named frames_measured would misdescribe this case
     as near-box scarcity when the real cause is pair scarcity."""
-    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+    with caplog.at_level(logging.WARNING, logger="splitstep.detect.segment"):
         params_for_frames(frames("O" * 100 + "A" * 15))
     assert any("low-confidence" in r.message for r in caplog.records)
     assert any("15 of those were paired" in r.message for r in caplog.records)
 
 
 def test_params_for_frames_does_not_warn_on_a_confident_classification(caplog):
-    with caplog.at_level(logging.WARNING, logger="bootleg.detect.segment"):
+    with caplog.at_level(logging.WARNING, logger="splitstep.detect.segment"):
         params_for_frames(frames("A" * 200))
     assert caplog.records == []
 

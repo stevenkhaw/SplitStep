@@ -1,7 +1,7 @@
 import pytest
 
-from bootleg.db.presets import create_preset, get_preset, list_presets
-from bootleg.db.rallies import (
+from splitstep.db.presets import create_preset, get_preset, list_presets
+from splitstep.db.rallies import (
     list_rallies,
     replace_rallies,
     set_bounds,
@@ -9,8 +9,8 @@ from bootleg.db.rallies import (
     set_rejected,
     set_star,
 )
-from bootleg.db.schema import MIGRATIONS, connect, migrate
-from bootleg.db.sessions import (
+from splitstep.db.schema import MIGRATIONS, connect, migrate
+from splitstep.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     get_source,
@@ -18,8 +18,8 @@ from bootleg.db.sessions import (
     set_source_preset,
     set_source_rotation,
 )
-from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import Interval
+from splitstep.detect.geometry import Quad
+from splitstep.detect.segment import Interval
 
 SAMPLE_QUAD = Quad(((0.1, 0.9), (0.9, 0.9), (0.7, 0.3), (0.3, 0.3)))
 
@@ -81,7 +81,7 @@ def test_migrate_refuses_before_applying_anything_if_two_files_share_a_number(
     real database cannot get partway migrated with the collision still live
     -- 001 (no collision at all) must NOT have applied either.
     """
-    import bootleg.db.schema as schema_mod
+    import splitstep.db.schema as schema_mod
 
     fake_migrations = tmp_path / "migrations"
     fake_migrations.mkdir()
@@ -424,7 +424,7 @@ def test_replace_rallies_rolls_back_cleanly_on_failure(conn, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("bootleg.db.rallies._renumber", boom)
+    monkeypatch.setattr("splitstep.db.rallies._renumber", boom)
 
     with pytest.raises(RuntimeError):
         replace_rallies(conn, s, src, [Interval(9000, 12000, 0.9)])
@@ -599,7 +599,7 @@ def test_set_source_rotation_rejects_a_non_right_angle(tmp_path):
 
 
 def test_set_source_setup_writes_both_columns(tmp_path):
-    from bootleg.db.sessions import set_source_setup
+    from splitstep.db.sessions import set_source_setup
     conn = connect(tmp_path / "l.db")
     migrate(conn)
     session_id = find_or_create_session_for_date(conn, "2026-08-20")
@@ -617,7 +617,7 @@ def test_set_source_setup_writes_both_columns(tmp_path):
 
 
 def test_set_source_setup_rejects_illegal_rotation_without_writing(tmp_path):
-    from bootleg.db.sessions import set_source_setup
+    from splitstep.db.sessions import set_source_setup
     conn = connect(tmp_path / "l.db")
     migrate(conn)
     session_id = find_or_create_session_for_date(conn, "2026-08-20")

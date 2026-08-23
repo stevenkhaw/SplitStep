@@ -5,13 +5,13 @@ import uuid
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from bootleg.media.probe import color_tag, ffprobe_json, probe
+from splitstep.media.probe import color_tag, ffprobe_json, probe
 
-# Tests monkeypatch bootleg.media.concat.run_ffmpeg -- the name concat_clips
+# Tests monkeypatch splitstep.media.concat.run_ffmpeg -- the name concat_clips
 # actually calls -- so it has to live in this module's namespace, not just
 # transcode's. TranscodeError rides along on the same import for tests that
 # want concat_mod.TranscodeError rather than reaching back into transcode.
-from bootleg.media.transcode import (
+from splitstep.media.transcode import (
     CLIP_CRF,
     CLIP_FPS,
     ProgressFn,
@@ -38,7 +38,7 @@ _TOLERANCE_BASE_MS = 100
 _TOLERANCE_PER_INPUT_MS = 40
 # Fallback cap when tolerance_ms is called with no reel-specific durations
 # (existing callers, existing tests). NOT anchored to
-# bootleg/detect/segment.py's min_duration_s: that floor is the segmenter's
+# splitstep/detect/segment.py's min_duration_s: that floor is the segmenter's
 # own, and nothing else in the app enforces it on a span a reel can hold --
 # web's MIN_RALLY_MS is 100ms, and the bounds route validates only
 # end_ms > start_ms. A hand-trimmed clip well under 1.5s is a real reel

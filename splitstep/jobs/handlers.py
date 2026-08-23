@@ -5,12 +5,12 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bootleg.config import Library
-from bootleg.db import jobs as jobq
-from bootleg.db.rallies import replace_rallies, set_clip_path
-from bootleg.db.reels import get_reel, mark_rendered
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.config import Library
+from splitstep.db import jobs as jobq
+from splitstep.db.rallies import replace_rallies, set_clip_path
+from splitstep.db.reels import get_reel, mark_rendered
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source,
     find_ingesting_sources_by_original_name,
     find_or_create_session_for_date,
@@ -21,18 +21,18 @@ from bootleg.db.sessions import (
     set_source_dimensions,
     set_source_status,
 )
-from bootleg.detect.audio import detect_hits, extract_pcm, hits_to_grid
-from bootleg.detect.features import read_features, write_features
-from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import params_for_frames, segment
-from bootleg.detect.vision import build_features, iter_person_boxes
-from bootleg.jobs.worker import Handler, no_progress
-from bootleg.media.clips import clip_relpath
-from bootleg.media.concat import concat_clips
-from bootleg.media.files import find_original
-from bootleg.media.probe import display_size, probe
-from bootleg.media.transcode import ProgressFn, make_clip, make_proxy, make_thumbs
-from bootleg.reels import clip_paths, missing_clip_count, resolve_items
+from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
+from splitstep.detect.features import read_features, write_features
+from splitstep.detect.geometry import Quad
+from splitstep.detect.segment import params_for_frames, segment
+from splitstep.detect.vision import build_features, iter_person_boxes
+from splitstep.jobs.worker import Handler, no_progress
+from splitstep.media.clips import clip_relpath
+from splitstep.media.concat import concat_clips
+from splitstep.media.files import find_original
+from splitstep.media.probe import display_size, probe
+from splitstep.media.transcode import ProgressFn, make_clip, make_proxy, make_thumbs
+from splitstep.reels import clip_paths, missing_clip_count, resolve_items
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def _session_should_fail(
     spec and refresh_session_review_status; sources never hold it, so
     checking for it here was always a no-op.) Sessions hold multiple
     sources (see test_second_file_same_day_joins_the_same_session), and
-    refresh_session_review_status (bootleg/db/sessions.py) only ever acts
+    refresh_session_review_status (splitstep/db/sessions.py) only ever acts
     on sessions already in ('ready', 'reviewed') -- once a session is
     written 'failed' it can never transition again. Failing it while a
     sibling source already finished review would strand that sibling's
@@ -227,7 +227,7 @@ def handle_build_proxy(library: Library, payload: dict,
         make_thumbs(proxy_path, src_dir / "thumbs.jpg")
         # Probe the proxy we just wrote rather than recomputing dimensions
         # from rotation_deg: it's the artifact everything downstream (the
-        # player, `bootleg doctor`) actually reads, and add_source's
+        # player, `splitstep doctor`) actually reads, and add_source's
         # ingest-time seed goes stale the moment the wizard corrects
         # rotation after that seed was written (see set_source_dimensions).
         proxy_info = probe(proxy_path)
@@ -248,7 +248,7 @@ def handle_build_proxy(library: Library, payload: dict,
     # silently discard any rally boundaries a human hand-edited between the
     # two detect runs (replace_rallies only preserves starred/rejected).
     # TODO: this is a check-then-act, unlike claim()'s BEGIN IMMEDIATE --
-    # two concurrent `bootleg serve` processes racing this same window
+    # two concurrent `splitstep serve` processes racing this same window
     # could both pass has_pending_job and both enqueue. No live path hits
     # that today (reclaim_stale only re-enters at worker startup against a
     # dead process), but the project designs for a second concurrent serve

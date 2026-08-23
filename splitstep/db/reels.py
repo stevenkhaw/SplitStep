@@ -229,7 +229,7 @@ def delete_reel(conn: sqlite3.Connection, reel_id: str) -> None:
 
     Never touches the rendered file on disk -- that needs a Library to
     resolve a path, not just a connection, so it lives as
-    `bootleg.reels.delete_rendered_file` instead. The route calls both.
+    `splitstep.reels.delete_rendered_file` instead. The route calls both.
     """
     conn.execute("DELETE FROM reels WHERE id = ?", (reel_id,))
     conn.commit()

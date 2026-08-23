@@ -2,7 +2,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Literal
 
-from bootleg.detect.features import FeatureFrame
+from splitstep.detect.features import FeatureFrame
 
 # Median |near.foot - far.foot| below which the two largest boxes are sharing
 # a horizon line rather than standing at different depths. A camera propped a

@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.api.routes import _evict_old_frames
-from bootleg.db.presets import create_preset
-from bootleg.db.rallies import list_rallies, replace_rallies, set_point, set_rejected, set_star
-from bootleg.db.schema import connect
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import Interval
-from bootleg.media.transcode import TranscodeError
+from splitstep.api.app import create_app
+from splitstep.api.routes import _evict_old_frames
+from splitstep.db.presets import create_preset
+from splitstep.db.rallies import list_rallies, replace_rallies, set_point, set_rejected, set_star
+from splitstep.db.schema import connect
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.geometry import Quad
+from splitstep.detect.segment import Interval
+from splitstep.media.transcode import TranscodeError
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ def test_media_missing_file_is_404(client, seeded):
 
 
 def test_resegment_rewrites_rallies_from_cached_features(client, library, conn, seeded):
-    from bootleg.detect.features import FeatureFrame, Player, write_features
+    from splitstep.detect.features import FeatureFrame, Player, write_features
 
     frames = [
         FeatureFrame(i * 200, 2,
@@ -219,7 +219,7 @@ def test_scores_with_no_threshold_returns_the_resolved_profile_default(
     classification would still pass a pair-fixture assertion; subject's 0.25
     only comes out if params_for_frames's resolution actually ran.
     """
-    from bootleg.detect.features import write_features
+    from splitstep.detect.features import write_features
 
     src_dir = library.source_dir(seeded["session_id"], seeded["idx"])
     src_dir.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ def test_scores_with_explicit_threshold_returns_it_unchanged(client, library, se
     """The re-segment slider passes an explicit threshold to override the
     profile default -- that value must come back verbatim, same as
     params_for_frames itself (see test_params_for_frames_honours_an_explicit_threshold)."""
-    from bootleg.detect.features import FeatureFrame, Player, write_features
+    from splitstep.detect.features import FeatureFrame, Player, write_features
 
     frames = [
         FeatureFrame(i * 200, 2,
@@ -400,7 +400,7 @@ def test_preview_write_is_atomic_on_extraction_failure(
         Path(dst).write_bytes(b"not a complete jpeg")
         raise TranscodeError("ffmpeg died mid-write")
 
-    monkeypatch.setattr("bootleg.api.routes.extract_frame", _dies_after_partial_write)
+    monkeypatch.setattr("splitstep.api.routes.extract_frame", _dies_after_partial_write)
 
     r = client.get(f"/media/{registered_source.session_id}/1/preview.jpg?at_ms=500&rot=0")
     assert r.status_code == 409
@@ -439,7 +439,7 @@ def test_preview_leaked_temp_file_is_eventually_swept(client, registered_source,
         raise RuntimeError("process killed mid-extraction")
 
     real_unlink = Path.unlink
-    monkeypatch.setattr("bootleg.api.routes.extract_frame", dies_after_writing)
+    monkeypatch.setattr("splitstep.api.routes.extract_frame", dies_after_writing)
     monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: None)
 
     with pytest.raises(RuntimeError):

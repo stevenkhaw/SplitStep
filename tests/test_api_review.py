@@ -5,19 +5,19 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.rallies import list_rallies, replace_rallies, set_star
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.api.app import create_app
+from splitstep.db.rallies import list_rallies, replace_rallies, set_star
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source,
     find_or_create_session_for_date,
     get_session,
     refresh_session_review_status,
     set_session_status,
 )
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.detect.segment import Interval
-from bootleg.media.transcode import TranscodeError
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.detect.segment import Interval
+from splitstep.media.transcode import TranscodeError
 
 
 @pytest.fixture
@@ -466,7 +466,7 @@ def test_frame_endpoint_clamps_at_ms_past_the_clip_duration(client, conn, librar
     editor. Past end-of-stream ffmpeg fails with exit 234 and a misleading
     "Non full-range YUV is non-standard" message -- the same end-of-stream
     encoder bug make_thumbs already documents and clamps against
-    (bootleg/media/transcode.py). at_ms must be clamped into the clip's
+    (splitstep/media/transcode.py). at_ms must be clamped into the clip's
     duration, not passed straight through to ffmpeg.
 
     The clamp margin now comes from the sources row (duration_ms/fps)
@@ -570,7 +570,7 @@ def test_repeat_frame_request_does_not_re_extract_the_cached_file(
     d.mkdir(parents=True, exist_ok=True)
     _write_clip(d / "proxy.mp4", "red", "320x240")
 
-    import bootleg.api.routes as routes_mod
+    import splitstep.api.routes as routes_mod
     real_extract_frame = routes_mod.extract_frame
     calls = []
 
@@ -578,7 +578,7 @@ def test_repeat_frame_request_does_not_re_extract_the_cached_file(
         calls.append(at_ms)
         real_extract_frame(src, dst, at_ms=at_ms, **kwargs)
 
-    monkeypatch.setattr("bootleg.api.routes.extract_frame", _counting)
+    monkeypatch.setattr("splitstep.api.routes.extract_frame", _counting)
 
     r1 = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r1.status_code == 200
@@ -615,7 +615,7 @@ def test_evict_old_frames_tolerates_a_file_vanishing_mid_sweep(tmp_path, monkeyp
     key). That race must not bubble an OSError out of a request that
     otherwise succeeded -- eviction is best-effort housekeeping.
     """
-    from bootleg.api.routes import _evict_old_frames
+    from splitstep.api.routes import _evict_old_frames
 
     for i in range(25):
         (tmp_path / f"frame-{i}.jpg").write_bytes(b"x")
@@ -652,7 +652,7 @@ def test_frame_endpoint_409s_when_extraction_fails(client, library, seeded, monk
     def _boom(*args, **kwargs):
         raise TranscodeError("ffmpeg failed (exit 234)\nNon full-range YUV is non-standard")
 
-    monkeypatch.setattr("bootleg.api.routes.extract_frame", _boom)
+    monkeypatch.setattr("splitstep.api.routes.extract_frame", _boom)
 
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r.status_code == 409
@@ -696,7 +696,7 @@ def test_frame_endpoint_pins_a_30s_timeout(client, library, seeded, monkeypatch)
         calls.append(kwargs)
         Path(dst).write_bytes(b"fake jpeg bytes")
 
-    monkeypatch.setattr("bootleg.api.routes.extract_frame", _fake)
+    monkeypatch.setattr("splitstep.api.routes.extract_frame", _fake)
 
     r = client.get(f"/media/{seeded['session_id']}/{seeded['idx']}/frame.jpg")
     assert r.status_code == 200
@@ -706,16 +706,16 @@ def test_frame_endpoint_pins_a_30s_timeout(client, library, seeded, monkeypatch)
 def test_index_is_served_when_the_spa_is_built(library, tmp_path):
     dist = library.root / "webdist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>BootlegVision</title>")
+    (dist / "index.html").write_text("<!doctype html><title>SplitStep</title>")
     (dist / "assets" / "app.js").write_text("console.log('hi')")
 
-    from bootleg.api.app import create_app
-    from bootleg.api.spa import mount_spa
+    from splitstep.api.app import create_app
+    from splitstep.api.spa import mount_spa
 
     app = create_app(library)
     mount_spa(app, dist)
     with TestClient(app) as c:
-        assert "BootlegVision" in c.get("/").text
+        assert "SplitStep" in c.get("/").text
         assert c.get("/assets/app.js").status_code == 200
 
 
@@ -724,8 +724,8 @@ def test_api_routes_still_work_with_the_spa_mounted(library):
     dist.mkdir(parents=True)
     (dist / "index.html").write_text("<!doctype html>")
 
-    from bootleg.api.app import create_app
-    from bootleg.api.spa import mount_spa
+    from splitstep.api.app import create_app
+    from splitstep.api.spa import mount_spa
 
     app = create_app(library)
     mount_spa(app, dist)
@@ -734,9 +734,9 @@ def test_api_routes_still_work_with_the_spa_mounted(library):
 
 
 def test_missing_dist_is_tolerated(library):
-    """Running `bootleg serve` before the UI is built must not crash."""
-    from bootleg.api.app import create_app
-    from bootleg.api.spa import mount_spa
+    """Running `splitstep serve` before the UI is built must not crash."""
+    from splitstep.api.app import create_app
+    from splitstep.api.spa import mount_spa
 
     app = create_app(library)
     mount_spa(app, library.root / "does-not-exist")
@@ -765,12 +765,12 @@ def test_create_app_wires_the_spa_mount_after_the_api_routes(library, seeded):
     """
     dist = library.root / "webdist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>BootlegVision</title>")
+    (dist / "index.html").write_text("<!doctype html><title>SplitStep</title>")
     (dist / "assets" / "app.js").write_text("console.log('hi')")
 
     app = create_app(library, spa_dist=dist)
     with TestClient(app) as c:
-        assert "BootlegVision" in c.get("/").text
+        assert "SplitStep" in c.get("/").text
         assert c.get("/assets/app.js").status_code == 200
         assert c.get("/api/sessions").status_code == 200
 

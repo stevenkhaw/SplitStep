@@ -3,13 +3,13 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import list_sessions, list_sources
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.jobs.handlers import HANDLERS
-from bootleg.jobs.worker import Worker
-from bootleg.watcher import scan_inbox
+from splitstep.api.app import create_app
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import list_sessions, list_sources
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.jobs.handlers import HANDLERS
+from splitstep.jobs.worker import Worker
+from splitstep.watcher import scan_inbox
 
 
 @pytest.fixture

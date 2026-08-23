@@ -3,7 +3,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
-from bootleg.detect.segment import Interval
+from splitstep.detect.segment import Interval
 
 STAR_OVERLAP_MIN = 0.5
 

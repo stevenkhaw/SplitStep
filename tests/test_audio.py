@@ -1,6 +1,6 @@
 import numpy as np
 
-from bootleg.detect.audio import Hit, detect_hits, hits_to_grid
+from splitstep.detect.audio import Hit, detect_hits, hits_to_grid
 
 SR = 22050
 

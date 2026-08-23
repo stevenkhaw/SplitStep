@@ -2,8 +2,8 @@ import subprocess
 
 import pytest
 
-from bootleg.media.frames import extract_frame
-from bootleg.media.probe import ProbeError, probe
+from splitstep.media.frames import extract_frame
+from splitstep.media.probe import ProbeError, probe
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_probe_timeout_is_converted_to_probe_error(tmp_path, monkeypatch):
     def _timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
 
-    monkeypatch.setattr("bootleg.media.probe.subprocess.run", _timeout)
+    monkeypatch.setattr("splitstep.media.probe.subprocess.run", _timeout)
 
     with pytest.raises(ProbeError):
         probe(tmp_path / "wedged.mp4", timeout=0.01)

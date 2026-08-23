@@ -2,14 +2,14 @@ import subprocess
 
 import pytest
 
-from bootleg.config import NotEnoughSpace
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.reels import add_items, create_reel, get_reel
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.jobs.handlers import HANDLERS, handle_reel
-from bootleg.media.clips import clip_relpath
-from bootleg.media.probe import probe
+from splitstep.config import NotEnoughSpace
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.reels import add_items, create_reel, get_reel
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.jobs.handlers import HANDLERS, handle_reel
+from splitstep.media.clips import clip_relpath
+from splitstep.media.probe import probe
 
 
 def _real_clip(path, seconds=1.0):
@@ -140,7 +140,7 @@ def test_a_reencode_fallback_still_marks_the_reel_rendered(
     # The fallback is a slower success, not a failure: the reel is rendered
     # and dirty is cleared. It is logged so a silent -c copy problem leaves a
     # trace rather than only a slower render nobody notices.
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     _cut_all(library, reel_of_two)
     real_run = concat_mod.run_ffmpeg

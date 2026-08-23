@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from bootleg.db.labels import (
+from splitstep.db.labels import (
     add_label,
     format_flags,
     latest_label_for_span,
@@ -11,10 +11,10 @@ from bootleg.db.labels import (
     record_boundary_correction,
     retract_label,
 )
-from bootleg.db.rallies import replace_rallies
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.label_score import rows_to_labels, score_against_labels
+from splitstep.db.rallies import replace_rallies
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.label_score import rows_to_labels, score_against_labels
 
 
 @pytest.fixture

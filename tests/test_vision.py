@@ -1,8 +1,8 @@
 import sys
 import threading
 
-from bootleg.detect.geometry import Quad
-from bootleg.detect.vision import Box, _run_frames, _scaled_dims, build_features, split_near_far
+from splitstep.detect.geometry import Quad
+from splitstep.detect.vision import Box, _run_frames, _scaled_dims, build_features, split_near_far
 
 FULL = Quad(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
 

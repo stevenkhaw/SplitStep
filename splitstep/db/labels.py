@@ -57,7 +57,7 @@ def add_label(
     (or always true_start_ms=None) will silently blank that field out of the
     latest row every time it runs. Carrying the other half of a label forward
     is the caller's job -- see `record_boundary_correction` below and
-    `api_label` in `bootleg/api/routes.py`, which is why `latest_label_for_span`
+    `api_label` in `splitstep/api/routes.py`, which is why `latest_label_for_span`
     exists.
     """
     if verdict is not None and verdict not in VERDICTS:
@@ -131,7 +131,7 @@ def latest_label_for_span(
 
     Exists so a writer can carry the other half of a label forward onto its
     own new row -- see `record_boundary_correction` and `api_label` in
-    `bootleg/api/routes.py`. Without this lookup, whichever of the two
+    `splitstep/api/routes.py`. Without this lookup, whichever of the two
     writers runs second has no way to know a row already exists for this
     span, and its own row (which always leaves the other writer's field NULL)
     would be the only one `latest_labels` ever returns.
@@ -203,7 +203,7 @@ def record_boundary_correction(
     one `latest_labels` returns -- would silently erase the earlier verdict
     from every reader (H1, docs/superpowers/specs/2026-08-21-rally-labelling-
     design.md). The mirror carry-forward, for the opposite write order, lives
-    in `api_label` (bootleg/api/routes.py).
+    in `api_label` (splitstep/api/routes.py).
     """
     if (true_start_ms, true_end_ms) == (det_start_ms, det_end_ms):
         return None

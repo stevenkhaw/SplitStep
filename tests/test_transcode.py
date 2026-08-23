@@ -2,8 +2,8 @@ import subprocess
 
 import pytest
 
-from bootleg.media.probe import probe
-from bootleg.media.transcode import (
+from splitstep.media.probe import probe
+from splitstep.media.transcode import (
     TranscodeError,
     make_proxy,
     make_thumbs,

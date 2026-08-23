@@ -2,8 +2,8 @@ import subprocess
 
 import pytest
 
-from bootleg.accel import detect_accel
-from bootleg.media.probe import ProbeError, _pick_fps, probe
+from splitstep.accel import detect_accel
+from splitstep.media.probe import ProbeError, _pick_fps, probe
 
 
 @pytest.fixture
@@ -105,13 +105,13 @@ def test_probe_still_reports_coded_dimensions_for_a_rotated_clip(rotated_video):
 
 
 def test_display_size_swaps_the_axes_on_a_quarter_turn():
-    from bootleg.media.probe import display_size
+    from splitstep.media.probe import display_size
     assert display_size(3840, 2160, 90) == (2160, 3840)
     assert display_size(3840, 2160, 270) == (2160, 3840)
 
 
 def test_display_size_is_unchanged_on_a_half_turn():
-    from bootleg.media.probe import display_size
+    from splitstep.media.probe import display_size
     assert display_size(3840, 2160, 0) == (3840, 2160)
     assert display_size(3840, 2160, 180) == (3840, 2160)
 
@@ -122,7 +122,7 @@ def test_display_size_is_unchanged_on_a_half_turn():
 # and `creation_time` (always UTC) already reads as the next day.
 
 def test_recorded_at_prefers_apples_local_creationdate():
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     tags = {
         "creation_time": "2026-08-19T00:39:16.000000Z",
@@ -135,7 +135,7 @@ def test_recorded_at_prefers_apples_local_creationdate():
 
 
 def test_recorded_at_normalizes_the_offset_for_javascript():
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     # web/src/lib/timeline.ts calls Date.parse on this value. ECMAScript only
     # guarantees +HH:MM, so Apple's "-0400" has to be re-emitted with a colon.
@@ -146,7 +146,7 @@ def test_recorded_at_normalizes_the_offset_for_javascript():
 def test_recorded_at_converts_a_utc_only_clip_to_local():
     from datetime import datetime
 
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     tags = {"creation_time": "2026-08-19T00:39:16.000000Z"}
     got = _recorded_at(tags)
@@ -155,19 +155,19 @@ def test_recorded_at_converts_a_utc_only_clip_to_local():
 
 
 def test_recorded_at_is_none_without_any_timestamp():
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     assert _recorded_at({}) is None
 
 
 def test_recorded_at_ignores_an_unparseable_timestamp():
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     assert _recorded_at({"creation_time": "not a date"}) is None
 
 
 def test_recorded_at_falls_back_when_the_apple_tag_is_malformed():
-    from bootleg.media.probe import _recorded_at
+    from splitstep.media.probe import _recorded_at
 
     tags = {
         "creation_time": "2026-08-19T00:39:16.000000Z",

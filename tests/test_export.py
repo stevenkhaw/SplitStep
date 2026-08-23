@@ -1,13 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from bootleg.api.app import create_app
-from bootleg.db.jobs import enqueue
-from bootleg.db.rallies import replace_rallies, set_point, set_rejected, set_star
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.export import column_for, plan_export
-from bootleg.media.clips import clip_relpath
+from splitstep.api.app import create_app
+from splitstep.db.jobs import enqueue
+from splitstep.db.rallies import replace_rallies, set_point, set_rejected, set_star
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.export import column_for, plan_export
+from splitstep.media.clips import clip_relpath
 
 
 @pytest.fixture

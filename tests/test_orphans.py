@@ -1,11 +1,11 @@
 import pytest
 
-from bootleg.db.rallies import replace_rallies, set_rejected
-from bootleg.db.reels import add_items, create_reel
-from bootleg.db.sessions import add_source, find_or_create_session_for_date
-from bootleg.detect.segment import Interval
-from bootleg.export import delete_orphan_clips, find_orphan_clips
-from bootleg.media.clips import clip_relpath
+from splitstep.db.rallies import replace_rallies, set_rejected
+from splitstep.db.reels import add_items, create_reel
+from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.detect.segment import Interval
+from splitstep.export import delete_orphan_clips, find_orphan_clips
+from splitstep.media.clips import clip_relpath
 
 SPANS = [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7), Interval(20000, 26000, 0.6)]
 

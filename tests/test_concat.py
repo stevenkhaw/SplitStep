@@ -2,14 +2,14 @@ import subprocess
 
 import pytest
 
-from bootleg.media.concat import (
+from splitstep.media.concat import (
     ConcatError,
     clip_params,
     concat_clips,
     divergences,
     tolerance_ms,
 )
-from bootleg.media.probe import probe
+from splitstep.media.probe import probe
 
 
 def _clip(path, seconds=1.0, size="320x240", sar=None, silent=False, crf=23, colorspace=None):
@@ -170,7 +170,7 @@ def test_a_nonconforming_input_skips_the_copy_entirely(tmp_path, caplog, monkeyp
     what actually pins the skip -- mirroring
     test_a_short_copy_falls_back_to_a_reencode's technique below.
     """
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", sar="2/1")]
     dst = tmp_path / "reel.mp4"
@@ -204,7 +204,7 @@ def test_a_short_copy_falls_back_to_a_reencode(tmp_path, monkeypatch):
     what is under test is the DECISION, which cannot be provoked on demand
     with real ffmpeg.
     """
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / f"{i}.mp4") for i in range(3)]
     dst = tmp_path / "reel.mp4"
@@ -240,7 +240,7 @@ def test_a_reencode_that_still_comes_out_wrong_is_refused(tmp_path, monkeypatch)
     THAT call -- identified by "-c:v", the flag only _reencode_args passes
     -- is intercepted to write just the first input.
     """
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", sar="2/1")]
     dst = tmp_path / "reel.mp4"
@@ -265,7 +265,7 @@ def test_a_reencode_that_still_comes_out_wrong_is_refused(tmp_path, monkeypatch)
 
 
 def test_a_failed_copy_leaves_no_partial_output(tmp_path, monkeypatch):
-    import bootleg.media.concat as concat_mod
+    import splitstep.media.concat as concat_mod
 
     parts = [_clip(tmp_path / "a.mp4")]
     dst = tmp_path / "reel.mp4"
@@ -319,7 +319,7 @@ def test_tolerance_grows_with_the_input_count():
     # its shortest point is seconds short, not milliseconds.
     assert tolerance_ms(24) < 2000
     # But growth must stop well short of that: min_duration_s in
-    # bootleg/detect/segment.py is 1.5s, the shortest clip the segmenter can
+    # splitstep/detect/segment.py is 1.5s, the shortest clip the segmenter can
     # produce, so at ANY reel size the bound has to stay under that or a
     # reel silently missing exactly its shortest clip would pass unnoticed.
     assert tolerance_ms(10_000) < 1500

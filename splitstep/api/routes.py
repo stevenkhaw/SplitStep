@@ -8,9 +8,9 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from bootleg.accel import detect_accel
-from bootleg.db import jobs as jobq
-from bootleg.db.labels import (
+from splitstep.accel import detect_accel
+from splitstep.db import jobs as jobq
+from splitstep.db.labels import (
     FLAG_ORDER,
     VERDICTS,
     add_label,
@@ -21,8 +21,8 @@ from bootleg.db.labels import (
     record_boundary_correction,
     retract_label,
 )
-from bootleg.db.presets import create_preset, get_preset, list_presets
-from bootleg.db.rallies import (
+from splitstep.db.presets import create_preset, get_preset, list_presets
+from splitstep.db.rallies import (
     NOTE_MAX_CHARS,
     list_rallies,
     replace_rallies,
@@ -33,7 +33,7 @@ from bootleg.db.rallies import (
     set_seen,
     set_star,
 )
-from bootleg.db.reels import (
+from splitstep.db.reels import (
     add_items,
     create_reel,
     delete_reel,
@@ -45,7 +45,7 @@ from bootleg.db.reels import (
     rename_reel,
     set_order,
 )
-from bootleg.db.sessions import (
+from splitstep.db.sessions import (
     get_session,
     get_source,
     list_sessions,
@@ -53,22 +53,22 @@ from bootleg.db.sessions import (
     refresh_session_review_status,
     set_source_preset,
 )
-from bootleg.detect.features import read_features
-from bootleg.detect.geometry import Quad
-from bootleg.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
-from bootleg.export import SETS, column_for, plan_export
-from bootleg.media.files import find_original
-from bootleg.media.frames import extract_frame
-from bootleg.media.probe import ProbeError
-from bootleg.media.transcode import TranscodeError, rotation_filter
-from bootleg.reels import (
+from splitstep.detect.features import read_features
+from splitstep.detect.geometry import Quad
+from splitstep.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
+from splitstep.export import SETS, column_for, plan_export
+from splitstep.media.files import find_original
+from splitstep.media.frames import extract_frame
+from splitstep.media.probe import ProbeError
+from splitstep.media.transcode import TranscodeError, rotation_filter
+from splitstep.reels import (
     delete_rendered_file,
     missing_clip_count,
     plan_reel_export,
     rendered_file,
     resolve_items,
 )
-from bootleg.setup import queue_setup
+from splitstep.setup import queue_setup
 
 from .media import range_response
 
@@ -658,7 +658,7 @@ def api_proxy(session_id: str, idx: int, request: Request,
 @router.get("/api/court_presets")
 def api_list_presets(request: Request):
     """Presentation only -- storage and ordering live in db/presets.py so the
-    CLI (`bootleg preset list`) and this endpoint always agree on both.
+    CLI (`splitstep preset list`) and this endpoint always agree on both.
     """
     rows = list_presets(_conn(request))
     return [
@@ -739,7 +739,7 @@ def _last_safe_ms(source: sqlite3.Row) -> int:
     behaviour in the quad editor. Past end-of-stream, ffmpeg fails with
     exit 234 and a misleading "Non full-range YUV is non-standard" message
     -- the same end-of-stream encoder bug make_thumbs already documents
-    and clamps against (bootleg/media/transcode.py) -- so callers clamp
+    and clamps against (splitstep/media/transcode.py) -- so callers clamp
     into the clip's duration here too, rather than reject. This also makes
     the negative case explicit instead of relying on ffmpeg to silently
     clamp it (which produced a duplicate cached file per distinct negative

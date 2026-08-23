@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from bootleg.db.presets import create_preset
-from bootleg.db.rallies import list_rallies
-from bootleg.db.schema import connect, migrate
-from bootleg.db.sessions import (
+from splitstep.db.presets import create_preset
+from splitstep.db.rallies import list_rallies
+from splitstep.db.schema import connect, migrate
+from splitstep.db.sessions import (
     add_source,
     create_session,
     find_or_create_session_for_date,
@@ -17,12 +17,12 @@ from bootleg.db.sessions import (
     set_source_preset,
     set_source_rotation,
 )
-from bootleg.detect.features import FeatureFrame, Player, write_features
-from bootleg.detect.geometry import Quad
-from bootleg.jobs import handlers
-from bootleg.jobs.handlers import HANDLERS, handle_build_proxy, handle_detect, handle_ingest
-from bootleg.media.probe import ProbeError, probe
-from bootleg.watcher import scan_inbox
+from splitstep.detect.features import FeatureFrame, Player, write_features
+from splitstep.detect.geometry import Quad
+from splitstep.jobs import handlers
+from splitstep.jobs.handlers import HANDLERS, handle_build_proxy, handle_detect, handle_ingest
+from splitstep.media.probe import ProbeError, probe
+from splitstep.watcher import scan_inbox
 
 
 @pytest.fixture
@@ -511,7 +511,7 @@ def test_ingest_of_a_missing_inbox_file_with_no_matching_source_raises(library, 
 def test_ingest_registers_without_transcoding(library, sample_video, monkeypatch):
     called = []
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda *a, **k: called.append(a),
     )
     src = library.inbox / "IMG_0001.MOV"
@@ -728,12 +728,12 @@ def test_build_proxy_passes_the_stored_rotation(library, sample_video, monkeypat
     set_source_rotation(conn, row["id"], 270)
     seen = {}
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda src, dst, rotation_deg=0: seen.update(rotation_deg=rotation_deg) or dst.touch(),
     )
-    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr("splitstep.jobs.handlers.make_thumbs", lambda *a, **k: None)
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.probe",
+        "splitstep.jobs.handlers.probe",
         lambda path: SimpleNamespace(width=100, height=200),
     )
 
@@ -749,7 +749,7 @@ def test_build_proxy_records_the_proxys_actual_dimensions(library, sample_video)
     handle_build_proxy only wrote status -- so a source seeded at one
     rotation whose orientation the wizard later corrects keeps its stale
     ingest-time dimensions forever, even though the proxy on disk is a
-    completely different shape. `bootleg doctor` prints exactly that pair
+    completely different shape. `splitstep doctor` prints exactly that pair
     (width/height vs rotation) as its headline diagnostic, so it lies on
     every source the wizard corrected.
 
@@ -782,11 +782,11 @@ def test_build_proxy_records_the_proxys_actual_dimensions(library, sample_video)
 def test_build_proxy_enqueues_detect(library, sample_video, monkeypatch):
     conn, row = _registered(library, sample_video, name="IMG_1001.MOV")
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
+        "splitstep.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
     )
-    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr("splitstep.jobs.handlers.make_thumbs", lambda *a, **k: None)
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.probe",
+        "splitstep.jobs.handlers.probe",
         lambda path: SimpleNamespace(width=100, height=200),
     )
 
@@ -836,7 +836,7 @@ def test_build_proxy_failure_does_not_fail_the_session_when_a_sibling_is_ready(
     (b_dir / "original.mp4").write_bytes(sample_video.read_bytes())
 
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ffmpeg exploded")),
     )
 
@@ -860,7 +860,7 @@ def test_build_proxy_failure_fails_the_session_when_it_is_the_only_source(
     """
     _, row = _registered(library, sample_video, name="IMG_3002.MOV")
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy",
+        "splitstep.jobs.handlers.make_proxy",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ffmpeg exploded")),
     )
 
@@ -937,11 +937,11 @@ def test_build_proxy_retried_after_the_first_run_does_not_duplicate_detect(
     """
     conn, row = _registered(library, sample_video, name="IMG_3003.MOV")
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
+        "splitstep.jobs.handlers.make_proxy", lambda src, dst, rotation_deg=0: dst.touch()
     )
-    monkeypatch.setattr("bootleg.jobs.handlers.make_thumbs", lambda *a, **k: None)
+    monkeypatch.setattr("splitstep.jobs.handlers.make_thumbs", lambda *a, **k: None)
     monkeypatch.setattr(
-        "bootleg.jobs.handlers.probe",
+        "splitstep.jobs.handlers.probe",
         lambda path: SimpleNamespace(width=100, height=200),
     )
 
@@ -957,7 +957,7 @@ def test_build_proxy_retried_after_the_first_run_does_not_duplicate_detect(
 def test_played_on_uses_the_local_evening_not_the_utc_date():
     from pathlib import Path
 
-    from bootleg.jobs.handlers import _played_on
+    from splitstep.jobs.handlers import _played_on
 
     # 20:39 on Tuesday the 18th, Eastern. UTC calls that Wednesday the 19th;
     # the session belongs to the evening it was actually played.
@@ -968,7 +968,7 @@ def test_played_on_falls_back_to_the_files_local_mtime(tmp_path):
     import os
     from datetime import datetime
 
-    from bootleg.jobs.handlers import _played_on
+    from splitstep.jobs.handlers import _played_on
 
     f = tmp_path / "clip.mov"
     f.write_bytes(b"x")
