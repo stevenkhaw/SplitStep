@@ -31,9 +31,28 @@
   const maxMs = $derived(source ? lastSafeFrameMs(source.duration_ms, source.fps) : 0)
 
   $effect(() => {
+    let cancelled = false
+    // Both cleared at the start of each attempt. This effect re-runs whenever
+    // `id` changes, and App.svelte renders `<Setup id={router.current.id} />`
+    // unkeyed, so navigating from one source's wizard to another swaps the
+    // prop on this live instance rather than remounting -- leaving the
+    // previous source on screen under the new id, and the previous error over
+    // a source that loaded fine.
+    error = null
+    source = null
+    // The quad goes too, even though it is the user's own work rather than
+    // anything this effect fetched -- which is exactly why it was missed.
+    // Carrying it meant landing on the next source's wizard with the previous
+    // source's play region already committed and `start detection` enabled:
+    // one click from queueing a rebuild and a detect against a region drawn
+    // over different footage.
+    points = null
+    selectedPresetId = null
+
     api
       .getSource(id)
       .then((s) => {
+        if (cancelled) return null
         source = s
         rotation = s.rotation_deg
         // The working frame starts at the first grid timestamp rather than
@@ -44,11 +63,22 @@
         return api.listPresets()
       })
       .then((p) => {
+        if (cancelled || p === null) return
         presets = p
       })
       .catch((e) => {
-        error = String(e)
+        if (!cancelled) error = String(e)
       })
+
+    // Stricter here than on the session page, because this wizard writes.
+    // `start()` submits `api.setup(source.id, ...)` -- the id off the loaded
+    // source, not the prop -- so a superseded response landing over the
+    // current one means a quad dragged on screen queues a proxy rebuild and a
+    // fifteen-minute detect against a different source entirely, then
+    // navigates away as though it had worked.
+    return () => {
+      cancelled = true
+    }
   })
 
   function rotate(dir: 1 | -1) {

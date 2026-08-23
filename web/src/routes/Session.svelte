@@ -47,6 +47,22 @@
   }
 
   $effect(() => {
+    let cancelled = false
+    // Cleared at the start of each attempt rather than left to linger from a
+    // previous one -- and here that is not merely defensive the way it is in
+    // Library.svelte, because this effect genuinely does re-run (`id` is a
+    // reactive read). The template puts `{#if error}` ahead of the detail
+    // branch, so a 404 belonging to a session the user has already navigated
+    // away from hides a session that loaded perfectly well, with only a
+    // reload to recover.
+    error = null
+    // `detail` goes with it, back to the Loading… branch. The header renders
+    // `id` straight from the prop, so leaving the previous session's detail
+    // in place for the length of the fetch shows the new session's name over
+    // the old session's rallies -- live, keyboard-driven, and indistinguishable
+    // from having loaded. A brief Loading… is the honest state.
+    detail = null
+
     // Reruns only when `id` itself changes (its only reactive read) --
     // i.e. the initial load, or navigating to a different session
     // entirely. Always bumps `rallyRevision`: a different session's rally
@@ -55,10 +71,24 @@
     api
       .getSession(id)
       .then((d) => {
+        if (cancelled) return
         detail = d
         rallyRevision += 1
       })
-      .catch((e) => (error = String(e)))
+      .catch((e) => {
+        if (!cancelled) error = String(e)
+      })
+
+    // The teardown is what makes a superseded response inert. Without it a
+    // slow fetch for the session just left assigns its detail over the one
+    // now on screen: the header reads the new session while the rally set,
+    // the counts and every keystroke target belong to the old one. Rally ids
+    // are globally unique, so a star fired in that state lands on a real
+    // rally -- just not the one named above it, and with nothing visible to
+    // say so.
+    return () => {
+      cancelled = true
+    }
   })
 
   function openTimeline(rallyId: string, liveRallies: Rally[]) {
