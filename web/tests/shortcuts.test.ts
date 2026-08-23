@@ -112,3 +112,20 @@ describe('the label reference matches its verdict and flag maps', () => {
     }
   })
 })
+
+describe('timeline split bindings', () => {
+  it('binds C and U in timeline mode', () => {
+    const keys = shortcutKeys('timeline')
+    expect(keys).toContain('C')
+    expect(keys).toContain('U')
+  })
+
+  it('keeps the timeline strip at six and puts split in it', () => {
+    // Past six the strip wraps and stops being glanceable, which is the
+    // failure it replaces. The frame-step pair leaves for the `?` overlay --
+    // they are a mirror pair, discoverable from one another.
+    const strip = primaryShortcuts('timeline')
+    expect(strip).toHaveLength(6)
+    expect(strip.flatMap((s) => s.keys)).toEqual(['[', ']', 'C', 'U', 'Esc', '?'])
+  })
+})

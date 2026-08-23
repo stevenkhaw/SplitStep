@@ -74,6 +74,17 @@ const TIMELINE: ShortcutGroup[] = [
     ],
   },
   {
+    // `C` rather than `S` for "split": S is *star* in queue mode, the
+    // reviewer crosses between the two modes constantly, and a reflex S in
+    // timeline that cut instead of starred is the worst possible misfire for
+    // a key whose inverse is conditional.
+    title: 'Split',
+    items: [
+      { keys: ['C'], label: 'Split here into two rallies' },
+      { keys: ['U'], label: 'Merge back into the previous' },
+    ],
+  },
+  {
     title: 'Playback',
     items: [
       { keys: ['Space'], label: 'Play or pause' },
@@ -158,8 +169,8 @@ export function shortcutKeys(mode: ShortcutMode): string[] {
 const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
   queue: [QUEUE[0].items[0], QUEUE[0].items[1], QUEUE[0].items[2], QUEUE[0].items[3],
           QUEUE[2].items[1], QUEUE[3].items[2]],
-  timeline: [TIMELINE[0].items[0], TIMELINE[0].items[1], TIMELINE[1].items[1],
-             TIMELINE[1].items[2], TIMELINE[2].items[0], TIMELINE[2].items[1]],
+  timeline: [TIMELINE[0].items[0], TIMELINE[0].items[1], TIMELINE[1].items[0],
+             TIMELINE[1].items[1], TIMELINE[3].items[0], TIMELINE[3].items[1]],
   label: [LABEL[0].items[0], LABEL[0].items[1], LABEL[3].items[1], LABEL[3].items[2],
           LABEL[4].items[0], LABEL[4].items[1]],
 }
