@@ -129,8 +129,10 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     expect(target.textContent).toMatch(/rally 3 \/ 3/)
 
     press('t')
-    // TimelineMode's own help line -- the queue never renders it.
-    await vi.waitFor(() => expect(target.textContent).toMatch(/set in\/out/))
+    // A TimelineMode control, not its help text: the keyboard reference is
+    // generated from lib/shortcuts.ts now and its wording is not a contract,
+    // whereas the threshold slider is the thing timeline mode exists around.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/preview threshold/))
 
     press('Escape')
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally \d+ \/ 3/))
@@ -164,7 +166,7 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     // LabelMode's own help line -- the queue never renders it. Its
     // sourceLabels() fetch resolves on a microtask, so this also waits out
     // the mount before the second `l` fires.
-    await vi.waitFor(() => expect(target.textContent).toMatch(/back to queue/))
+    await vi.waitFor(() => expect(target.textContent).toMatch(/starts early/))
 
     press('l')
     await vi.waitFor(() => expect(target.textContent).toMatch(/rally \d+ \/ 3/))
@@ -194,7 +196,7 @@ describe('leaving the timeline returns to the rally you were editing', () => {
     // LabelMode's own help line -- only rendered once it has actually
     // mounted, so this proves label mode opened rather than the key doing
     // nothing.
-    await vi.waitFor(() => expect(target.textContent).toMatch(/back to queue/))
+    await vi.waitFor(() => expect(target.textContent).toMatch(/starts early/))
   })
 
   it('opens label mode on the rally you had open, not rally 1', async () => {

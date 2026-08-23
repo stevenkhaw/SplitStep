@@ -17,6 +17,7 @@
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
+  import KeyHints from './KeyHints.svelte'
   import VideoDeck from './VideoDeck.svelte'
   import ZoomBand from './ZoomBand.svelte'
 
@@ -362,9 +363,7 @@
     </div>
 
     <p class="flex items-center gap-2 font-data text-caption text-faint">
-      <span>
-        detector score — dashed line is the threshold · [ ] set in/out · , . step one frame · esc back
-      </span>
+      <span>detector score — dashed line is the threshold</span>
       <!-- Edits persist on drag-release and on [ / ], with no save button, so
            this is the only thing telling the user an edit took. -->
       {#if saveState === 'saved'}
@@ -373,6 +372,8 @@
         <span class="text-danger" role="status">✕ not saved</span>
       {/if}
     </p>
+
+    <KeyHints mode="timeline" />
   </section>
 
   {#if toaster.toasts.length > 0}

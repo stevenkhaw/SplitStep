@@ -8,6 +8,7 @@
   import { formatDuration, formatTs } from '../lib/time'
   import type { BoundaryFlag, LabelAction, Verdict } from '../lib/labels'
   import type { LabelRecord, SessionDetail, Source } from '../lib/types'
+  import KeyHints from './KeyHints.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
@@ -359,10 +360,7 @@
     {/each}
   </div>
 
-  <p class="mt-4 font-data text-data text-faint">
-    1 clean · 2 no play · 3 partly · 4 unsure · Q/W start · O/P end · R replay · ← →
-    move · U undo · L back to queue
-  </p>
+  <KeyHints mode="label" />
 {/if}
 
 {#if toaster.toasts.length > 0}

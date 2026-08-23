@@ -12,6 +12,7 @@
   import { formatDuration, formatTs } from '../lib/time'
   import type { QueueAction } from '../lib/queue'
   import type { Rally, SessionDetail, Source } from '../lib/types'
+  import KeyHints from './KeyHints.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
@@ -68,14 +69,6 @@
   const initialRallyId = untrack(() => startAtRallyId)
   if (initialRallyId) queue.jumpTo(initialRallyId)
   const toaster = createToaster()
-
-  // The keyboard legend is reference material, not content, so it sits at
-  // caption weight -- but the keys themselves have to stay findable inside
-  // it. Boxing each key does that without raising the whole line, which is
-  // what the previous single run-on sentence at the same weight as the live
-  // data above it could not do.
-  const KBD =
-    'rounded border border-line bg-surface-2 px-1.5 font-data text-caption text-dim'
 
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)
@@ -611,18 +604,7 @@
     </span>
   </div>
 
-  <p class="mt-3 text-caption text-faint">
-    <kbd class={KBD}>S</kbd> star
-    <kbd class={KBD}>P</kbd> point
-    <kbd class={KBD}>X</kbd> reject
-    <kbd class={KBD}>R</kbd> replay
-    <kbd class={KBD}>N</kbd> note
-    <kbd class={KBD}>←</kbd><kbd class={KBD}>→</kbd> move
-    <kbd class={KBD}>U</kbd> undo
-    <kbd class={KBD}>`</kbd><kbd class={KBD}>1</kbd><kbd class={KBD}>2</kbd><kbd class={KBD}>3</kbd> speed
-    <kbd class={KBD}>T</kbd> timeline
-    <kbd class={KBD}>L</kbd> label
-  </p>
+  <KeyHints mode="queue" />
 {/if}
 
 {#if toaster.toasts.length > 0}
