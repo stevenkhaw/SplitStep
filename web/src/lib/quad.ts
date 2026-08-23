@@ -4,7 +4,7 @@ import type { Preset } from './types'
  * A trapezoid roughly matching a baseline camera: narrow at the far
  * baseline, wide at the near one, extended to the frame bottom (y = 1.0) so
  * a near player standing between the camera and the baseline stays inside.
- * `Quad.contains` (bootleg/detect/geometry.py) is inclusive on every edge
+ * `Quad.contains` (splitstep/detect/geometry.py) is inclusive on every edge
  * specifically so a foot point landing exactly on y = 1.0 -- which happens
  * constantly at ~1ft camera height, where the near player's box is clipped
  * by the frame edge -- still counts as inside the play region.

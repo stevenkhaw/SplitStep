@@ -1,6 +1,6 @@
 import type { Job } from './types'
 
-// What the queue considers unfinished. Mirrors bootleg/db/jobs.py, where
+// What the queue considers unfinished. Mirrors splitstep/db/jobs.py, where
 // claim() and has_pending_job() both use exactly these two.
 const ACTIVE = new Set(['queued', 'running'])
 

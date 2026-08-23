@@ -85,7 +85,7 @@ export const api = {
   point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
   setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
   // Called on every plain right-arrow (see persist.ts's skip case) --
-  // on this". See bootleg/db/rallies.py::set_seen.
+  // on this". See splitstep/db/rallies.py::set_seen.
   seen: (id: string) => post(`/api/rallies/${id}/seen`),
   setBounds: (id: string, start_ms: number, end_ms: number) =>
     post(`/api/rallies/${id}/bounds`, { start_ms, end_ms }),
@@ -94,7 +94,7 @@ export const api = {
   // Withdraws the current verdict for the rally's detector span, appending a
   // retraction row rather than deleting anything. Its own route because a
   // verdict-less label row is what a boundary drag writes, and the two mean
-  // opposite things -- see api_label_retract in bootleg/api/routes.py.
+  // opposite things -- see api_label_retract in splitstep/api/routes.py.
   retractLabel: (id: string) => post(`/api/rallies/${id}/label/retract`),
   sourceLabels: (sourceId: string) => req<LabelRecord[]>(`/api/sources/${sourceId}/labels`),
 

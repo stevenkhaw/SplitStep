@@ -118,7 +118,7 @@
       await refreshPresets()
       status =
         'Saved and assigned. Existing rallies on this source were detected without this ' +
-        'region -- re-run detect (CLI: bootleg detect) for it to take effect.'
+        'region -- re-run detect (CLI: splitstep detect) for it to take effect.'
       onassigned()
     } catch (e) {
       error = String(e)
@@ -141,7 +141,7 @@
       await api.setPreset(source.id, preset.id)
       status =
         `Assigned "${preset.name}". Existing rallies on this source were detected without ` +
-        'this region -- re-run detect (CLI: bootleg detect) for it to take effect.'
+        'this region -- re-run detect (CLI: splitstep detect) for it to take effect.'
       onassigned()
     } catch (e) {
       error = String(e)

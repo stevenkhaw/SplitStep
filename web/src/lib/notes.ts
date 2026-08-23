@@ -3,7 +3,7 @@ import type { Rally } from './types'
 /**
  * The longest note that still renders as two lines inside the caption pill at
  * 4K without shrinking the type. Mirrors NOTE_MAX_CHARS in
- * bootleg/db/rallies.py -- the server enforces it too, because the UI is not
+ * splitstep/db/rallies.py -- the server enforces it too, because the UI is not
  * the only writer a library ever has.
  */
 export const NOTE_MAX_CHARS = 120

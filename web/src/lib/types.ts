@@ -69,7 +69,7 @@ export interface Job {
   error: string | null
 }
 
-// The four outcomes plan_export sorts a set's rallies into (bootleg/export.py
+// The four outcomes plan_export sorts a set's rallies into (splitstep/export.py
 // ExportPlan): a clip on disk, a job already working the same span, and a
 // rally whose source vanished are distinct reasons nothing new was queued,
 // not one "already done" bucket -- see lib/export.ts's describeExportResult.
@@ -136,7 +136,7 @@ export interface SpanRef {
 export interface ReelDetail {
   // rendered_bytes lives ONLY here, not on Reel itself: the list route
   // deliberately never stat()s every reel's render on every page load (see
-  // api_get_reel's comment in bootleg/api/routes.py), so a listed Reel truly
+  // api_get_reel's comment in splitstep/api/routes.py), so a listed Reel truly
   // does not carry this field -- widening it onto Reel would let TypeScript
   // promise a number the list response never sends.
   reel: Reel & { rendered_bytes: number | null }

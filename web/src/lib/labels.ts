@@ -4,7 +4,7 @@ import type { LabelRecord, Rally } from './types'
 export type Verdict = 'clean' | 'not_play' | 'partly' | 'unsure'
 export type BoundaryFlag = 'start_early' | 'start_late' | 'end_early' | 'end_late'
 
-// Mirrors FLAG_ORDER in bootleg/db/labels.py. The server re-orders on write
+// Mirrors FLAG_ORDER in splitstep/db/labels.py. The server re-orders on write
 // anyway, but sending and rendering the same order keeps the UI's flag row
 // from reshuffling as you toggle.
 export const FLAG_ORDER: readonly BoundaryFlag[] = [
@@ -242,7 +242,7 @@ export class LabelController {
     // case used to return null and persist nothing, on the reasoning that
     // the append-only corpus has no "unlabel" -- but the reviewer was then
     // left looking at a clip the corpus still called 'clean', and a reload
-    // brought the verdict back. `retract_label` (bootleg/db/labels.py) is
+    // brought the verdict back. `retract_label` (splitstep/db/labels.py) is
     // the append-only way to say it: one more row, superseding the
     // judgement without erasing it.
     return {

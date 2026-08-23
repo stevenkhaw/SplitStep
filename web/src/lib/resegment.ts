@@ -4,7 +4,7 @@ import type { Rally } from './types'
  * Rallies on `sourceId` whose live boundaries have diverged from what the
  * detector produced. Re-segmenting discards these -- the server carries
  * stars and rejections across by >50% overlap (see `replace_rallies` /
- * `STAR_OVERLAP_MIN` in bootleg/db/rallies.py), but a hand-dragged boundary
+ * `STAR_OVERLAP_MIN` in splitstep/db/rallies.py), but a hand-dragged boundary
  * has no such carry-over, so the caller must name this count before paying
  * the cost (spec 6).
  */

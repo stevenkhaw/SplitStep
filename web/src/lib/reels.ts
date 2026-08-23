@@ -59,7 +59,7 @@ export function shouldPollReel(items: ReelItem[]): boolean {
 /**
  * How often the builder page polls a reel with clips still being cut.
  *
- * `bootleg`'s job worker is single-threaded and each cut is a full ffmpeg
+ * `splitstep`'s job worker is single-threaded and each cut is a full ffmpeg
  * encode -- minutes, not seconds -- so there is nothing to gain from a
  * tight loop, only load on a server that shares its worker pool with media
  * serving. 15s means "Render — N clips not cut yet" is never stale by more
@@ -143,7 +143,7 @@ export function formatBytes(bytes: number): string {
  * render's size when there is one to reclaim.
  *
  * `renderedBytes === null` covers both "never rendered" and "rendered_path
- * pointed outside reels/ and rendered_file refused it" (see bootleg/reels.py):
+ * pointed outside reels/ and rendered_file refused it" (see splitstep/reels.py):
  * both mean the same thing to a reviewer deciding whether to press the
  * button -- there is no file this delete will reclaim -- so the wording
  * collapses them rather than trying to explain a distinction that only
@@ -158,7 +158,7 @@ export function deleteConfirmationText(name: string, renderedBytes: number | nul
  * A rename input, trimmed -- or null if there is nothing worth saving.
  *
  * Mirrors the server's own validator (`_ReelNameBody.check_name` in
- * bootleg/api/routes.py) so the Save button is disabled for exactly the
+ * splitstep/api/routes.py) so the Save button is disabled for exactly the
  * input the POST would otherwise reject with 422, rather than letting a
  * click round-trip to the server just to learn that.
  */

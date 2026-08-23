@@ -295,7 +295,7 @@ describe('persisting a label', () => {
 })
 
 // A stand-in for the two label write routes plus the read route, following
-// the same resolution rule bootleg/db/labels.py does: rows are appended and
+// the same resolution rule splitstep/db/labels.py does: rows are appended and
 // never edited, the newest row per (source, span) is the current one, and a
 // row carrying neither a verdict nor a correction (i.e. a retraction of a
 // verdict-only label) leaves the span with no current label at all.

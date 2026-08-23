@@ -29,7 +29,7 @@ export function clamp(v: number, lo: number, hi: number): number {
 /**
  * The last timestamp that reliably decodes to a real frame.
  *
- * Mirrors the server's own clamp in `api_frame` (bootleg/api/routes.py):
+ * Mirrors the server's own clamp in `api_frame` (splitstep/api/routes.py):
  * past end-of-stream ffmpeg fails with exit 234, and `duration_ms - 1` is
  * not far enough back -- the true last frame lands up to one frame period
  * before the reported duration. Clamping client-side too keeps a scrubber
