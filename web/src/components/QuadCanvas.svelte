@@ -127,13 +127,13 @@
     onload={() => (frameError = false)}
   />
   <div
-    class="pointer-events-none absolute inset-0 bg-blue-400/20"
+    class="pointer-events-none absolute inset-0 bg-accent/20"
     style={`clip-path: ${polygon}`}
   ></div>
   {#each points as p, i (i)}
     <button
       class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full
-             border-2 border-white bg-blue-500 touch-none"
+             border-2 border-fg bg-accent touch-none"
       style={`left:${p[0] * 100}%;top:${p[1] * 100}%`}
       onpointerdown={(e) => onHandleDown(e, i)}
       onpointermove={(e) => onHandleMove(e, i)}
@@ -155,16 +155,16 @@
 -->
 <div class="mt-2 flex items-center gap-2">
   <button
-    class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
-           hover:bg-neutral-800"
+    class="rounded border border-line px-2 py-0.5 font-data text-data
+           hover:bg-surface-2"
     onclick={() => onseek(timeMs - 1000)}
     aria-label="back one second"
   >
     &laquo; 1s
   </button>
   <button
-    class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
-           hover:bg-neutral-800"
+    class="rounded border border-line px-2 py-0.5 font-data text-data
+           hover:bg-surface-2"
     onclick={() => stepFrames(-1)}
     aria-label="previous frame"
   >
@@ -178,32 +178,32 @@
     value={timeMs}
     oninput={(e) => (draftMs = e.currentTarget.valueAsNumber)}
     onchange={(e) => onseek(e.currentTarget.valueAsNumber)}
-    class="min-w-0 flex-1 accent-blue-500"
+    class="min-w-0 flex-1 accent-accent"
     aria-label="frame timestamp"
   />
   <button
-    class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
-           hover:bg-neutral-800"
+    class="rounded border border-line px-2 py-0.5 font-data text-data
+           hover:bg-surface-2"
     onclick={() => stepFrames(1)}
     aria-label="next frame"
   >
     fr &rsaquo;
   </button>
   <button
-    class="rounded border border-neutral-700 px-2 py-0.5 font-mono text-xs
-           hover:bg-neutral-800"
+    class="rounded border border-line px-2 py-0.5 font-data text-data
+           hover:bg-surface-2"
     onclick={() => onseek(timeMs + 1000)}
     aria-label="forward one second"
   >
     1s &raquo;
   </button>
-  <span class="w-20 shrink-0 text-right font-mono text-xs text-neutral-400">
+  <span class="w-20 shrink-0 text-right font-data text-data text-dim">
     {formatTs(draftMs)}
   </span>
 </div>
 
 {#if frameError}
-  <p class="mt-2 font-mono text-xs text-amber-300">
+  <p class="mt-2 font-data text-caption text-danger">
     No frame at {formatTs(timeMs)} -- {frameErrorHint}. Try again, or scrub somewhere else.
   </p>
 {/if}

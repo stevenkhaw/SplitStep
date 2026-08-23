@@ -109,20 +109,20 @@
   }
 </script>
 
-<div class="rounded-lg border border-neutral-800 p-4">
+<div class="rounded-lg border border-line p-4">
   <div class="mb-3 flex items-baseline justify-between">
-    <h2 class="text-sm font-semibold">Add rallies</h2>
-    <button class="font-mono text-xs text-neutral-400 hover:text-neutral-200" onclick={onclose}>
+    <h2 class="text-body font-semibold">Add rallies</h2>
+    <button class="font-data text-data text-dim hover:text-fg" onclick={onclose}>
       close
     </button>
   </div>
 
   {#if error}
-    <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+    <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
   {:else}
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <select
-        class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+        class="rounded border border-line bg-surface px-2 py-1 text-caption"
         aria-label="Session"
         bind:value={sessionId}
       >
@@ -134,17 +134,17 @@
       {#each ['points', 'starred', 'all'] as f (f)}
         <button
           data-filter={f}
-          class="rounded border px-2 py-1 font-mono text-xs
+          class="rounded border px-2 py-1 font-data text-data
                  {filter === f
-                   ? 'border-blue-500 text-blue-300'
-                   : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
+                   ? 'border-accent text-accent'
+                   : 'border-line text-dim hover:bg-surface-2'}"
           onclick={() => (filter = f as Filter)}
         >{f}</button>
       {/each}
 
       <button
         data-select-all
-        class="ml-auto font-mono text-xs text-neutral-400 hover:text-neutral-200
+        class="ml-auto font-data text-data text-dim hover:text-fg
                disabled:opacity-40"
         disabled={selectable.length === 0}
         onclick={selectAll}
@@ -152,30 +152,30 @@
     </div>
 
     {#if loading}
-      <p class="text-sm text-neutral-400">Loading…</p>
+      <p class="text-body text-dim">Loading…</p>
     {:else if shown.length === 0}
-      <p class="text-sm text-neutral-400">Nothing matches this filter in that session.</p>
+      <p class="text-body text-dim">Nothing matches this filter in that session.</p>
     {:else}
-      <ul class="max-h-72 divide-y divide-neutral-800 overflow-y-auto">
+      <ul class="max-h-72 divide-y divide-line overflow-y-auto">
         {#each shown as r (r.id)}
           {@const inReel = alreadyIn.has(spanKey(r))}
           <li>
-            <label class="flex items-center gap-3 py-2 text-sm
-                          {inReel ? 'text-neutral-500' : ''}">
+            <label class="flex items-center gap-3 py-2 text-body
+                          {inReel ? 'text-faint' : ''}">
               <input
                 type="checkbox"
                 checked={inReel || checked.has(r.id)}
                 disabled={inReel}
                 onchange={() => toggle(r)}
               />
-              <span class="font-mono text-xs tabular-nums">{formatTs(r.start_ms)}</span>
-              <span class="font-mono text-xs tabular-nums text-neutral-400">
+              <span class="font-data text-data tabular-nums">{formatTs(r.start_ms)}</span>
+              <span class="font-data text-data tabular-nums text-dim">
                 {formatDuration(r.end_ms - r.start_ms)}
               </span>
-              {#if r.point}<span class="font-mono text-xs text-neutral-400">P</span>{/if}
-              {#if r.starred}<span class="font-mono text-xs text-amber-300">★</span>{/if}
+              {#if r.point}<span class="font-data text-data text-dim">P</span>{/if}
+              {#if r.starred}<span class="font-data text-caption text-star">★</span>{/if}
               {#if inReel}
-                <span class="ml-auto font-mono text-xs text-neutral-600">in reel</span>
+                <span class="ml-auto font-data text-data text-faint">in reel</span>
               {/if}
             </label>
           </li>
@@ -185,8 +185,8 @@
 
     <button
       data-add
-      class="mt-3 rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs
-             text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed
+      class="mt-3 rounded border border-line px-3 py-1.5 font-data text-data
+             text-fg hover:bg-surface-2 disabled:cursor-not-allowed
              disabled:opacity-40"
       disabled={selected.length === 0}
       onclick={add}

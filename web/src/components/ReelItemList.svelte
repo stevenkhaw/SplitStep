@@ -108,7 +108,7 @@
 
 <svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} />
 
-<ul bind:this={list} class="divide-y divide-neutral-800">
+<ul bind:this={list} class="divide-y divide-line">
   {#each shown as item, i (`${item.source_id}:${item.start_ms}:${item.end_ms}`)}
     <li
       data-reel-row
@@ -116,7 +116,7 @@
     >
       <button
         data-drag-handle
-        class="cursor-grab select-none px-2 font-mono text-neutral-500 hover:text-neutral-200"
+        class="cursor-grab select-none px-2 font-data text-faint hover:text-fg"
         aria-label="Reorder {i + 1}. Hold alt and press the up or down arrow."
         onpointerdown={(e) => startDrag(i, e)}
         onkeydown={(e) => onHandleKey(i, e)}
@@ -132,19 +132,19 @@
         loading="lazy"
       />
 
-      <span class="font-mono text-xs tabular-nums text-neutral-300">
+      <span class="font-data text-data tabular-nums text-dim">
         {formatDuration(item.duration_ms)}
       </span>
-      <span class="font-mono text-xs text-neutral-500">
+      <span class="font-data text-data text-faint">
         source {String(item.source_idx).padStart(2, '0')}
       </span>
 
       {#if !item.clip_ready}
-        <span class="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-xs text-amber-300">
+        <span class="rounded bg-danger/15 px-2 py-0.5 font-data text-caption text-danger">
           missing
         </span>
       {:else}
-        <span class="rounded bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-400">
+        <span class="rounded bg-surface-2 px-2 py-0.5 font-data text-data text-dim">
           ready
         </span>
       {/if}
@@ -153,14 +153,14 @@
         <!-- The rally this span came from is gone (a threshold sweep
              re-makes every rally). The clip is not: it is what the reel is
              actually made of, so this is badged, never dropped. -->
-        <span class="rounded bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-500">
+        <span class="rounded bg-surface-2 px-2 py-0.5 font-data text-data text-faint">
           orphan
         </span>
       {/if}
 
       <button
         data-remove
-        class="ml-auto px-2 font-mono text-xs text-neutral-500 hover:text-red-300"
+        class="ml-auto px-2 font-data text-data text-faint hover:text-danger"
         aria-label="Remove clip {i + 1}"
         onclick={() => onremove(item)}
       >✕</button>

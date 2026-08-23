@@ -144,7 +144,7 @@
 
 <div
   bind:this={band}
-  class="relative h-16 cursor-ew-resize overflow-hidden rounded bg-neutral-800"
+  class="relative h-16 cursor-ew-resize overflow-hidden rounded bg-surface-2"
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
@@ -158,7 +158,7 @@
 >
   {#each neighbours as n (n.id)}
     <div
-      class="pointer-events-none absolute top-2 bottom-2 rounded bg-blue-500/30"
+      class="pointer-events-none absolute top-2 bottom-2 rounded bg-accent/30"
       style={`left:${frac(n.start_ms) * 100}%;width:${
         Math.max(0.2, (frac(n.end_ms) - frac(n.start_ms)) * 100)
       }%`}
@@ -181,7 +181,7 @@
     was always the true fraction -- which is why only the right handle broke.
   -->
   <div
-    class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-blue-400 bg-blue-400/25"
+    class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-accent bg-accent/25"
     style={`left:${frac(rally.start_ms) * 100}%;width:${
       Math.max(0.4, (frac(rally.end_ms) - frac(rally.start_ms)) * 100)
     }%`}
@@ -190,8 +190,8 @@
          target is wider still (HANDLE_GRAB_PX); this is only the affordance,
          sized so the thing you aim at is actually visible against a 66px-wide
          short rally. -->
-    <div class="absolute -top-0.5 -bottom-0.5 -left-1.5 w-3 rounded bg-blue-400"></div>
-    <div class="absolute -top-0.5 -bottom-0.5 -right-1.5 w-3 rounded bg-blue-400"></div>
+    <div class="absolute -top-0.5 -bottom-0.5 -left-1.5 w-3 rounded bg-accent"></div>
+    <div class="absolute -top-0.5 -bottom-0.5 -right-1.5 w-3 rounded bg-accent"></div>
   </div>
 
   <!--
@@ -206,7 +206,7 @@
   -->
   <div
     bind:this={playheadEl}
-    class="pointer-events-none absolute inset-y-0 w-0.5 bg-red-500"
+    class="pointer-events-none absolute inset-y-0 w-0.5 bg-fg"
     style="left: 0%"
   ></div>
 </div>

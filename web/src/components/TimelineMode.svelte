@@ -300,12 +300,12 @@
     onprogress={() => writePlayhead(deck?.currentMs() ?? 0)}
   />
 
-  <p class="mt-2 font-mono text-xs text-neutral-400">
+  <p class="mt-2 font-data text-data text-dim">
     rally {rally.idx} · {formatTs(rally.start_ms)} → {formatTs(rally.end_ms)}
   </p>
 
   <section class="mt-4 space-y-1">
-    <p class="text-[11px] tracking-wide text-neutral-500 uppercase">whole session</p>
+    <p class="text-caption tracking-wide text-faint uppercase">whole session</p>
     <OverviewBand
       {rallies}
       sources={detail.sources}
@@ -317,7 +317,7 @@
   </section>
 
   <section class="mt-4 space-y-1">
-    <p class="text-[11px] tracking-wide text-neutral-500 uppercase">±20s — drag either handle</p>
+    <p class="text-caption tracking-wide text-faint uppercase">±20s — drag either handle</p>
     <ZoomBand
       bind:this={zoomBand}
       {rally}
@@ -344,7 +344,7 @@
     {/if}
 
     <div class="flex items-center gap-2 pt-1">
-      <span class="text-[11px] text-neutral-500">preview threshold</span>
+      <span class="text-caption text-faint">preview threshold</span>
       <input
         type="range"
         min="0.05"
@@ -356,21 +356,21 @@
         class="flex-1 disabled:opacity-40"
         aria-label="preview threshold"
       />
-      <span class="w-10 font-mono text-[11px] text-neutral-500">
+      <span class="w-10 font-data text-caption text-faint">
         {threshold === null ? '…' : threshold.toFixed(2)}
       </span>
     </div>
 
-    <p class="flex items-center gap-2 font-mono text-[11px] text-neutral-500">
+    <p class="flex items-center gap-2 font-data text-caption text-faint">
       <span>
         detector score — dashed line is the threshold · [ ] set in/out · , . step one frame · esc back
       </span>
       <!-- Edits persist on drag-release and on [ / ], with no save button, so
            this is the only thing telling the user an edit took. -->
       {#if saveState === 'saved'}
-        <span class="text-green-400" role="status">✓ saved</span>
+        <span class="text-faint" role="status">✓ saved</span>
       {:else if saveState === 'error'}
-        <span class="text-red-400" role="status">✕ not saved</span>
+        <span class="text-danger" role="status">✕ not saved</span>
       {/if}
     </p>
   </section>
@@ -378,12 +378,12 @@
   {#if toaster.toasts.length > 0}
     <div class="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 space-y-2">
       {#each toaster.toasts as t (t.id)}
-        <div class="rounded {toastToneClasses(t.tone, 'muted')} px-3 py-2 text-sm shadow-lg">
+        <div class="rounded {toastToneClasses(t.tone, 'muted')} px-3 py-2 text-body shadow-lg">
           {t.message}
         </div>
       {/each}
     </div>
   {/if}
 {:else}
-  <p class="text-sm text-neutral-400">No rallies to show.</p>
+  <p class="text-body text-dim">No rallies to show.</p>
 {/if}

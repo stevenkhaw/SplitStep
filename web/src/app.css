@@ -1,1 +1,85 @@
 @import "tailwindcss";
+
+/* The design tokens. Every colour and every type size in the app resolves
+   through one of these -- if a component reaches for a raw Tailwind palette
+   class (`bg-neutral-800`, `text-blue-300`) it has escaped the system and
+   should be brought back here instead.
+
+   Dark-only is a decision, not an omission: the app is used on a laptop
+   reviewing night footage, and a light mode would be a second palette
+   nobody opens. It is expressed through these tokens rather than through
+   two literals on <html>/<body>, so changing it later is one file. */
+@theme {
+  /* Base. The ramp is shifted toward violet rather than sitting on
+     Tailwind's neutral grey, so the chrome sits *with* night-court footage
+     instead of against it: the video is a violet-cast sky, blown warm
+     floodlights and a desaturated green court, and pure grey chrome reads
+     as a separate object pasted over it. */
+  --color-bg: #0b0b0e;
+  --color-surface: #141419;
+  --color-surface-2: #1d1d24;
+  --color-line: #2a2a33;
+
+  /* Text. Named for their job, not their lightness. All three clear 4.5:1
+     against both --color-bg and --color-surface (16.1 / 7.1 / 5.2 on bg),
+     which is what lets `faint` be used for the keyboard legend -- real
+     functional text, not decoration. */
+  --color-fg: #e8e8ee;
+  --color-dim: #9a9aa8;
+  --color-faint: #82828e;
+
+  /* Semantic. Four, and *reject is deliberately not one of them*.
+
+     Detection is recall-biased by design ("rejecting a false rally is one
+     keystroke, a missed rally means rescrubbing an hour"), so rejecting is
+     the single most frequent action in the app. Colouring the routine case
+     red states "error" about normal work and wears the reviewer down over
+     hundreds of reps. Reject is instead the *absence* of emphasis --
+     `text-faint` plus a strikethrough -- which both matches its meaning
+     (dismissed, receded) and leaves --color-danger free to mean an actual
+     failure: a failed job, a missing clip, a render refusing to run.
+
+     star and point are different axes, not two grades of the same one: a
+     rally can be either, both or neither. Warm versus cool keeps them
+     apart at a glance, which a single hue at two saturations would not. */
+  --color-star: #f0a94c; /* sodium floodlight, off the footage's own lights */
+  --color-point: #6fd0e8; /* ice; counted, clinical, not a rating */
+  --color-accent: #6e9bff; /* the one interactive blue: links, focus, progress */
+  --color-danger: #f0666b; /* real failure only */
+
+  /* Type. Five roles rather than a size ramp, because the failure this
+     replaces was 74 uses of text-xs and 50 of text-sm -- naming sizes by
+     magnitude is what let everything collapse into the same two. A role
+     has to be argued for at the callsite. */
+  --text-display: 1.75rem; /* 28px: session identity, rally position */
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.02em;
+  --text-title: 1.125rem; /* 18px: section headers */
+  --text-title--line-height: 1.3;
+  --text-title--letter-spacing: -0.01em;
+  --text-body: 0.9375rem; /* 15px: prose */
+  --text-body--line-height: 1.5;
+  --text-data: 0.8125rem; /* 13px: anything numeric, always mono */
+  --text-data--line-height: 1.45;
+  --text-caption: 0.75rem; /* 12px: keyboard legend and hints only */
+  --text-caption--line-height: 1.6;
+
+  /* Faces. System stacks on purpose -- "no cloud, no services" rules out
+     Google Fonts, and self-hosting a webfont costs bundle weight for
+     marginal character in an app whose largest string is a date. SF Mono
+     already carries the tabular figures the data role actually needs. */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-data: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Numbers must not reflow as they tick. The queue's status line updates its
+   timecode several times a second and the timeline's rows are read as
+   columns, so proportional figures made the layout jitter sideways and
+   nothing lined up between rows. Applied to the face rather than per
+   callsite so it cannot be forgotten. */
+.font-data,
+code,
+kbd {
+  font-variant-numeric: tabular-nums;
+}

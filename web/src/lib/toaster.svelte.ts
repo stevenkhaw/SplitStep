@@ -51,19 +51,20 @@ export function createToaster(durationMs: number = DEFAULT_DURATION_MS) {
 /**
  * Tailwind classes for a toast pill, by tone.
  *
- * `surface` picks which of two already-shipped colour treatments to key
- * off: 'solid' is QueueMode/LabelMode's mid-opacity pill, 'muted' is
- * TimelineMode's darker one over the boundary editor. 'error' reproduces
- * each surface's existing red exactly, so this refactor changes no pixel on
- * the failure path every consumer already relied on. 'info' extends that
- * same surface's own blue -- the colour this app already uses for
- * "something is progressing, not broken" (JobsBadge's running-job count,
- * the queue/label progress bars, Setup's action button) -- rather than
- * inventing a third hue project-wide.
+ * `surface` picks which of two treatments to key off: 'solid' is
+ * QueueMode/LabelMode's filled pill, 'muted' is TimelineMode's quieter one
+ * over the boundary editor. Both now resolve through the design tokens
+ * (app.css) rather than raw palette steps, so a toast cannot drift from the
+ * rest of the app: 'error' is --color-danger, 'info' is --color-accent, the
+ * colour this app already uses for "progressing, not broken" (the jobs
+ * badge, the queue/label progress bars, the primary buttons).
+ *
+ * Solid pills set an explicit dark label. Both tokens are light enough that
+ * white-on-fill measures about 2:1, while bg-on-fill clears 6.4:1.
  */
 export function toastToneClasses(tone: ToastTone, surface: 'solid' | 'muted' = 'solid'): string {
   if (surface === 'muted') {
-    return tone === 'error' ? 'bg-red-900/90 text-red-100' : 'bg-blue-900/90 text-blue-100'
+    return tone === 'error' ? 'bg-danger/20 text-danger' : 'bg-accent/20 text-accent'
   }
-  return tone === 'error' ? 'bg-red-500/90 text-white' : 'bg-blue-500/90 text-white'
+  return tone === 'error' ? 'bg-danger text-bg' : 'bg-accent text-bg'
 }

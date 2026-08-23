@@ -151,15 +151,15 @@
   }
 </script>
 
-<details bind:open class="mt-6 rounded-lg border border-neutral-800">
-  <summary class="cursor-pointer select-none p-4 text-sm font-semibold">Play region</summary>
+<details bind:open class="mt-6 rounded-lg border border-line">
+  <summary class="cursor-pointer select-none p-4 text-body font-semibold">Play region</summary>
 
   <!-- `{#if open}` rather than letting <details> merely hide a mounted
        subtree: hidden children still load, and QuadCanvas' frame request
        makes the server extract a frame with ffmpeg. -->
   {#if open}
     <div class="px-4 pb-4">
-      <p class="text-xs text-neutral-400">
+      <p class="text-caption text-dim">
         Drag the four corners to cover the area both players move in, extended to the bottom of
         frame. Without this, adjacent public courts stay visible to detection and can be picked as
         the far player.
@@ -169,7 +169,7 @@
         <select
           value={sourceId}
           onchange={(e) => onSourceChange(e.currentTarget.value)}
-          class="mt-3 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          class="mt-3 rounded border border-line bg-surface px-2 py-1 text-body"
           aria-label="source to edit"
         >
           {#each sources as s (s.id)}
@@ -179,7 +179,7 @@
       {/if}
 
       {#if source}
-        <p class="mt-2 font-mono text-[11px] text-neutral-500">
+        <p class="mt-2 font-data text-caption text-faint">
           currently assigned: {assignedLabel}
         </p>
 
@@ -198,11 +198,11 @@
           <input
             bind:value={name}
             placeholder={defaultPresetName(sessionId, source.idx)}
-            class="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            class="flex-1 rounded border border-line bg-surface px-2 py-1 text-body"
             aria-label="preset name"
           />
           <button
-            class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
+            class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40"
             onclick={save}
             disabled={busy}
           >
@@ -212,10 +212,10 @@
 
         {#if presets.length > 0}
           <div class="mt-3 flex flex-wrap gap-2">
-            <span class="text-xs text-neutral-500">reuse:</span>
+            <span class="text-caption text-faint">reuse:</span>
             {#each presets as p (p.id)}
               <button
-                class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800
+                class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2
                        disabled:opacity-40"
                 onclick={() => assignExisting(p)}
                 disabled={busy}
@@ -227,10 +227,10 @@
         {/if}
 
         {#if status}
-          <p class="mt-2 font-mono text-xs text-amber-300">{status}</p>
+          <p class="mt-2 font-data text-caption text-accent">{status}</p>
         {/if}
         {#if error}
-          <p class="mt-2 font-mono text-xs text-red-300">{error}</p>
+          <p class="mt-2 font-data text-data text-danger">{error}</p>
         {/if}
       {/if}
     </div>

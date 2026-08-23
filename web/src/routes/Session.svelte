@@ -162,10 +162,10 @@
 
 <header class="mb-4 flex items-baseline justify-between">
   <div class="flex items-baseline gap-4">
-    <button class="text-sm text-neutral-400 hover:text-neutral-100" onclick={() => navigate('/')}>
+    <button class="text-body text-dim hover:text-fg" onclick={() => navigate('/')}>
       ← library
     </button>
-    <h1 class="text-lg font-semibold">{detail?.session.title ?? id}</h1>
+    <h1 class="text-display font-semibold">{detail?.session.title ?? id}</h1>
   </div>
   <!--
     Finding 9: QueueMode's persist-failure handling deliberately doesn't
@@ -178,14 +178,14 @@
 </header>
 
 {#if error}
-  <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
 {:else if !detail}
-  <p class="text-sm text-neutral-400">Loading…</p>
+  <p class="text-body text-dim">Loading…</p>
 {:else}
   {#if needsSetupSources.length > 0}
-    <div class="mb-4 space-y-2 rounded-lg border border-blue-700/50 bg-blue-500/5 p-4">
-      <h2 class="text-sm font-semibold text-blue-300">Set up sources</h2>
-      <p class="text-xs text-blue-200/80">
+    <div class="mb-4 space-y-2 rounded-lg border border-accent/50 bg-accent/5 p-4">
+      <h2 class="text-body font-semibold text-accent">Set up sources</h2>
+      <p class="text-caption text-accent/80">
         These sources need setup before detection can begin. Pick the rotation and play region for
         each.
       </p>
@@ -193,7 +193,7 @@
         {#each needsSetupSources as source (source.id)}
           <li>
             <button
-              class="inline-block rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500"
+              class="inline-block rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110"
               onclick={() => openSetupWizard(source)}
             >
               Set up source {source.idx}

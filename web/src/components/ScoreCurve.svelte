@@ -34,7 +34,7 @@
     stroke="currentColor"
     stroke-width="2"
     {points}
-    class="text-neutral-400"
+    class="text-dim"
   />
   <line
     x1="0"
@@ -44,6 +44,6 @@
     stroke="currentColor"
     stroke-width="1.5"
     stroke-dasharray="5 4"
-    class="text-amber-400"
+    class="text-accent"
   />
 </svg>

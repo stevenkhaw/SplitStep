@@ -47,17 +47,17 @@
   }
 </script>
 
-<div class="rounded-lg border border-neutral-800 p-4">
+<div class="rounded-lg border border-line p-4">
   <div class="mb-3 flex items-baseline justify-between">
-    <h2 class="text-sm font-semibold">Preview</h2>
-    <div class="flex items-center gap-4 font-mono text-xs text-neutral-400">
+    <h2 class="text-body font-semibold">Preview</h2>
+    <div class="flex items-center gap-4 font-data text-data text-dim">
       <!-- Stated rather than discovered later: this is the 1080p proxy, and
            it cannot reveal a -c copy artifact. It shows TIMING exactly. -->
       <span>1080p proxy · timing only</span>
       <span class="tabular-nums">
         {Math.min(position.index + 1, position.total)} / {position.total}
       </span>
-      <button class="hover:text-neutral-200" onclick={onclose}>close</button>
+      <button class="hover:text-fg" onclick={onclose}>close</button>
     </div>
   </div>
 
@@ -72,13 +72,13 @@
     />
   {:else}
     <div class="flex h-40 flex-col items-center justify-center gap-3 rounded bg-black">
-      <p class="font-mono text-xs text-neutral-400">
+      <p class="font-data text-data text-dim">
         {position.total === 0 ? 'Nothing in this reel yet.' : 'End of reel.'}
       </p>
       {#if position.total > 0}
         <button
-          class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs
-                 text-neutral-200 hover:bg-neutral-800"
+          class="rounded border border-line px-3 py-1.5 font-data text-data
+                 text-fg hover:bg-surface-2"
           onclick={restart}
         >
           Play again

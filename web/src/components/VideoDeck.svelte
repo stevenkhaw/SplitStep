@@ -336,16 +336,16 @@
     onerror={() => handleError(b)}
   ></video>
   {#if loadError}
-    <div class="absolute inset-0 flex items-center justify-center bg-black/50 text-white">
-      <span class="rounded-full bg-white px-5 py-2 text-sm font-medium text-black">{loadError}</span>
+    <div class="absolute inset-0 flex items-center justify-center bg-black/50 text-fg">
+      <span class="rounded-full bg-fg px-5 py-2 text-body font-medium text-bg">{loadError}</span>
     </div>
   {:else if blocked}
     <button
       type="button"
-      class="absolute inset-0 flex items-center justify-center bg-black/50 text-white"
+      class="absolute inset-0 flex items-center justify-center bg-black/50 text-fg"
       onclick={play}
     >
-      <span class="rounded-full bg-white px-5 py-2 text-sm font-medium text-black">Click to play</span>
+      <span class="rounded-full bg-fg px-5 py-2 text-body font-medium text-bg">Click to play</span>
     </button>
   {/if}
 </div>

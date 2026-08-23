@@ -82,13 +82,13 @@ describe('createToaster', () => {
 })
 
 describe('toastToneClasses', () => {
-  it('keeps error alarming red', () => {
-    expect(toastToneClasses('error')).toMatch(/red/)
+  it('keeps the error tone on the danger token', () => {
+    expect(toastToneClasses('error')).toMatch(/danger/)
   })
 
   it('renders info in a distinct, non-red style', () => {
     const classes = toastToneClasses('info')
-    expect(classes).not.toMatch(/red/)
+    expect(classes).not.toMatch(/danger/)
   })
 
   it('is consistent for the same tone regardless of surface', () => {

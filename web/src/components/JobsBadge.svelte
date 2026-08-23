@@ -23,11 +23,11 @@
 </script>
 
 {#if label}
-  <span class="rounded bg-blue-500/20 px-2 py-1 text-xs text-blue-300">{label}</span>
+  <span class="rounded bg-accent/20 px-2 py-1 text-caption text-accent">{label}</span>
 {/if}
 {#if failed.length > 0}
   <span
-    class="rounded bg-red-500/20 px-2 py-1 text-xs text-red-300"
+    class="rounded bg-danger/20 px-2 py-1 text-caption text-danger"
     title={failed[0].error ?? ''}
   >
     {failed.length} failed

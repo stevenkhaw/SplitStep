@@ -164,11 +164,11 @@
   }
 </script>
 
-<details bind:open class="mt-6 rounded-lg border border-neutral-800">
-  <summary class="cursor-pointer select-none p-4 text-sm font-semibold">Re-segment</summary>
+<details bind:open class="mt-6 rounded-lg border border-line">
+  <summary class="cursor-pointer select-none p-4 text-body font-semibold">Re-segment</summary>
 
   <div class="px-4 pb-4">
-    <p class="text-xs text-neutral-400">
+    <p class="text-caption text-dim">
       Runs over cached features — no GPU. Stars and rejections carry across by overlap;
       hand-edited boundaries do not.
     </p>
@@ -177,7 +177,7 @@
       <select
         value={sourceId}
         onchange={(e) => onSourceChange(e.currentTarget.value)}
-        class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+        class="rounded border border-line bg-surface px-2 py-1 text-body"
         aria-label="source to re-segment"
       >
         {#each sources as s (s.id)}
@@ -196,10 +196,10 @@
         class="flex-1 disabled:opacity-40"
         aria-label="detector threshold"
       />
-      <span class="w-12 font-mono text-sm">{threshold === null ? '…' : threshold.toFixed(2)}</span>
+      <span class="w-12 font-data text-body">{threshold === null ? '…' : threshold.toFixed(2)}</span>
 
       <button
-        class="rounded bg-blue-600 px-3 py-1 text-sm disabled:opacity-40"
+        class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40"
         onclick={run}
         disabled={busy || !source || threshold === null}
       >
@@ -210,25 +210,25 @@
     {#if source && threshold !== null}
       <div class="mt-3">
         <ScoreCurve {scores} {threshold} stepMs={scoreStepMs} windowStartMs={0} windowEndMs={source.duration_ms} />
-        <p class="mt-1 font-mono text-[11px] text-neutral-500">
+        <p class="mt-1 font-data text-caption text-faint">
           detector score for the whole source — dashed line is the threshold above
         </p>
       </div>
     {/if}
 
     {#if editedCount > 0}
-      <p class="mt-2 text-xs text-amber-300">
+      <p class="mt-2 text-caption text-danger">
         {editedCount} hand-edited boundar{editedCount === 1 ? 'y' : 'ies'} on this source will be
         discarded if you re-segment.
       </p>
     {/if}
     {#if lastCount !== null && threshold !== null}
-      <p class="mt-2 font-mono text-xs text-neutral-400">
+      <p class="mt-2 font-data text-data text-dim">
         {lastCount} rallies at threshold {threshold.toFixed(2)}
       </p>
     {/if}
     {#if error}
-      <p class="mt-2 text-xs text-red-300">{error}</p>
+      <p class="mt-2 text-caption text-danger">{error}</p>
     {/if}
   </div>
 </details>

@@ -68,6 +68,15 @@
   const initialRallyId = untrack(() => startAtRallyId)
   if (initialRallyId) queue.jumpTo(initialRallyId)
   const toaster = createToaster()
+
+  // The keyboard legend is reference material, not content, so it sits at
+  // caption weight -- but the keys themselves have to stay findable inside
+  // it. Boxing each key does that without raising the whole line, which is
+  // what the previous single run-on sentence at the same weight as the live
+  // data above it could not do.
+  const KBD =
+    'rounded border border-line bg-surface-2 px-1.5 font-data text-caption text-dim'
+
   let version = $state(0) // bumped to re-read the controller after a mutation
   let speed = $state(1)
   let deck = $state<VideoDeck>()
@@ -419,39 +428,39 @@
        either way). Naming the actual cause here -- nothing detected yet, or
        the threshold produced none -- points at what to do next instead of
        misreporting a session that was never reviewed as reviewed. -->
-  <section class="rounded-lg border border-neutral-800 p-8 text-center">
-    <h2 class="text-lg font-semibold">No rallies to review</h2>
-    <p class="mt-2 font-mono text-sm text-neutral-400">
+  <section class="rounded-lg border border-line p-8 text-center">
+    <h2 class="text-title font-semibold">No rallies to review</h2>
+    <p class="mt-2 font-data text-body text-dim">
       Nothing has been detected for this session yet, or the current threshold produced zero
       rallies. Re-segment at a lower threshold below, or wait for detection to finish.
     </p>
   </section>
 {:else if !current}
-  <section class="rounded-lg border border-neutral-800 p-8 text-center">
-    <h2 class="text-lg font-semibold">Session reviewed</h2>
-    <p class="mt-2 font-mono text-sm text-neutral-400">
+  <section class="rounded-lg border border-line p-8 text-center">
+    <h2 class="text-title font-semibold">Session reviewed</h2>
+    <p class="mt-2 font-data text-body text-dim">
       {stats.total} seen · ★{stats.starredCount} starred · ✕{stats.rejectedCount} rejected
     </p>
     <!-- M3: this screen used to render no help line at all, so the only way
          into label mode -- pressing L -- was undiscoverable exactly when a
          reviewer who just finished a pass is most likely to want it. -->
-    <p class="mt-4 font-mono text-xs text-neutral-500">L label</p>
+    <p class="mt-4 font-data text-data text-faint">L label</p>
     <!-- Two rows, four actions: cut, and compile. The reel buttons are
          ADDITIONS beside Plan A's export pair, never replacements -- cutting
          clips and compiling a reel are different decisions, and only the
          first one starts an encode. -->
     <div class="mt-4 flex items-center justify-center gap-3">
       <button
-        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={stats.pointCount === 0}
         onclick={() => exportSet('points')}
       >
         Export point clips ({stats.pointCount})
       </button>
       <button
-        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={stats.starredCount === 0}
         onclick={() => exportSet('starred')}
       >
@@ -460,16 +469,16 @@
     </div>
     <div class="mt-2 flex items-center justify-center gap-3">
       <button
-        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={stats.pointCount === 0}
         onclick={() => buildReel('points')}
       >
         Reel of all points ({stats.pointCount})
       </button>
       <button
-        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-               hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+               hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={stats.starredCount === 0}
         onclick={() => buildReel('starred')}
       >
@@ -497,7 +506,7 @@
     />
     <div
       class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
-             font-mono text-xs tabular-nums text-neutral-200"
+             font-data text-data tabular-nums text-fg"
     >
       {stats.index + 1} / {stats.total}
     </div>
@@ -517,7 +526,7 @@
   -->
   <div
     bind:this={scrubTrack}
-    class="relative mt-3 h-2 cursor-ew-resize overflow-hidden rounded bg-neutral-800"
+    class="relative mt-3 h-2 cursor-ew-resize overflow-hidden rounded bg-surface-2"
     onpointerdown={onScrubDown}
     onpointermove={onScrubMove}
     onpointerup={endScrub}
@@ -531,7 +540,7 @@
   >
     <div
       bind:this={progressBar}
-      class="h-full origin-left rounded bg-blue-500"
+      class="h-full origin-left rounded bg-accent"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -550,44 +559,76 @@
       maxlength={NOTE_MAX_CHARS}
       placeholder="note for this rally — Enter saves, Esc cancels"
       aria-label="rally note"
-      class="mt-2 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1
-             font-mono text-sm"
+      class="mt-2 w-full rounded border border-line bg-surface px-2 py-1
+             font-data text-body"
     />
   {/if}
 
-  <div class="mt-2 flex items-center justify-between font-mono text-xs text-neutral-400">
-    <span class="flex items-center gap-2">
-      <span
-        class="text-base leading-none {currentStarred ? 'text-yellow-400' : 'text-neutral-700'}"
-        title={currentStarred ? 'starred' : 'not starred'}
-      >★</span>
-      <span
-        class="text-base leading-none {currentPoint ? 'text-green-400' : 'text-neutral-700'}"
-        title={currentPoint ? 'point' : 'not a point'}
-      >●</span>
-      <span
-        class="text-base leading-none {currentHasNote ? 'text-blue-300' : 'text-neutral-700'}"
-        title={currentHasNote ? currentNote : 'no note'}
-      >✎</span>
-      rally {stats.index + 1} / {stats.total} ·
-      {formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}
-      {#if currentRejected}<span class="text-red-400">· rejected</span>{/if}
+  <!-- Two groups, and they mean different things: the left is *this rally's*
+       state, the right is the session tally. `★` previously appeared in both
+       halves of one undivided line with no way to tell which was which. The
+       left group is now boxed toggles that fill when set, because the old
+       treatment drew the unset state in text-neutral-700 -- close enough to
+       the background that "not starred" and "no such control" looked the
+       same. -->
+  <div class="mt-2 flex items-center justify-between gap-4 font-data text-data text-dim">
+    <span class="flex items-center gap-3">
+      <span class="flex items-center gap-1.5">
+        <span
+          class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
+                 {currentStarred
+            ? 'border-star/35 bg-star/15 text-star'
+            : 'border-transparent bg-surface-2 text-faint'}"
+          title={currentStarred ? 'starred' : 'not starred'}
+        >★</span>
+        <span
+          class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
+                 {currentPoint
+            ? 'border-point/35 bg-point/15 text-point'
+            : 'border-transparent bg-surface-2 text-faint'}"
+          title={currentPoint ? 'point' : 'not a point'}
+        >●</span>
+        <span
+          class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
+                 {currentHasNote
+            ? 'border-accent/35 bg-accent/15 text-accent'
+            : 'border-transparent bg-surface-2 text-faint'}"
+          title={currentHasNote ? currentNote : 'no note'}
+        >✎</span>
+      </span>
+      <span class="text-fg">rally {stats.index + 1} / {stats.total}</span>
+      <span>{formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}</span>
+      <!-- Rejected is deliberately not danger-coloured. Detection is
+           recall-biased, so rejecting is the most frequent action here; red
+           would state "error" about the routine case. It recedes instead. -->
+      {#if currentRejected}<span class="text-faint">rejected</span>{/if}
     </span>
-    <span>
-      ★{stats.starredCount} ✕{stats.rejectedCount} ●{stats.pointCount} ·
-      ~{formatDuration(stats.remainingMs)} left at {speed}×
+    <span class="flex shrink-0 items-center gap-3">
+      <span class="text-star">★ {stats.starredCount}</span>
+      <span class="text-point">● {stats.pointCount}</span>
+      <span class="text-faint">✕ {stats.rejectedCount}</span>
+      <span>~{formatDuration(stats.remainingMs)} left at {speed}×</span>
     </span>
   </div>
 
-  <p class="mt-4 font-mono text-xs text-neutral-500">
-    S star · P point · X reject (again to undo) · R replay · N note · ← back · → next · U undo · `/1/2/3 speed · T timeline · L label
+  <p class="mt-3 text-caption text-faint">
+    <kbd class={KBD}>S</kbd> star
+    <kbd class={KBD}>P</kbd> point
+    <kbd class={KBD}>X</kbd> reject
+    <kbd class={KBD}>R</kbd> replay
+    <kbd class={KBD}>N</kbd> note
+    <kbd class={KBD}>←</kbd><kbd class={KBD}>→</kbd> move
+    <kbd class={KBD}>U</kbd> undo
+    <kbd class={KBD}>`</kbd><kbd class={KBD}>1</kbd><kbd class={KBD}>2</kbd><kbd class={KBD}>3</kbd> speed
+    <kbd class={KBD}>T</kbd> timeline
+    <kbd class={KBD}>L</kbd> label
   </p>
 {/if}
 
 {#if toaster.toasts.length > 0}
   <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
     {#each toaster.toasts as t (t.id)}
-      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-sm shadow-lg">
+      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-body shadow-lg">
         {t.message}
       </div>
     {/each}

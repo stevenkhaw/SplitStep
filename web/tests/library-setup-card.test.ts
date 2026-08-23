@@ -407,13 +407,13 @@ describe('Library', () => {
     flushSync()
 
     await vi.waitFor(() => {
-      expect(target.querySelector('span.font-mono')).not.toBeNull()
+      expect(target.querySelector('span.font-data')).not.toBeNull()
     })
 
     // The header's Reels link is also .font-mono, so scope to the span the
     // session row renders its summary into -- the header control is a
     // button, not a span.
-    const summary = target.querySelector('span.font-mono')
+    const summary = target.querySelector('span.font-data')
     expect(summary?.textContent).toContain('P24')
     expect(summary?.textContent).toContain('★0')
     // Points is the structural fact (a session has points); starred is a

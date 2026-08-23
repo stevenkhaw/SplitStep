@@ -25,13 +25,13 @@
   }
 </script>
 
-<div class="relative h-7 overflow-hidden rounded bg-neutral-800">
+<div class="relative h-7 overflow-hidden rounded bg-surface-2">
   {#each rallies as r (r.id)}
     <button
       type="button"
       class="absolute top-1 bottom-1 rounded-sm {r.starred
-        ? 'bg-amber-400'
-        : 'bg-blue-500'} {r.id === currentId ? 'ring-2 ring-white' : 'opacity-60'}"
+        ? 'bg-star'
+        : 'bg-accent'} {r.id === currentId ? 'ring-2 ring-fg' : 'opacity-60'}"
       style={pos(r)}
       title={`rally ${r.idx}`}
       onclick={() => onpick(r.id)}
@@ -43,7 +43,7 @@
   {#each timeline.marks as m (m.sourceId)}
     {#if m.gapMs > 0}
       <div
-        class="pointer-events-none absolute inset-y-0 w-px bg-neutral-500"
+        class="pointer-events-none absolute inset-y-0 w-px bg-faint"
         style={`left:${msToFraction(m.offsetMs, timeline.totalMs) * 100}%`}
         title={`+${formatDuration(m.gapMs)} break`}
       ></div>
@@ -51,7 +51,7 @@
   {/each}
 
   <div
-    class="pointer-events-none absolute inset-y-0 border-2 border-white/70 bg-white/10"
+    class="pointer-events-none absolute inset-y-0 border-2 border-fg/70 bg-fg/10"
     style={`left:${msToFraction(windowStartMs, timeline.totalMs) * 100}%;width:${
       msToFraction(windowEndMs - windowStartMs, timeline.totalMs) * 100
     }%`}

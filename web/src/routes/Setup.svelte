@@ -135,19 +135,19 @@
 </script>
 
 {#if error}
-  <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
 {/if}
 
 {#if !source}
-  <p class="text-sm text-neutral-400">Loading…</p>
+  <p class="text-body text-dim">Loading…</p>
 {:else}
   <header class="mb-4">
-    <h1 class="text-xl font-semibold">Set up source {source.idx}</h1>
-    <p class="mt-1 text-sm text-neutral-400">
+    <h1 class="text-display font-semibold">Set up source {source.idx}</h1>
+    <p class="mt-1 text-body text-dim">
       Pick the rotation and drag the play region over a real frame, then start detection.
     </p>
     {#if source.status === 'ready'}
-      <p class="mt-2 rounded bg-amber-500/10 p-3 text-xs text-amber-300">
+      <p class="mt-2 rounded bg-danger/10 p-3 text-caption text-danger">
         Re-running setup rebuilds the proxy and replaces this source's rallies, including any
         boundaries you hand-edited.
       </p>
@@ -157,15 +157,15 @@
   <section>
     <div class="flex items-center gap-3">
       <button
-        class="rounded border border-neutral-700 px-2 py-1 text-sm hover:bg-neutral-800"
+        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2"
         onclick={() => rotate(-1)}
         aria-label="rotate counter-clockwise"
       >
         &#8634;
       </button>
-      <span class="font-mono text-xs text-neutral-400">{rotation}&deg;</span>
+      <span class="font-data text-data text-dim">{rotation}&deg;</span>
       <button
-        class="rounded border border-neutral-700 px-2 py-1 text-sm hover:bg-neutral-800"
+        class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2"
         onclick={() => rotate(1)}
         aria-label="rotate clockwise"
       >
@@ -183,7 +183,7 @@
     <div class="mt-3 grid grid-cols-3 gap-2">
       {#each timestamps as t (t)}
         <button
-          class="overflow-hidden rounded border border-neutral-800 hover:border-neutral-600"
+          class="overflow-hidden rounded border border-line hover:border-line"
           onclick={() => seek(t)}
         >
           <img
@@ -198,15 +198,15 @@
   </section>
 
   <section class="mt-6">
-    <h2 class="text-sm font-semibold">Play region</h2>
-    <p class="mt-1 text-xs text-neutral-400">
+    <h2 class="text-body font-semibold">Play region</h2>
+    <p class="mt-1 text-caption text-dim">
       Drag the four corners to cover the area both players move in, extended to the bottom of
       frame.
     </p>
 
     <div class="mt-3 flex flex-wrap items-center gap-2">
       <button
-        class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+        class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2"
         onclick={() => usePoints(DEFAULT_QUAD_POINTS)}
         aria-label="use default play region"
       >
@@ -214,7 +214,7 @@
       </button>
       {#each presets as p (p.id)}
         <button
-          class="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+          class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2"
           onclick={() => usePoints(p.points, p.id)}
           aria-label="use preset {p.name}"
         >
@@ -243,7 +243,7 @@
   </section>
 
   <button
-    class="mt-6 rounded bg-blue-600 px-4 py-1.5 text-sm disabled:opacity-40"
+    class="mt-6 rounded bg-accent px-4 py-1.5 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40"
     onclick={start}
     disabled={!points || busy}
     aria-label="start detection"

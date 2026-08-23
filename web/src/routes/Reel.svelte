@@ -278,13 +278,13 @@
 
 <header class="mb-6 flex items-baseline justify-between">
   <div>
-    <button class="font-mono text-xs text-neutral-400 hover:text-neutral-200"
+    <button class="font-data text-data text-dim hover:text-fg"
             onclick={() => navigate('/reels')}>← Reels</button>
     {#if editingName}
       <div class="mt-1 flex items-center gap-2">
         <input
           data-rename-input
-          class="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-lg
+          class="rounded border border-line bg-surface px-2 py-1 text-display
                  font-semibold"
           bind:value={nameBuffer}
           onkeydown={onNameKey}
@@ -295,24 +295,24 @@
              onNameKey already handles. -->
         <button
           data-rename-save
-          class="rounded border border-neutral-700 px-2 py-1 font-mono text-xs
-                 text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed
+          class="rounded border border-line px-2 py-1 font-data text-data
+                 text-fg hover:bg-surface-2 disabled:cursor-not-allowed
                  disabled:opacity-40"
           disabled={busy || normalizedReelName(nameBuffer) === null}
           onclick={saveName}
         >Save</button>
         <button
-          class="font-mono text-xs text-neutral-400 hover:text-neutral-200"
+          class="font-data text-data text-dim hover:text-fg"
           onclick={cancelRename}
         >Cancel</button>
       </div>
     {:else}
-      <h1 class="mt-1 flex items-center gap-2 text-xl font-semibold">
+      <h1 class="mt-1 flex items-center gap-2 text-display font-semibold">
         {detail?.reel.name ?? slug}
         {#if detail}
           <button
             data-rename
-            class="font-mono text-xs font-normal text-neutral-400 hover:text-neutral-200"
+            class="font-data text-data font-normal text-dim hover:text-fg"
             onclick={startRename}
           >rename</button>
         {/if}
@@ -323,21 +323,21 @@
 </header>
 
 {#if error}
-  <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+  <p class="rounded bg-danger/10 p-3 text-body text-danger">{error}</p>
 {:else if loading && !detail}
-  <p class="text-sm text-neutral-400">Loading…</p>
+  <p class="text-body text-dim">Loading…</p>
 {:else if detail}
   <div class="mb-4 flex flex-wrap items-center gap-3">
     <button
-      class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-             hover:bg-neutral-800"
+      class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+             hover:bg-surface-2"
       onclick={() => (showPicker = !showPicker)}
     >Add rallies</button>
 
     <button
       data-preview
-      class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-             hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+      class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={items.length === 0}
       onclick={() => (showPreview = !showPreview)}
     >{showPreview ? 'Hide preview' : 'Preview'}</button>
@@ -350,8 +350,8 @@
            nothing behind the button before a first render. -->
       <button
         data-watch
-        class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-               hover:bg-neutral-800"
+        class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+               hover:bg-surface-2"
         onclick={() => (showWatch = !showWatch)}
       >{showWatch ? 'Hide watch' : 'Watch'}</button>
     {/if}
@@ -365,16 +365,16 @@
          wondering whether the click registered. -->
     <button
       data-cut
-      class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-             hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+      class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={items.length === 0 || busy}
       onclick={cutMissing}
     >{busy ? 'Working…' : 'Cut missing clips'}</button>
 
     <button
       data-render
-      class="rounded border border-neutral-700 px-3 py-1.5 font-mono text-xs text-neutral-200
-             hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+      class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
+             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={blocked !== null || busy}
       title={blocked ?? ''}
       onclick={render}
@@ -386,31 +386,31 @@
            formatting, and a stray Enter on the page cannot dismiss and
            accidentally confirm it the way a native dialog's default button
            could. -->
-      <span data-delete-confirm class="flex items-center gap-2 font-mono text-xs text-red-300">
+      <span data-delete-confirm class="flex items-center gap-2 font-data text-data text-danger">
         {deleteConfirmationText(detail.reel.name, detail.reel.rendered_bytes)}
         <button
           data-delete-confirm-yes
-          class="rounded border border-red-800 px-2 py-1 text-red-200 hover:bg-red-900/40
+          class="rounded border border-danger px-2 py-1 text-danger hover:bg-danger/40
                  disabled:cursor-not-allowed disabled:opacity-40"
           disabled={busy}
           onclick={confirmDelete}
         >Yes, delete</button>
         <button
-          class="text-neutral-400 hover:text-neutral-200"
+          class="text-dim hover:text-fg"
           onclick={() => (confirmingDelete = false)}
         >Cancel</button>
       </span>
     {:else}
       <button
         data-delete
-        class="rounded border border-red-900/60 px-3 py-1.5 font-mono text-xs text-red-300
-               hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded border border-danger/60 px-3 py-1.5 font-data text-data text-danger
+               hover:bg-danger/40 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={busy}
         onclick={() => (confirmingDelete = true)}
       >Delete reel</button>
     {/if}
 
-    <span class="ml-auto font-mono text-xs text-neutral-500">
+    <span class="ml-auto font-data text-data text-faint">
       {items.length} clips{detail.reel.rendered_path && !detail.reel.dirty
         ? ` · ${detail.reel.rendered_path}`
         : ''}
@@ -448,10 +448,10 @@
   {/if}
 
   {#if showWatch && canWatch && detail.reel.rendered_path}
-    <div class="mb-4 rounded-lg border border-neutral-800 p-4">
+    <div class="mb-4 rounded-lg border border-line p-4">
       <div class="mb-3 flex items-baseline justify-between">
-        <h2 class="text-sm font-semibold">Watch</h2>
-        <div class="flex items-center gap-4 font-mono text-xs text-neutral-400">
+        <h2 class="text-body font-semibold">Watch</h2>
+        <div class="flex items-center gap-4 font-data text-data text-dim">
           <!-- Preview above seeks the 1080p proxy to each span in order --
                it shows TIMING, and by design cannot reveal a -c copy
                artifact (a mismatched profile that -c copy stitched without
@@ -465,7 +465,7 @@
               ? 'rendered 4K · last render, not current membership'
               : 'rendered 4K file'}
           </span>
-          <button class="hover:text-neutral-200" onclick={() => (showWatch = false)}>
+          <button class="hover:text-fg" onclick={() => (showWatch = false)}>
             close
           </button>
         </div>
@@ -488,7 +488,7 @@
   {/if}
 
   {#if items.length === 0}
-    <p class="text-sm text-neutral-400">
+    <p class="text-body text-dim">
       Nothing in this reel yet. Add rallies above, or compile a session's points from the
       end of its review queue.
     </p>
@@ -501,7 +501,7 @@
   <div class="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col
               items-center gap-2">
     {#each toaster.toasts as t (t.id)}
-      <p class="rounded-full px-4 py-2 font-mono text-xs {toastToneClasses(t.tone)}">
+      <p class="rounded-full px-4 py-2 font-data text-data {toastToneClasses(t.tone)}">
         {t.message}
       </p>
     {/each}

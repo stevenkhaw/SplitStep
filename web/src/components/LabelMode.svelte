@@ -243,13 +243,13 @@
 <svelte:window onkeydown={onKey} />
 
 {#if loadError}
-  <p class="rounded bg-red-500/10 p-3 text-sm text-red-300">{loadError}</p>
+  <p class="rounded bg-danger/10 p-3 text-body text-danger">{loadError}</p>
 {:else if !controller}
-  <p class="text-sm text-neutral-400">Loading labels…</p>
+  <p class="text-body text-dim">Loading labels…</p>
 {:else if !current}
-  <section class="rounded-lg border border-neutral-800 p-8 text-center">
-    <h2 class="text-lg font-semibold">Nothing to label</h2>
-    <p class="mt-2 font-mono text-sm text-neutral-400">
+  <section class="rounded-lg border border-line p-8 text-center">
+    <h2 class="text-title font-semibold">Nothing to label</h2>
+    <p class="mt-2 font-data text-body text-dim">
       This session has no rallies yet. Detect or re-segment a source first.
     </p>
   </section>
@@ -276,7 +276,7 @@
     />
     <div
       class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
-             font-mono text-xs tabular-nums text-neutral-200"
+             font-data text-data tabular-nums text-fg"
     >
       {stats.index + 1} / {stats.total} · {stats.labelled} labelled
     </div>
@@ -298,7 +298,7 @@
   -->
   <div
     bind:this={scrubTrack}
-    class="relative mt-3 h-3 cursor-ew-resize rounded bg-neutral-800"
+    class="relative mt-3 h-3 cursor-ew-resize rounded bg-surface-2"
     onpointerdown={onScrubDown}
     onpointermove={onScrubMove}
     onpointerup={endScrub}
@@ -312,7 +312,7 @@
   >
     <div
       bind:this={scrubFill}
-      class="h-full origin-left rounded bg-blue-500"
+      class="h-full origin-left rounded bg-accent"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -324,7 +324,7 @@
     positive (someone walking past the lens), so seeing the number before
     judging is a bias with no compensating benefit.
   -->
-  <div class="mt-2 font-mono text-xs text-neutral-400">
+  <div class="mt-2 font-data text-data text-dim">
     {formatTs(current.det_start_ms)} ·
     {formatDuration(current.det_end_ms - current.det_start_ms)} ·
     <span bind:this={elapsedEl}>{formatTs(0)}</span> / {formatTs(current.det_end_ms - current.det_start_ms)}
@@ -333,13 +333,13 @@
   <div class="mt-3 flex flex-wrap gap-2">
     {#each Object.entries(VERDICT_KEYS) as [key, v] (v)}
       <button
-        class="rounded border px-3 py-1 font-mono text-sm
+        class="rounded border px-3 py-1 font-data text-body
                {verdict === v
-          ? 'border-blue-500 bg-blue-500/20 text-blue-200'
-          : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'}"
+          ? 'border-accent bg-accent/20 text-accent'
+          : 'border-line text-dim hover:bg-surface-2'}"
         onclick={() => apply(controller?.setVerdict(v) ?? null)}
       >
-        {v} <span class="text-neutral-500">{key}</span>
+        {v} <span class="text-faint">{key}</span>
       </button>
     {/each}
   </div>
@@ -348,10 +348,10 @@
     {#each FLAG_ORDER as f (f)}
       <button
         disabled={!flagsEnabled}
-        class="rounded border px-3 py-1 font-mono text-xs disabled:opacity-30
+        class="rounded border px-3 py-1 font-data text-data disabled:opacity-30
                {flags.includes(f)
-          ? 'border-yellow-500 bg-yellow-500/20 text-yellow-200'
-          : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'}"
+          ? 'border-accent bg-accent/20 text-accent'
+          : 'border-line text-dim hover:bg-surface-2'}"
         onclick={() => apply(controller?.toggleFlag(f) ?? null)}
       >
         {FLAG_LABELS[f]}
@@ -359,7 +359,7 @@
     {/each}
   </div>
 
-  <p class="mt-4 font-mono text-xs text-neutral-500">
+  <p class="mt-4 font-data text-data text-faint">
     1 clean · 2 no play · 3 partly · 4 unsure · Q/W start · O/P end · R replay · ← →
     move · U undo · L back to queue
   </p>
@@ -368,7 +368,7 @@
 {#if toaster.toasts.length > 0}
   <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
     {#each toaster.toasts as t (t.id)}
-      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-sm shadow-lg">
+      <div class="rounded {toastToneClasses(t.tone)} px-3 py-2 text-body shadow-lg">
         {t.message}
       </div>
     {/each}
