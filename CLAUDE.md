@@ -218,8 +218,9 @@ undo stack, timeline math, quad geometry, persistence, polling, debounce,
 plus `shortcuts.ts` (the one place a keybinding is written down; the inline
 strip and the `?` overlay both render from it), `status.ts` (status → label +
 tone for the list cards), `jobs.ts` (job phase names and batch elapsed),
-`flash.ts` (the verdict confirmation) and `errors.ts` (`ApiError` →
-a sentence) — and that is what `web/tests/` covers. Components are thin shells over those modules
+`split.ts` (cutting a rally in two and putting it back, with the same idx
+ordering `_renumber` uses), `flash.ts` (the verdict confirmation) and
+`errors.ts` (`ApiError` → a sentence) — and that is what `web/tests/` covers. Components are thin shells over those modules
 and are verified by hand, because jsdom has no `<video>` implementation. Put
 new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
@@ -299,6 +300,27 @@ four had to be retargeted during the migration and would again.
   Two writers: label mode in the UI (verdict + boundary flags) and
   `POST /api/rallies/{id}/bounds`, which turns every manual drag into a signed
   millisecond correction for free.
+- **A rally with `det_start_ms IS NULL` was made by a human, not proposed by
+  the detector.** Timeline mode's `C` cuts one rally in two; the second half
+  carries no detector span, because `rally_labels` anchors on
+  `(source_id, det_start_ms, det_end_ms)` and two halves inheriting one span
+  would collide in the corpus — the second labelled would silently overwrite
+  the first. Giving each half its own span is worse: `det_*` records what the
+  detector *originally guessed*, so spans it never produced are fabricated
+  training data. The absence is the marker rather than a boolean beside it,
+  since a boolean can drift out of agreement with the columns it describes.
+  Consequences, all of them load-bearing: `merge_into_previous` (`U`) refuses
+  any rally that has a det span, so an undo can never delete a row the corpus
+  is anchored to; `/bounds` skips its corpus write while `/label` and
+  `/label/retract` both refuse outright — there is no detector span for
+  either a judgement or its retraction to attach to; `LabelController` filters
+  these rallies out in its constructor so `index`/`total` stay truthful; and
+  `editedBoundaryCount` excludes them, counted instead by a separate
+  `splitCount` — the two feed one shared `resegmentLossPhrase`, so the
+  click-time confirm dialog and the panel's always-visible warning can never
+  disagree about what a re-segment costs. A re-segment destroys them, like
+  every other manual edit — `replace_rallies` rebuilds from detector
+  intervals and a hand-made rally has none.
 - **The current label for a span is resolved, not just read.** Newest row per
   `(source_id, span_start_ms, span_end_ms)` by `labelled_at DESC, rowid DESC`,
   then dropped if it carries neither a verdict nor a corrected span. Only a
