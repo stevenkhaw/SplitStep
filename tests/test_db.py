@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from splitstep.db.presets import create_preset, get_preset, list_presets
@@ -46,8 +48,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 8
-    assert migrate(conn) == 8
+    assert migrate(conn) == 9
+    assert migrate(conn) == 9
 
 
 def test_no_two_migrations_share_a_number():
@@ -156,7 +158,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 8
+    assert migrate(conn) == 9
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -216,7 +218,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 8
+    assert migrate(conn) == 9
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.
@@ -274,7 +276,7 @@ def test_migration_008_backfills_seen_at_from_reviewed_at(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 8
+    assert migrate(conn) == 9
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     assert rows["r_reviewed"]["seen_at"] == rows["r_reviewed"]["reviewed_at"]
@@ -634,3 +636,96 @@ def test_set_source_setup_rejects_illegal_rotation_without_writing(tmp_path):
     row = get_source(conn, source_id)
     assert row["rotation_deg"] == original_row["rotation_deg"]
     assert row["court_preset_id"] == original_row["court_preset_id"]
+
+
+def test_migration_009_rebuilds_rallies_without_losing_rows(tmp_path):
+    # 009 makes det_start_ms/det_end_ms nullable, which sqlite can only do by
+    # rebuilding the table -- create, copy, drop, rename. A rebuild that
+    # forgot the copy would take an entire session's review work with it
+    # (stars, points, notes, seen_at) and nothing would notice until the
+    # queue reopened empty. Migrate to 008, plant a fully-populated rally,
+    # then let 009 run over it.
+    conn = connect(tmp_path / "old.db")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        n = int(path.name.split("_", 1)[0])
+        if n > 8:
+            break
+        conn.executescript(path.read_text())
+        conn.execute(f"PRAGMA user_version={n}")
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s1','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src1','s1',1,'now',0,1000,1920,1080,30.0,0,'a.mov','ready')"
+    )
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence,starred,rejected,point,reviewed_at,"
+        "clip_path,note,seen_at) VALUES ('r1','s1','src1',1,1100,5200,1000,5000,"
+        "0.83,1,0,1,'T1','clips/a.mp4','late backhand','T0')"
+    )
+    conn.commit()
+
+    assert migrate(conn) == 9
+
+    row = conn.execute("SELECT * FROM rallies").fetchone()
+    # Every column, not just the two being altered: the whole risk of a
+    # rebuild is a column dropped from the INSERT ... SELECT copy.
+    assert (row["id"], row["session_id"], row["source_id"], row["idx"]) == (
+        "r1", "s1", "src1", 1)
+    assert (row["start_ms"], row["end_ms"]) == (1100, 5200)
+    assert (row["det_start_ms"], row["det_end_ms"]) == (1000, 5000)
+    assert row["confidence"] == 0.83
+    assert (row["starred"], row["rejected"], row["point"]) == (1, 0, 1)
+    assert (row["reviewed_at"], row["seen_at"]) == ("T1", "T0")
+    assert (row["clip_path"], row["note"]) == ("clips/a.mp4", "late backhand")
+    # The rebuild must not have quietly disabled enforcement for the rest of
+    # this connection's life -- 009 toggles no pragmas, same as 004.
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_migration_009_allows_a_null_det_span(conn):
+    # The point of the migration: a rally a human made, which the detector
+    # never proposed. NULL det is the marker -- see the spec's section 3.
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s2','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src2','s2',1,'now',0,1000,1920,1080,30.0,0,'b.mov','ready')"
+    )
+    conn.execute(
+        "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+        "det_start_ms,det_end_ms,confidence) VALUES"
+        " ('r2','s2','src2',1,1000,5000,NULL,NULL,0.5)"
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM rallies WHERE id='r2'").fetchone()
+    assert row["det_start_ms"] is None
+    assert row["det_end_ms"] is None
+
+
+def test_migration_009_rejects_a_half_present_det_span(conn):
+    # Both or neither. A half-present span is a third state nothing knows how
+    # to read: every consumer asks `det_start_ms IS NULL` and that question
+    # must answer for the pair.
+    conn.execute(
+        "INSERT INTO sessions (id,title,played_on,status,created_at)"
+        " VALUES ('s3','t','2026-08-19','ready','now')"
+    )
+    conn.execute(
+        "INSERT INTO sources (id,session_id,idx,recorded_at,offset_ms,duration_ms,"
+        "width,height,fps,rotation_deg,original_name,status)"
+        " VALUES ('src3','s3',1,'now',0,1000,1920,1080,30.0,0,'c.mov','ready')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+            "det_start_ms,det_end_ms,confidence) VALUES"
+            " ('r3','s3','src3',1,1000,5000,1000,NULL,0.5)"
+        )
