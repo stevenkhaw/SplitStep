@@ -208,7 +208,8 @@ alone.
 
 ### Frontend
 
-Hash router (`lib/router.svelte.ts`) → three routes: Library, Setup, Session.
+Hash router (`lib/router.svelte.ts`) → five routes: Library, Setup, Session,
+Reels, Reel.
 Session hosts QueueMode (autoplay + star/reject/undo) and TimelineMode
 (boundary editing, score curve, re-segment panel).
 
@@ -288,6 +289,18 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
   `tests/fixtures/`.
 - **`features.jsonl` floats are quantized to 4dp** so read/write cycles are
   byte-stable. Round-tripping is exact only for already-quantized values.
+- **A route `$effect` keyed on a reactive `id` must clear its state and guard
+  its response.** `App.svelte` renders `<Session id=…>` and `<Setup id=…>`
+  unkeyed, so navigating between two sessions (or two sources) swaps the prop
+  on the live instance rather than remounting. Both effects therefore set
+  `error = null` and drop the loaded object up front, and both return a
+  teardown flipping a `cancelled` flag their `.then`/`.catch` check. Without
+  it a superseded response assigns over the one on screen: rally ids are
+  globally unique, so a star lands on a real rally that is not the one the
+  header names. Setup clears `points`/`selectedPresetId` too — `start()`
+  submits `api.setup(source.id, …)`, so a carried-over quad is one click from
+  a rebuild and a fifteen-minute detect on the wrong source.
+  `tests/route-effect-staleness.test.ts` covers all four shapes.
 - Design rationale and decision log: `docs/superpowers/specs/`, implementation
   plans: `docs/superpowers/plans/`. Read the relevant spec before changing
   pipeline shape or status vocabulary.

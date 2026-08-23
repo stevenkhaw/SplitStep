@@ -34,3 +34,7 @@ web/dist/
 
 # Ultralytics downloads the model into the working directory on first run.
 yolo11n.pt
+
+# Claude Code session state: agent worktrees live under .claude/worktrees/,
+# and launch.json hardcodes this machine's library path.
+.claude/
