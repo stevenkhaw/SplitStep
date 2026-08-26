@@ -2,7 +2,8 @@ import re
 
 
 def clip_relpath(source_idx: int, start_ms: int, end_ms: int) -> str:
-    """A clip's filename within its session's `clips/` directory.
+    """A clip's path within its session's `clips/` directory: one folder per
+    source, span-derived filename inside it.
 
     Derived from the span, never from `rallies.idx`: `_renumber` reassigns idx
     across a whole session on every `replace_rallies`, so a name built from it
@@ -14,14 +15,19 @@ def clip_relpath(source_idx: int, start_ms: int, end_ms: int) -> str:
     the path its bounds imply, or it does not. There is no separate staleness
     record to keep in sync, which is why this is a pure function and not a
     database column.
+
+    The source index is a directory rather than a filename prefix so a
+    session holding several phone videos separates them in Finder -- the
+    index was always in the name; it moved one level up.
     """
-    return f"{source_idx:02d}-{start_ms}-{end_ms}.mp4"
+    return f"{source_idx:02d}/{start_ms}-{end_ms}.mp4"
 
 
-# Exactly what clip_relpath writes and nothing else: two digits of source
-# index, two non-negative millisecond bounds, ".mp4". Anchored at both ends
-# so a name with an extra segment cannot match a prefix of it.
-_CLIP_NAME = re.compile(r"^(\d{2,})-(\d+)-(\d+)\.mp4$")
+# The two shapes this library has ever written: nested (current) and legacy
+# flat (pre layout-reconcile). Both anchored at both ends, same strictness
+# rationale as before -- parse admits exactly what we wrote, nothing else.
+_CLIP_RELPATH = re.compile(r"^(\d{2,})/(\d+)-(\d+)\.mp4$")
+_LEGACY_CLIP_NAME = re.compile(r"^(\d{2,})-(\d+)-(\d+)\.mp4$")
 
 
 def parse_clip_name(name: str) -> tuple[int, int, int] | None:
@@ -38,8 +44,13 @@ def parse_clip_name(name: str) -> tuple[int, int, int] | None:
     onto the real name on success, and such a name carries extra segments
     the pattern does not admit -- so a live encode's output can be neither
     mistaken for a finished clip nor deleted as an orphan.
+
+    Accepts the legacy flat shape too: reconcile_clip_layout leaves a flat
+    file behind when its nested target already exists, and that stray must
+    stay self-identifying for the orphan sweep rather than becoming invisible
+    dead weight.
     """
-    match = _CLIP_NAME.match(name)
+    match = _CLIP_RELPATH.match(name) or _LEGACY_CLIP_NAME.match(name)
     if match is None:
         return None
     idx, start_ms, end_ms = match.groups()

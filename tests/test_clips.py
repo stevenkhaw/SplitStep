@@ -133,8 +133,8 @@ def test_clip_relpath_is_derived_from_the_span(tmp_path):
     # Span-derived, never idx-derived: _renumber reassigns rallies.idx across a
     # whole session on every replace_rallies, so a name built from idx points
     # at a different rally after any threshold sweep.
-    assert clip_relpath(1, 738500, 745500) == "01-738500-745500.mp4"
-    assert clip_relpath(12, 0, 100) == "12-0-100.mp4"
+    assert clip_relpath(1, 738500, 745500) == "01/738500-745500.mp4"
+    assert clip_relpath(12, 0, 100) == "12/0-100.mp4"
 
 
 def test_clip_relpath_is_stable_for_the_same_span(tmp_path):
@@ -482,6 +482,27 @@ def test_parse_clip_name_rejects_an_in_flight_temp_file():
     progress, and counting one as a clip would report a partial file as cut.
     """
     assert parse_clip_name(".01-738500-745500.deadbeef.part.mp4") is None
+
+
+def test_clip_relpath_is_nested_per_source():
+    assert clip_relpath(1, 9000, 14000) == "01/9000-14000.mp4"
+
+
+def test_parse_accepts_the_nested_relpath():
+    assert parse_clip_name("01/9000-14000.mp4") == (1, 9000, 14000)
+
+
+def test_parse_still_accepts_the_legacy_flat_name():
+    # Legacy stays parseable on purpose: a flat file left behind by the
+    # reconcile sweep's collision case must remain self-identifying so the
+    # orphan tooling can report and sweep it.
+    assert parse_clip_name("01-9000-14000.mp4") == (1, 9000, 14000)
+
+
+def test_parse_rejects_everything_else():
+    for bad in ("01/9000-14000.mov", ".01/9000-14000.mp4", "a/9000-14000.mp4",
+                "01/9000-14000.mp4.part", "01-9000.mp4", "01/02/9000-14000.mp4"):
+        assert parse_clip_name(bad) is None
 
 
 def test_make_clip_reports_progress_while_it_encodes(source_4k, tmp_path):
