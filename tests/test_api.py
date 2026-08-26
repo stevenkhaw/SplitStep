@@ -648,3 +648,36 @@ def test_missing_spa_serves_an_explanation_not_a_blank_page(library, tmp_path):
         r = c.get("/")
     assert r.status_code == 503
     assert "npm run build" in r.text
+
+
+def test_detect_route_queues_a_full_detect(client, conn, seeded):
+    conn.execute("UPDATE sources SET status='ready' WHERE id=?", (seeded["source_id"],))
+    conn.commit()
+    r = client.post(f"/api/sources/{seeded['source_id']}/detect")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["job_id"] and body["already_running"] is False
+    row = conn.execute("SELECT payload FROM jobs WHERE type='detect'").fetchone()
+    # Full detect on purpose: the route exists for "I just assigned a play
+    # region", and cached features are already quad-shaped.
+    assert "reuse_features" not in row["payload"]
+
+
+def test_detect_route_reports_an_already_running_job(client, conn, seeded):
+    conn.execute("UPDATE sources SET status='ready' WHERE id=?", (seeded["source_id"],))
+    conn.commit()
+    client.post(f"/api/sources/{seeded['source_id']}/detect")
+    r = client.post(f"/api/sources/{seeded['source_id']}/detect")
+    assert r.status_code == 200
+    assert r.json() == {"job_id": None, "already_running": True}
+
+
+def test_detect_route_refuses_a_source_awaiting_setup(client, conn, seeded):
+    conn.execute("UPDATE sources SET status='needs_setup' WHERE id=?",
+                 (seeded["source_id"],))
+    conn.commit()
+    assert client.post(f"/api/sources/{seeded['source_id']}/detect").status_code == 409
+
+
+def test_detect_route_404s_an_unknown_source(client, seeded):
+    assert client.post("/api/sources/nope/detect").status_code == 404

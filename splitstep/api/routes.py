@@ -672,6 +672,29 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
     }
 
 
+@router.post("/api/sources/{source_id}/detect")
+def api_detect(source_id: str, request: Request):
+    """Queue a full re-detect for one source.
+
+    Always a full run, never reuse_features: this route exists for "I just
+    assigned a play region", and the quad is applied when features are built,
+    so cached features are already shaped by the old quad (see CLAUDE.md on
+    --reuse-features). Idempotent at the queue: enqueue_once means mashing
+    the button cannot stack duplicate fifteen-minute jobs.
+    """
+    conn = _conn(request)
+    source = get_source(conn, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if source["status"] in ("needs_setup", "ingesting"):
+        raise HTTPException(
+            status_code=409,
+            detail="This source has no proxy yet -- finish setup first.",
+        )
+    job_id = jobq.enqueue_once(conn, "detect", source_id, {"source_id": source_id})
+    return {"job_id": job_id, "already_running": job_id is None}
+
+
 @router.get("/api/sources/{source_id}/scores")
 def api_scores(source_id: str, request: Request,
                threshold: float | None = Query(default=None, ge=0.0, le=1.0)):
