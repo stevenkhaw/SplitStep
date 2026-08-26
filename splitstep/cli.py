@@ -22,7 +22,13 @@ from splitstep.db.sessions import (
 from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, segment
-from splitstep.export import SETS, delete_orphan_clips, find_orphan_clips, plan_export
+from splitstep.export import (
+    SETS,
+    delete_orphan_clips,
+    find_orphan_clips,
+    plan_export,
+    reconcile_clip_layout,
+)
 from splitstep.jobs.handlers import HANDLERS
 from splitstep.jobs.worker import Worker
 from splitstep.label_score import rows_to_labels, score_against_labels
@@ -207,6 +213,22 @@ def cmd_serve(args) -> int:
     # strict guard.
     lib = Library.open_or_create(root) if args.create else Library.open(root)
     app = create_app(lib, spa_dist=resources.spa_dist())
+
+    # Before anything else touches clips/: a still-flat legacy clip is
+    # exactly what reconcile_clip_layout's docstring warns both of its
+    # downstream readers about. The server process runs plan_export on every
+    # `clips export` request, where an un-swept clip reads as "not cut" and
+    # queues a pointless re-encode -- but it's just as reachable through
+    # find_orphan_clips/delete_orphan_clips, whose `claimed` set is built
+    # from nested relpaths, so a still-flat clip a live rally references
+    # would read as an orphan and `clips prune --yes` would delete footage
+    # nothing else can regenerate. A short-lived connection, same shape as
+    # cmd_doctor's, closed immediately after: the worker and watcher get
+    # their own connections once they start.
+    conn = connect(lib.db_path)
+    migrate(conn)
+    reconcile_clip_layout(lib, conn)
+    conn.close()
 
     worker = Worker(lib, HANDLERS)
     watcher = InboxWatcher(lib)
@@ -430,6 +452,10 @@ def cmd_clips_export(args) -> int:
     library = _library(args)
     conn = connect(library.db_path)
     migrate(conn)
+    # Must run before plan_export in this process: a claimed flat clip that
+    # has not moved yet would read as "not cut" and queue a pointless
+    # re-encode. See reconcile_clip_layout's docstring.
+    reconcile_clip_layout(library, conn)
     if get_session(conn, args.session_id) is None:
         print(f"session not found: {args.session_id}", file=sys.stderr)
         return 1
@@ -475,6 +501,12 @@ def _load_orphans(args):
     library = _library(args)
     conn = connect(library.db_path)
     migrate(conn)
+    # Must run before find_orphan_clips: `claimed` there is built from
+    # nested relpaths, so a still-flat legacy clip a live rally references
+    # would read as unclaimed -- an orphan `clips prune --yes` would delete,
+    # even though a rally still holds that exact span. See
+    # reconcile_clip_layout's docstring.
+    reconcile_clip_layout(library, conn)
     if get_session(conn, args.session_id) is None:
         print(f"session not found: {args.session_id}", file=sys.stderr)
         return None

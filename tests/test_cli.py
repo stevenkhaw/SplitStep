@@ -672,6 +672,43 @@ def test_clips_export_when_everything_is_unavailable_says_so(library, conn, caps
     assert "already exists" not in out
 
 
+def test_clips_export_reconciles_legacy_layout_first(library, conn, capsys):
+    # A flat legacy clip whose span a point rally claims: without the sweep
+    # running before plan_export, this would read as "not cut" and queue a
+    # pointless re-encode; with it, the file moves and reads as already cut.
+    from splitstep.db.rallies import replace_rallies, set_point
+    from splitstep.detect.segment import Interval
+    from splitstep.media.clips import clip_relpath
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 5000, 0.8)])
+    set_point(conn, conn.execute("SELECT id FROM rallies").fetchone()["id"], True)
+
+    clips_dir = library.clips_dir(session_id)
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    flat_path = clips_dir / f"{idx:02d}-1000-5000.mp4"
+    flat_path.write_bytes(b"x" * 1000)
+    conn.close()
+
+    rc = main(["--library", str(library.root), "clips", "export", session_id])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # already_cut with in_flight=0/unavailable=0 hits cmd_clips_export's third
+    # branch, worded "already exists" rather than "already cut" -- the point
+    # under test is 0 queued plus the file having actually moved, not the
+    # exact phrasing of a message that has three legitimate wordings.
+    assert "queued 0 clip job(s)" in out
+    assert "already exists" in out
+
+    nested = clips_dir / clip_relpath(idx, 1000, 5000)
+    assert nested.exists()
+    assert not flat_path.exists()
+
+
 # -- clips orphans / clips prune --------------------------------------------
 
 
@@ -695,9 +732,13 @@ def stranded(library, conn):
     replace_rallies(conn, session_id, source_id, [Interval(a, b, 0.8) for a, b in spans])
 
     clips_dir = library.clips_dir(session_id)
-    clips_dir.mkdir(parents=True, exist_ok=True)
     for start_ms, end_ms in spans:
-        (clips_dir / clip_relpath(idx, start_ms, end_ms)).write_bytes(b"x" * 1_000_000)
+        # clip_relpath nests a source-index folder ("01/1000-5000.mp4"), so
+        # clips_dir existing is not enough -- each write's own parent
+        # (clips/NN/) must exist too.
+        path = clips_dir / clip_relpath(idx, start_ms, end_ms)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * 1_000_000)
 
     replace_rallies(conn, session_id, source_id, [
         Interval(1000, 5000, 0.8), Interval(9200, 13800, 0.7), Interval(20000, 26000, 0.6),
@@ -751,8 +792,11 @@ def test_clips_prune_with_yes_deletes_the_orphan(library, stranded, capsys):
 
 def test_clips_prune_leaves_the_clips_a_rally_still_claims(library, stranded, capsys):
     main(["--library", str(library.root), "clips", "prune", stranded["session_id"], "--yes"])
-    survivors = sorted(p.name for p in stranded["clips_dir"].iterdir())
-    assert survivors == ["01-1000-5000.mp4", "01-20000-26000.mp4"]
+    # Clips now live one level down, in the per-source folder clip_relpath
+    # names -- the same folder the orphan itself lived in -- rather than
+    # directly under clips_dir.
+    survivors = sorted(p.name for p in stranded["orphan"].parent.iterdir())
+    assert survivors == ["1000-5000.mp4", "20000-26000.mp4"]
 
 
 def test_clips_orphans_on_an_unknown_session_fails(library, conn, capsys):

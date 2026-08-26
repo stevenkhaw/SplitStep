@@ -274,13 +274,22 @@ def reconcile_clip_layout(library: Library, conn: sqlite3.Connection) -> int:
 
     File layout, not schema, which is why this is not a numbered migration --
     migrations cannot move files. Runs at serve startup and before every
-    clips CLI command, and must run before anything calls plan_export in the
-    same process: a claimed flat clip that has not moved yet would read as
-    "not cut" and trigger a pointless re-encode. Idempotent -- a swept
-    library has no top-level files matching the legacy shape, so the walk
-    finds nothing. A collision (nested target already exists) leaves the
-    flat file in place and logs it rather than deleting data; the orphan
-    tooling can see it (parse_clip_name still admits the legacy shape).
+    clips CLI command, and must run before anything calls plan_export OR
+    find_orphan_clips/delete_orphan_clips in the same process -- two
+    different failure modes, not one repeated. Against plan_export, a claimed
+    flat clip that has not moved yet reads as "not cut" and triggers a
+    pointless re-encode. Against find_orphan_clips the mistake is sharper,
+    not milder: `claimed` there is built from nested relpaths (see its
+    docstring), so a still-flat clip that a live rally references reads as
+    unclaimed -- an orphan -- and `clips prune --yes` would delete footage no
+    re-encode gets back. `cli.py`'s `_load_orphans` (shared by `clips
+    orphans` and `clips prune`) calls this first for exactly that reason;
+    that wiring is what closes the hazard, not the orphan walk's own logic.
+    Idempotent -- a swept library has no top-level files matching the legacy
+    shape, so the walk finds nothing. A collision (nested target already
+    exists) leaves the flat file in place and logs it rather than deleting
+    data; the orphan tooling can see it (parse_clip_name still admits the
+    legacy shape).
     Renames are same-directory-tree, hence atomic on one filesystem, and the
     matching rallies.clip_path row is rewritten in the same pass so the
     column keeps naming a file that exists.

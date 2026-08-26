@@ -216,8 +216,11 @@ def test_render_enqueues_once_clips_exist(client, conn, session, library):
     client.post(f"/api/reels/{reel['slug']}/items",
                 json={"items": [_span(session, 1000, 5000)]})
     clips = library.clips_dir(session["id"])
-    clips.mkdir(parents=True, exist_ok=True)
-    (clips / clip_relpath(session["idx"], 1000, 5000)).write_bytes(b"fake")
+    # clip_relpath nests a source-index folder ("01/1000-5000.mp4"), so the
+    # write's own parent must exist, not just clips_dir itself.
+    clip_path = clips / clip_relpath(session["idx"], 1000, 5000)
+    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path.write_bytes(b"fake")
 
     body = client.post(f"/api/reels/{reel['slug']}/render").json()
 
@@ -236,8 +239,11 @@ def test_a_second_render_does_not_queue_twice(client, conn, session, library):
     client.post(f"/api/reels/{reel['slug']}/items",
                 json={"items": [_span(session, 1000, 5000)]})
     clips = library.clips_dir(session["id"])
-    clips.mkdir(parents=True, exist_ok=True)
-    (clips / clip_relpath(session["idx"], 1000, 5000)).write_bytes(b"fake")
+    # clip_relpath nests a source-index folder ("01/1000-5000.mp4"), so the
+    # write's own parent must exist, not just clips_dir itself.
+    clip_path = clips / clip_relpath(session["idx"], 1000, 5000)
+    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path.write_bytes(b"fake")
 
     first = client.post(f"/api/reels/{reel['slug']}/render").json()
     second = client.post(f"/api/reels/{reel['slug']}/render").json()

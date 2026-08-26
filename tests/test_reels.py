@@ -30,8 +30,11 @@ def seeded(conn):
 
 def _cut(library, session_id, idx, start_ms, end_ms, name=None):
     clips = library.clips_dir(session_id)
-    clips.mkdir(parents=True, exist_ok=True)
     path = clips / (name or clip_relpath(idx, start_ms, end_ms))
+    # clip_relpath nests one source-index folder deep now, so clips_dir
+    # itself existing is not enough -- the write's own parent (clips/NN/)
+    # must exist too, not just clips/ itself.
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"fake clip")
     return path
 
@@ -125,7 +128,11 @@ def test_clip_paths_are_in_reel_order(library, conn, seeded):
         (seeded["source_id"], 1000, 5000),
     ])
     items = resolve_items(library, conn, reel["id"])
-    assert [p.name for p in clip_paths(library, items)] == [
+    # clip_relpath now nests a source-index folder ("01/9000-14000.mp4"), so
+    # comparing by .name alone would only see the filename tail and miss a
+    # wrong-source mixup; compare the path relative to clips_dir instead.
+    clips_dir = library.clips_dir(seeded["session_id"])
+    assert [str(p.relative_to(clips_dir)) for p in clip_paths(library, items)] == [
         clip_relpath(seeded["idx"], 9000, 14000),
         clip_relpath(seeded["idx"], 1000, 5000),
     ]
