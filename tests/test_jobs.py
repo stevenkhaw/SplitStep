@@ -8,6 +8,7 @@ import pytest
 from splitstep.db.jobs import (
     claim,
     enqueue,
+    enqueue_once,
     enqueue_reel_once,
     finish,
     has_pending_job,
@@ -458,3 +459,22 @@ def test_worker_progress_is_visible_while_the_job_is_still_running(library, conn
 
     Worker(library, {"ingest": handler}).run_once()
     assert mid_run == [pytest.approx(0.5)]
+
+
+def test_enqueue_once_inserts_when_nothing_is_pending(conn):
+    job_id = enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
+    assert job_id is not None
+    assert has_pending_job(conn, "detect", "src-1")
+
+
+def test_enqueue_once_returns_none_when_a_job_is_already_pending(conn):
+    first = enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
+    second = enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
+    assert first is not None and second is None
+    rows = conn.execute("SELECT COUNT(*) c FROM jobs WHERE type='detect'").fetchone()
+    assert rows["c"] == 1
+
+
+def test_enqueue_once_does_not_match_a_prefix_source_id(conn):
+    enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
+    assert enqueue_once(conn, "detect", "src-10", {"source_id": "src-10"}) is not None

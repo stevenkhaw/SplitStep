@@ -247,16 +247,9 @@ def handle_build_proxy(library: Library, payload: dict,
     # handler; a duplicate detect job would call replace_rallies again and
     # silently discard any rally boundaries a human hand-edited between the
     # two detect runs (replace_rallies only preserves starred/rejected).
-    # TODO: this is a check-then-act, unlike claim()'s BEGIN IMMEDIATE --
-    # two concurrent `splitstep serve` processes racing this same window
-    # could both pass has_pending_job and both enqueue. No live path hits
-    # that today (reclaim_stale only re-enters at worker startup against a
-    # dead process), but the project designs for a second concurrent serve
-    # elsewhere (see claim()). Close it with BEGIN IMMEDIATE around this
-    # check-and-enqueue, or a single `INSERT ... WHERE NOT EXISTS`, before
-    # that ever runs for real.
-    if not jobq.has_pending_job(conn, "detect", source["id"]):
-        jobq.enqueue(conn, "detect", {"source_id": source["id"]})
+    # enqueue_once holds BEGIN IMMEDIATE across check and insert, so two
+    # concurrent serve processes racing this window cannot both enqueue.
+    jobq.enqueue_once(conn, "detect", source["id"], {"source_id": source["id"]})
 
 
 def _quad_for(conn: sqlite3.Connection, source: sqlite3.Row) -> Quad:

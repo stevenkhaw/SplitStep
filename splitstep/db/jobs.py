@@ -147,6 +147,44 @@ def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool
     return job_id, False
 
 
+def enqueue_once(
+    conn: sqlite3.Connection, job_type: str, source_id: str, payload: dict
+) -> str | None:
+    """Enqueue unless a `job_type` job for `source_id` is already pending.
+
+    The check-then-act version of this (has_pending_job, then enqueue) was
+    the one TODO in the repo: with two serve processes -- exactly what the
+    Mac app's single-instance guard exists to prevent but must not rely on --
+    both could pass the check and both insert, and a duplicate detect calls
+    replace_rallies twice, silently discarding hand-edited boundaries.
+    BEGIN IMMEDIATE takes the write lock before the SELECT for the same
+    reason claim() and enqueue_reel_once do; the INSERT is inline rather
+    than via enqueue() so check and insert commit exactly once, under the
+    one lock.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM jobs WHERE type = ? AND status IN ('queued', 'running')"
+            " AND json_extract(payload, '$.source_id') = ? LIMIT 1",
+            (job_type, source_id),
+        ).fetchone()
+        if row is not None:
+            conn.commit()
+            return None
+        job_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO jobs (id,type,payload,status,created_at)"
+            " VALUES (?,?,?,'queued',?)",
+            (job_id, job_type, json.dumps(payload), _now()),
+        )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    return job_id
+
+
 def heartbeat(conn: sqlite3.Connection, job_id: str) -> None:
     conn.execute("UPDATE jobs SET heartbeat_at=? WHERE id=?", (_now(), job_id))
     conn.commit()
