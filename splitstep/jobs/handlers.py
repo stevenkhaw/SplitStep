@@ -21,6 +21,7 @@ from splitstep.db.sessions import (
     set_source_dimensions,
     set_source_status,
 )
+from splitstep.db.settings import get_color_profile, lock_color_profile
 from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
 from splitstep.detect.features import read_features, write_features
 from splitstep.detect.geometry import Quad
@@ -31,7 +32,14 @@ from splitstep.media.clips import clip_relpath
 from splitstep.media.concat import concat_clips
 from splitstep.media.files import find_original
 from splitstep.media.probe import display_size, probe
-from splitstep.media.transcode import ProgressFn, make_clip, make_proxy, make_thumbs
+from splitstep.media.transcode import (
+    HLG_PROFILE,
+    ProgressFn,
+    TranscodeError,
+    make_clip,
+    make_proxy,
+    make_thumbs,
+)
 from splitstep.reels import clip_paths, missing_clip_count, resolve_items
 
 log = logging.getLogger(__name__)
@@ -321,6 +329,43 @@ def _audio_grid(path: Path, duration_ms: int) -> list[tuple[int, float]]:
     return hits_to_grid(detect_hits(pcm, AUDIO_SR), duration_ms, step_ms=STEP_MS)
 
 
+def _clip_color_profile(conn, library: Library, info, src: Path):
+    """The colour profile this library's clips are locked to, resolving and
+    locking it on first use.
+
+    Priority: the stored setting; else, if clips already exist on disk, the
+    legacy module-pinned HLG profile (every pre-migration clip was cut under
+    it, so it is a fact about those files, not a guess); else this source's
+    own tags, which become the library's profile permanently. Locked at
+    check time rather than after a successful encode: the worker is
+    single-threaded so nothing races it, and a first export that fails
+    mid-encode for an unrelated reason still locked a profile read from
+    valid tags -- the owner's camera either way.
+
+    An untagged source can never become the profile: unknown pixels locking
+    the library would bless every future untagged source, exactly the
+    relabel-without-conversion _require_locked_color exists to refuse.
+    """
+    stored = get_color_profile(conn)
+    if stored is not None:
+        return stored
+    if any(library.sessions_dir.glob("*/clips/*.mp4")):
+        lock_color_profile(conn, HLG_PROFILE)
+        return HLG_PROFILE
+    actual = (info.color_range, info.color_space, info.color_transfer,
+              info.color_primaries)
+    if None in actual:
+        shown = tuple(field or "unset" for field in actual)
+        raise TranscodeError(
+            f"{src.name} is missing colour metadata (untagged: range={shown[0]} "
+            f"space={shown[1]} transfer={shown[2]} primaries={shown[3]}), so it "
+            f"cannot set this library's clip colour profile. Export a properly "
+            f"tagged source first."
+        )
+    lock_color_profile(conn, actual)
+    return actual
+
+
 def handle_clip(library: Library, payload: dict,
                 progress: ProgressFn = no_progress) -> None:
     """Cut one rally's span to a clip at the locked profile.
@@ -365,12 +410,18 @@ def handle_clip(library: Library, payload: dict,
     # dying at 90%, which is the whole point of the check.
     library.require_free(int((end_ms - start_ms) / 1000 * 4_000_000 * 2))
 
+    # Probing here and again inside make_clip is two ffprobe calls (~50 ms
+    # each) against minutes of encode -- cheaper than widening make_clip's
+    # signature to take a pre-probed MediaInfo.
+    profile = _clip_color_profile(conn, library, probe(src), src)
+
     # The one handler that reports progress, because it is the one whose
     # duration a human sits through: 4-8x realtime, so a 24-point session is
     # about half an hour. The others are longer still but run unattended
     # right after ingest, and nothing is waiting on a number for them.
     make_clip(src, dst, start_ms=start_ms, end_ms=end_ms,
-              rotation_deg=source["rotation_deg"], on_progress=progress)
+              rotation_deg=source["rotation_deg"], on_progress=progress,
+              color_profile=profile)
 
     # A reel item whose rally vanished under a re-segment carries no
     # rally_id (see plan_reel_export), and it must still be cuttable: the

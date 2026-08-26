@@ -1,8 +1,11 @@
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from splitstep.db.settings import get_color_profile, lock_color_profile
+from splitstep.jobs.handlers import _clip_color_profile
 from splitstep.media.clips import clip_relpath, parse_clip_name
 from splitstep.media.probe import probe
 from splitstep.media.transcode import (
@@ -14,6 +17,7 @@ from splitstep.media.transcode import (
     CLIP_FPS,
     CLIP_HEIGHT,
     CLIP_WIDTH,
+    HLG_PROFILE,
     TranscodeError,
     make_clip,
 )
@@ -645,5 +649,41 @@ def test_make_clip_refusal_names_both_sets_of_tags(tmp_path):
     assert "untagged.mp4" in message
     assert "unset" in message                 # how a None field is rendered
     assert "arib-std-b67" in message          # what the profile wanted
-    assert "No conversion was attempted" in message
+    assert "no conversion was attempted" in message
     assert "HDR Video" in message             # the iPhone setting
+
+
+def _info(range_="tv", space="bt709", trc="bt709", primaries="bt709"):
+    return SimpleNamespace(color_range=range_, color_space=space,
+                           color_transfer=trc, color_primaries=primaries)
+
+
+def test_first_export_locks_the_library_to_the_source(library, conn, tmp_path):
+    profile = _clip_color_profile(conn, library, _info(), tmp_path / "a.mov")
+    assert profile == ("tv", "bt709", "bt709", "bt709")
+    assert get_color_profile(conn) == profile
+
+
+def test_a_stored_profile_wins_over_the_source(library, conn, tmp_path):
+    lock_color_profile(conn, HLG_PROFILE)
+    profile = _clip_color_profile(conn, library, _info(), tmp_path / "a.mov")
+    assert profile == HLG_PROFILE  # the mismatch is _require_locked_color's to refuse
+
+
+def test_pre_migration_clips_lock_the_legacy_hlg_profile(library, conn, tmp_path):
+    # A library with clips on disk but no settings row predates migration
+    # 011. Every such clip was cut under the module-pinned constants, so
+    # HLG is a fact about those files, not a guess.
+    clips = library.clips_dir("2026-08-18")
+    clips.mkdir(parents=True)
+    (clips / "01-1000-2000.mp4").write_bytes(b"x")
+    profile = _clip_color_profile(conn, library, _info(), tmp_path / "a.mov")
+    assert profile == HLG_PROFILE
+    assert get_color_profile(conn) == HLG_PROFILE
+
+
+def test_an_untagged_source_cannot_become_the_profile(library, conn, tmp_path):
+    with pytest.raises(TranscodeError, match="untagged"):
+        _clip_color_profile(conn, library, _info(range_=None, space=None),
+                            tmp_path / "a.mov")
+    assert get_color_profile(conn) is None

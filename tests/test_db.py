@@ -20,6 +20,7 @@ from splitstep.db.sessions import (
     set_source_preset,
     set_source_rotation,
 )
+from splitstep.db.settings import get_color_profile, lock_color_profile
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import Interval
 
@@ -48,8 +49,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 10
-    assert migrate(conn) == 10
+    assert migrate(conn) == 11
+    assert migrate(conn) == 11
 
 
 def test_no_two_migrations_share_a_number():
@@ -158,7 +159,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 10
+    assert migrate(conn) == 11
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -218,7 +219,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 10
+    assert migrate(conn) == 11
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.
@@ -276,7 +277,7 @@ def test_migration_008_backfills_seen_at_from_reviewed_at(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 10
+    assert migrate(conn) == 11
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     assert rows["r_reviewed"]["seen_at"] == rows["r_reviewed"]["reviewed_at"]
@@ -669,7 +670,7 @@ def test_migration_009_rebuilds_rallies_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 10
+    assert migrate(conn) == 11
 
     row = conn.execute("SELECT * FROM rallies").fetchone()
     # Every column, not just the two being altered: the whole risk of a
@@ -731,3 +732,9 @@ def test_migration_009_rejects_a_half_present_det_span(conn):
             "det_start_ms,det_end_ms,confidence) VALUES"
             " ('r3','s3','src3',1,1000,5000,1000,NULL,0.5)"
         )
+
+
+def test_color_profile_round_trips_and_starts_unset(conn):
+    assert get_color_profile(conn) is None
+    lock_color_profile(conn, ("tv", "bt709", "bt709", "bt709"))
+    assert get_color_profile(conn) == ("tv", "bt709", "bt709", "bt709")

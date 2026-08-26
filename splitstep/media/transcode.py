@@ -238,44 +238,47 @@ CLIP_COLOR_SPACE = "bt2020nc"
 CLIP_COLOR_PRIMARIES = "bt2020"
 CLIP_COLOR_TRC = "arib-std-b67"
 
+# Canonical tuple order everywhere a profile travels: (range, space, trc,
+# primaries) -- the order _require_locked_color has always compared in.
+HLG_PROFILE = (CLIP_COLOR_RANGE, CLIP_COLOR_SPACE, CLIP_COLOR_TRC, CLIP_COLOR_PRIMARIES)
 
-def _require_locked_color(info: MediaInfo, src: Path) -> None:
-    """Refuse a source whose colour metadata is not the locked profile's.
+
+def _require_locked_color(
+    info: MediaInfo, src: Path, profile: tuple[str, str, str, str]
+) -> None:
+    """Refuse a source whose colour metadata is not this library's profile.
 
     Strict equality on all four fields, and `None` -- an untagged source --
-    fails it exactly as a bt709 one does. That is deliberate: untagged pixels
-    are not HLG pixels, so applying the profile's tags to them would be a
-    relabel without a conversion, which produces a file that looks correct
-    while being wrong. Harder to find later than an honest mismatch.
+    fails it exactly as a mismatched one does. That is deliberate: untagged
+    pixels are unknown pixels, so applying the profile's tags to them would
+    be a relabel without a conversion, which produces a file that looks
+    correct while being wrong. Harder to find later than an honest mismatch.
 
     Refused rather than converted because this ffmpeg cannot convert:
-    measured on 9.0.1 with neither libzimg nor libplacebo, `zscale` is absent
-    so no linear-light stage exists to feed `tonemap`, and the built-in
-    `colorspace` filter's transfer list contains no arib-std-b67 at all --
-    it takes HLG neither in nor out. Both directions are blocked, not just
-    the one.
-
-    There is deliberately no override. An override is a way to write a
-    permanently wrong clip, and the clip is the artifact that has to stay
-    concat-compatible for years; the reviewer is the part that can be
-    corrected later.
+    measured on 9.0.1 with neither libzimg nor libplacebo, `zscale` is
+    absent so no linear-light stage exists to feed `tonemap`, and the
+    built-in `colorspace` filter takes HLG neither in nor out. There is
+    deliberately no override -- an override is a way to write a permanently
+    wrong clip, and the clip is the artifact that has to stay
+    concat-compatible for years.
     """
     actual = (info.color_range, info.color_space, info.color_transfer, info.color_primaries)
-    wanted = (CLIP_COLOR_RANGE, CLIP_COLOR_SPACE, CLIP_COLOR_TRC, CLIP_COLOR_PRIMARIES)
-    if actual == wanted:
+    if actual == profile:
         return
 
     shown = tuple(field or "unset" for field in actual)
     raise TranscodeError(
-        f"{src.name} does not carry the locked profile's colour metadata, so a clip "
+        f"{src.name} does not match this library's clip colour profile, so a clip "
         f"cut from it could not be concatenated with the ones already cut.\n"
-        f"  source:  range={shown[0]} space={shown[1]} transfer={shown[2]} primaries={shown[3]}\n"
-        f"  profile: range={wanted[0]} space={wanted[1]} transfer={wanted[2]} "
-        f"primaries={wanted[3]}\n"
-        f"No conversion was attempted: relabelling one as the other makes the file look "
-        f"correct while being wrong, and this ffmpeg has no working tonemap in either "
-        f"direction. If this came from the usual iPhone, check Settings > Camera > "
-        f"Record Video -- HDR Video turned off records bt709 SDR."
+        f"  source:  range={shown[0]} space={shown[1]} transfer={shown[2]} "
+        f"primaries={shown[3]}\n"
+        f"  library: range={profile[0]} space={profile[1]} transfer={profile[2]} "
+        f"primaries={profile[3]}\n"
+        f"The profile locked to the first clip this library exported, and no "
+        f"conversion was attempted: this ffmpeg has no working tonemap in either "
+        f"direction. Record with the same camera settings as that first export "
+        f"(on an iPhone, Settings > Camera > Record Video > HDR Video ON records "
+        f"HLG), or keep this footage in its own library."
     )
 
 
@@ -287,6 +290,7 @@ def make_clip(
     end_ms: int,
     rotation_deg: int = 0,
     on_progress: ProgressFn | None = None,
+    color_profile: tuple[str, str, str, str] = HLG_PROFILE,
 ) -> None:
     """Cut one span to the locked clip profile.
 
@@ -313,7 +317,7 @@ def make_clip(
     # Before anything is written, and before the minutes of encoding: colour
     # is the one profile property that cannot be conformed here, only
     # checked. See _require_locked_color.
-    _require_locked_color(info, src)
+    _require_locked_color(info, src, color_profile)
 
     # A non-square SAR is a property of the source, and the locked profile
     # never pinned it: libx264 writes the sample aspect ratio into the SPS
@@ -433,10 +437,10 @@ def make_clip(
             # they do NOT for a lavfi one, where primaries and transfer are
             # silently dropped, which is why the test fixtures tag with
             # setparams instead.
-            "-color_range", CLIP_COLOR_RANGE,
-            "-colorspace", CLIP_COLOR_SPACE,
-            "-color_primaries", CLIP_COLOR_PRIMARIES,
-            "-color_trc", CLIP_COLOR_TRC,
+            "-color_range", color_profile[0],
+            "-colorspace", color_profile[1],
+            "-color_primaries", color_profile[3],
+            "-color_trc", color_profile[2],
             "-crf", str(CLIP_CRF),
             "-preset", "medium",
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
