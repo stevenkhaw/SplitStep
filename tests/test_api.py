@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from splitstep.api.app import create_app
 from splitstep.api.routes import _evict_old_frames
+from splitstep.db import jobs as jobq
 from splitstep.db.presets import create_preset
 from splitstep.db.rallies import list_rallies, replace_rallies, set_point, set_rejected, set_star
 from splitstep.db.schema import connect
@@ -681,3 +682,12 @@ def test_detect_route_refuses_a_source_awaiting_setup(client, conn, seeded):
 
 def test_detect_route_404s_an_unknown_source(client, seeded):
     assert client.post("/api/sources/nope/detect").status_code == 404
+
+
+def test_jobs_route_carries_error_detail(client, conn, seeded):
+    job_id = jobq.enqueue(conn, "detect", {"source_id": seeded["source_id"]})
+    jobq.finish(conn, job_id, error="it broke", error_detail="Traceback...")
+    jobs = client.get("/api/jobs").json()
+    failed = next(j for j in jobs if j["id"] == job_id)
+    assert failed["error"] == "it broke"
+    assert failed["error_detail"] == "Traceback..."

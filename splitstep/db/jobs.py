@@ -198,10 +198,15 @@ def set_progress(conn: sqlite3.Connection, job_id: str, progress: float) -> None
     conn.commit()
 
 
-def finish(conn: sqlite3.Connection, job_id: str, error: str | None = None) -> None:
+def finish(
+    conn: sqlite3.Connection,
+    job_id: str,
+    error: str | None = None,
+    error_detail: str | None = None,
+) -> None:
     conn.execute(
-        "UPDATE jobs SET status=?, error=?, finished_at=? WHERE id=?",
-        ("failed" if error else "done", error, _now(), job_id),
+        "UPDATE jobs SET status=?, error=?, error_detail=?, finished_at=? WHERE id=?",
+        ("failed" if error else "done", error, error_detail, _now(), job_id),
     )
     conn.commit()
 

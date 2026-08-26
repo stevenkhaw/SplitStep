@@ -467,6 +467,26 @@ def test_enqueue_once_inserts_when_nothing_is_pending(conn):
     assert has_pending_job(conn, "detect", "src-1")
 
 
+def test_finish_stores_sentence_and_detail_separately(conn):
+    job_id = enqueue(conn, "detect", {"source_id": "s"})
+    finish(conn, job_id, error="short and human", error_detail="Traceback...")
+    row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["status"] == "failed"
+    assert row["error"] == "short and human"
+    assert row["error_detail"] == "Traceback..."
+
+
+def test_worker_failure_yields_a_sentence_not_a_traceback(library, conn):
+    def explode(_library, _payload, _progress):
+        raise ValueError("the proxy is missing")
+
+    enqueue(conn, "boom", {"source_id": "s"})
+    Worker(library, {"boom": explode}).run_once()
+    row = conn.execute("SELECT * FROM jobs WHERE type='boom'").fetchone()
+    assert row["error"] == "the proxy is missing"
+    assert "Traceback" in row["error_detail"]
+
+
 def test_enqueue_once_returns_none_when_a_job_is_already_pending(conn):
     first = enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
     second = enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})

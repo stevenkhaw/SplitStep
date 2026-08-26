@@ -759,7 +759,7 @@ def api_setup(source_id: str, body: SetupBody, request: Request):
 @router.get("/api/jobs")
 def api_jobs(request: Request):
     rows = _conn(request).execute(
-        "SELECT id,type,status,progress,error,created_at,finished_at"
+        "SELECT id,type,status,progress,error,error_detail,created_at,finished_at"
         " FROM jobs ORDER BY created_at DESC LIMIT 50"
     ).fetchall()
     return [dict(r) for r in rows]

@@ -31,6 +31,20 @@ def no_progress(_fraction: float) -> None:
     """
 
 
+def _error_summary(exc: BaseException) -> str:
+    """One line a reviewer can act on, not a stack.
+
+    Handlers already raise with good sentences (TranscodeError's colour
+    message, ValueError's "No proxy on disk for source …"); str(exc) is
+    that sentence. The class name is the fallback for exceptions raised
+    bare, and the truncation guards against an exception whose repr is a
+    payload dump.
+    """
+    text = str(exc).strip() or type(exc).__name__
+    first_line = text.splitlines()[0]
+    return first_line[:300]
+
+
 class _Heartbeat:
     """Ticks `jobs.heartbeat_at` on a timer for the duration of a handler call.
 
@@ -92,6 +106,8 @@ class Worker:
 
         handler = self.handlers.get(job["type"])
         if handler is None:
+            # No handler means no traceback either -- there is nothing for
+            # error_detail to keep.
             jobq.finish(self.conn, job["id"], error=f"Unknown job type: {job['type']}")
             return True
 
@@ -105,8 +121,12 @@ class Worker:
         try:
             with _Heartbeat(self.conn, job["id"], self.heartbeat_interval_s):
                 handler(self.library, json.loads(job["payload"]), report)
-        except Exception:
-            jobq.finish(self.conn, job["id"], error=traceback.format_exc(limit=6))
+        except Exception as exc:
+            jobq.finish(
+                self.conn, job["id"],
+                error=_error_summary(exc),
+                error_detail=traceback.format_exc(limit=6),
+            )
             log.exception("job %s failed", job["id"])
         else:
             jobq.finish(self.conn, job["id"])
