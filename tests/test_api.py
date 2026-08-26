@@ -691,3 +691,11 @@ def test_jobs_route_carries_error_detail(client, conn, seeded):
     failed = next(j for j in jobs if j["id"] == job_id)
     assert failed["error"] == "it broke"
     assert failed["error_detail"] == "Traceback..."
+
+
+def test_retry_route_requeues_only_failed_jobs(client, conn, seeded):
+    job_id = jobq.enqueue(conn, "detect", {"source_id": seeded["source_id"]})
+    assert client.post(f"/api/jobs/{job_id}/retry").status_code == 409
+    jobq.finish(conn, job_id, error="boom")
+    assert client.post(f"/api/jobs/{job_id}/retry").status_code == 200
+    assert client.post("/api/jobs/nope/retry").status_code == 404

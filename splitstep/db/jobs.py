@@ -222,6 +222,24 @@ def reclaim_stale(conn: sqlite3.Connection, older_than_s: int = 120) -> int:
     return cur.rowcount
 
 
+def retry(conn: sqlite3.Connection, job_id: str) -> bool:
+    """Requeue one failed job in place. True if a row actually flipped.
+
+    In place rather than a fresh row: the payload is the job, handlers are
+    idempotent, and a new id would orphan whatever the UI is currently
+    pointing at. Guarded on status='failed' in the WHERE so a double-click
+    cannot requeue a job that is already running again.
+    """
+    cur = conn.execute(
+        "UPDATE jobs SET status='queued', error=NULL, error_detail=NULL,"
+        " finished_at=NULL, heartbeat_at=NULL, progress=0"
+        " WHERE id=? AND status='failed'",
+        (job_id,),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
 def get_failed_jobs_for_source(
     conn: sqlite3.Connection, source_id: str, since: str | None = None
 ) -> list[sqlite3.Row]:

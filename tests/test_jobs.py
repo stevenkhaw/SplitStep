@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from splitstep.db import jobs as jobq
 from splitstep.db.jobs import (
     claim,
     enqueue,
@@ -564,3 +565,18 @@ def test_enqueue_once_is_atomic_across_connections(library):
             setup_conn.commit()
     finally:
         setup_conn.close()
+
+
+def test_retry_requeues_a_failed_job_and_clears_its_error(conn):
+    job_id = jobq.enqueue(conn, "detect", {"source_id": "s"})
+    jobq.finish(conn, job_id, error="boom", error_detail="Traceback...")
+    assert jobq.retry(conn, job_id) is True
+    row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["status"] == "queued"
+    assert row["error"] is None and row["error_detail"] is None
+    assert row["finished_at"] is None and row["heartbeat_at"] is None
+
+
+def test_retry_refuses_a_job_that_did_not_fail(conn):
+    job_id = jobq.enqueue(conn, "detect", {"source_id": "s"})
+    assert jobq.retry(conn, job_id) is False

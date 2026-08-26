@@ -765,6 +765,18 @@ def api_jobs(request: Request):
     return [dict(r) for r in rows]
 
 
+@router.post("/api/jobs/{job_id}/retry")
+def api_retry_job(job_id: str, request: Request):
+    conn = _conn(request)
+    row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not jobq.retry(conn, job_id):
+        # Present but not failed -- done, queued, or running again already.
+        raise HTTPException(status_code=409, detail="Only a failed job can be retried")
+    return {"ok": True}
+
+
 @router.get("/media/{session_id}/{idx}/proxy.mp4")
 def api_proxy(session_id: str, idx: int, request: Request,
               range: str | None = Header(default=None)):
