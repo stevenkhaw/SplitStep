@@ -703,6 +703,19 @@ def test_pre_migration_clips_lock_the_legacy_hlg_profile(library, conn, tmp_path
     assert get_color_profile(conn) == HLG_PROFILE
 
 
+def test_pre_migration_clips_lock_the_legacy_hlg_profile_nested(library, conn, tmp_path):
+    # Same fact as the flat-shape test above, but for a library that has
+    # already been through reconcile_clip_layout (or was never flat to begin
+    # with, on a fresh-enough pre-011 library) -- every clip on disk is
+    # HLG-locked either way, so the glob has to find both shapes.
+    clips = library.clips_dir("2026-08-18")
+    (clips / "01").mkdir(parents=True)
+    (clips / "01" / "1000-2000.mp4").write_bytes(b"x")
+    profile = _clip_color_profile(conn, library, _info(), tmp_path / "a.mov")
+    assert profile == HLG_PROFILE
+    assert get_color_profile(conn) == HLG_PROFILE
+
+
 def test_an_untagged_source_cannot_become_the_profile(library, conn, tmp_path):
     with pytest.raises(TranscodeError, match="untagged"):
         _clip_color_profile(conn, library, _info(range_=None, space=None),

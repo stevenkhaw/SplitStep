@@ -358,7 +358,17 @@ def _clip_color_profile(conn, library: Library, info, src: Path):
     stored = get_color_profile(conn)
     if stored is not None:
         return stored
-    if any(library.sessions_dir.glob("*/clips/*.mp4")):
+    # Both shapes, not just the legacy flat one: reconcile_clip_layout moves
+    # a pre-existing library's clips into per-source folders at serve
+    # startup, but this function must give the same answer whether it runs
+    # before or after that sweep in a given process -- a library whose clips
+    # have already been moved is exactly as much "clips already exist under
+    # the legacy constants" as one that has not been swept yet, and a
+    # single-shape glob would silently stop finding them the moment the
+    # sweep runs.
+    if any(library.sessions_dir.glob("*/clips/*.mp4")) or any(
+        library.sessions_dir.glob("*/clips/*/*.mp4")
+    ):
         lock_color_profile(conn, HLG_PROFILE)
         return HLG_PROFILE
     actual = (info.color_range, info.color_space, info.color_transfer,

@@ -6,7 +6,7 @@ from splitstep.db.jobs import enqueue
 from splitstep.db.rallies import replace_rallies, set_point, set_rejected, set_star
 from splitstep.db.sessions import add_source, find_or_create_session_for_date
 from splitstep.detect.segment import Interval
-from splitstep.export import column_for, plan_export
+from splitstep.export import column_for, plan_export, reconcile_clip_layout
 from splitstep.media.clips import clip_relpath
 
 
@@ -278,3 +278,63 @@ def test_route_422s_on_an_unknown_set(client, seeded):
     r = client.post(f"/api/sessions/{seeded['session_id']}/export",
                     json={"which": "everything"})
     assert r.status_code == 422
+
+
+def _flat_clip(library, session_id, name, content=b"clip"):
+    clips = library.clips_dir(session_id)
+    clips.mkdir(parents=True, exist_ok=True)
+    (clips / name).write_bytes(content)
+    return clips / name
+
+
+def test_reconcile_moves_flat_clips_and_rewrites_clip_path(library, conn):
+    # rallies has several NOT NULL columns with no default (confidence,
+    # start_ms/end_ms, idx) plus FK-enforced session_id/source_id -- real
+    # rows via the same helpers `seeded` uses, not bare strings, or the
+    # INSERT below fails before reconcile ever runs. The point of the test
+    # is the clip_path rewrite, not the row's realism otherwise.
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_9000.MOV",
+    )
+    _flat_clip(library, session_id, "01-9000-14000.mp4")
+    old_rel = f"sessions/{session_id}/clips/01-9000-14000.mp4"
+    conn.execute(
+        "INSERT INTO rallies (id, session_id, source_id, idx, start_ms, end_ms,"
+        " confidence, clip_path)"
+        " VALUES ('r1', ?, ?, 1, 9000, 14000, 0.8, ?)",
+        (session_id, source_id, old_rel),
+    )
+    conn.commit()
+    assert reconcile_clip_layout(library, conn) == 1
+    nested = library.clips_dir(session_id) / "01" / "9000-14000.mp4"
+    assert nested.exists()
+    row = conn.execute("SELECT clip_path FROM rallies WHERE id='r1'").fetchone()
+    assert row["clip_path"] == f"sessions/{session_id}/clips/01/9000-14000.mp4"
+
+
+def test_reconcile_is_idempotent(library, conn):
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    _flat_clip(library, session_id, "01-9000-14000.mp4")
+    assert reconcile_clip_layout(library, conn) == 1
+    assert reconcile_clip_layout(library, conn) == 0
+
+
+def test_reconcile_leaves_a_collision_in_place(library, conn, caplog):
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    flat = _flat_clip(library, session_id, "01-9000-14000.mp4", b"old")
+    nested_dir = library.clips_dir(session_id) / "01"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "9000-14000.mp4").write_bytes(b"new")
+    with caplog.at_level("WARNING"):
+        assert reconcile_clip_layout(library, conn) == 0
+    assert flat.exists()  # never silently deleted
+    assert (nested_dir / "9000-14000.mp4").read_bytes() == b"new"
+
+
+def test_reconcile_ignores_temp_and_foreign_files(library, conn):
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    _flat_clip(library, session_id, ".01-1-2.abc.part.mp4")
+    _flat_clip(library, session_id, "somebody-elses.mp4")
+    assert reconcile_clip_layout(library, conn) == 0

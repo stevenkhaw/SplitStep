@@ -51,7 +51,9 @@ def test_a_clip_left_behind_by_a_re_segment_is_an_orphan(library, conn, seeded):
     orphans = find_orphan_clips(library, conn, session_id)
     assert [(o.start_ms, o.end_ms) for o in orphans] == [(9000, 14000)]
     assert orphans[0].source_idx == idx
-    assert orphans[0].path.name == clip_relpath(idx, 9000, 14000)
+    # .path is the full file, and clip_relpath now nests it under a
+    # per-source folder -- .name alone would be just "9000-14000.mp4".
+    assert orphans[0].path == library.clips_dir(session_id) / clip_relpath(idx, 9000, 14000)
     assert orphans[0].size_bytes == orphans[0].path.stat().st_size
 
 
@@ -143,6 +145,37 @@ def test_deleting_orphans_removes_exactly_those_files(library, conn, seeded):
     assert not (library.clips_dir(session_id) / clip_relpath(idx, 9000, 14000)).exists()
     assert (library.clips_dir(session_id) / clip_relpath(idx, 1000, 5000)).exists()
     assert (library.clips_dir(session_id) / clip_relpath(idx, 20000, 26000)).exists()
+
+
+def test_a_nested_clip_with_no_claim_is_an_orphan(library, conn, seeded):
+    """The walk goes one level down now that clip_relpath nests clips under
+    a per-source folder -- a clip sitting there with no rally or reel item
+    claiming its span must still be found, not silently missed because it is
+    no longer at the top of clips/."""
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    # 30000-34000 matches none of SPANS, so nothing claims it.
+    _cut(library, session_id, clip_relpath(idx, 30000, 34000))
+    orphans = find_orphan_clips(library, conn, session_id)
+    assert [(o.start_ms, o.end_ms) for o in orphans] == [(30000, 34000)]
+    assert orphans[0].source_idx == idx
+    assert orphans[0].path == library.clips_dir(session_id) / clip_relpath(idx, 30000, 34000)
+
+
+def test_a_stray_flat_legacy_clip_is_an_orphan(library, conn, seeded):
+    """A pre layout-reconcile file left at the top of clips/ (reconcile
+    hasn't run yet, or left it there after a collision) is self-identifying
+    via the legacy branch of parse_clip_name -- but `claimed` is built from
+    clip_relpath and so holds only nested names. A flat-named file's rel
+    never matches one of those even when a live rally holds exactly that
+    span (9000-14000 is one of SPANS here), because the comparison is on the
+    name reconcile would write it to, not the span the name encodes -- so it
+    reads as unclaimed and is reported the same as any other orphan."""
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    stray = _cut(library, session_id, f"{idx:02d}-9000-14000.mp4")
+    orphans = find_orphan_clips(library, conn, session_id)
+    assert [(o.start_ms, o.end_ms) for o in orphans] == [(9000, 14000)]
+    assert orphans[0].source_idx == idx
+    assert orphans[0].path == stray
 
 
 def test_deleting_an_orphan_clears_the_clip_path_that_pointed_at_it(library, conn, seeded):

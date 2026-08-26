@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -6,6 +7,8 @@ from splitstep.config import Library
 from splitstep.db.jobs import has_pending_clip
 from splitstep.db.sessions import get_source
 from splitstep.media.clips import clip_relpath, parse_clip_name
+
+log = logging.getLogger(__name__)
 
 SETS = ("points", "starred")
 
@@ -155,10 +158,19 @@ def find_orphan_clips(
     or un-pointed after it was cut is not stranded, because a rally still
     holds those bounds and the verdict is one keystroke from changing back.
 
-    `iterdir()` rather than `glob("*.mp4")`: the glob would silently skip
-    `make_clip`'s dot-prefixed temp files, which is the right outcome by
-    accident rather than on purpose. `parse_clip_name` is the real gate --
-    it admits exactly the names this library writes, so an encode in flight
+    `iterdir()` rather than `glob("*.mp4")`, and walked one level deep, not
+    just the top: `clip_relpath` names a clip `<idx>/<start>-<end>.mp4`, one
+    folder per source, so the files this function must see live a level
+    below `clips_dir` now. A bare top-level `iterdir()` would silently miss
+    every nested clip; a recursive walk would silently pick up whatever a
+    source-index-looking directory happens to contain. So each top-level
+    entry is a candidate if it is a file (a stray legacy flat clip, or
+    anything else dropped directly in `clips/`), and if it is a directory
+    its own files are added one level down and no further -- a dotted
+    directory is skipped, the same as a dotted file, since `make_clip` never
+    writes one and nothing here should be looking inside it either way.
+    `parse_clip_name` is the real gate on both tiers -- it admits exactly
+    the names this library writes, in either shape, so an encode in flight
     and a file the user dropped in here are both left alone, and only what
     we cut can be swept.
     """
@@ -195,11 +207,19 @@ def find_orphan_clips(
         )
     }
 
+    candidates: list[Path] = []
+    for entry in sorted(clips_dir.iterdir()):
+        if entry.is_file():
+            candidates.append(entry)
+        elif entry.is_dir() and not entry.name.startswith("."):
+            candidates.extend(p for p in sorted(entry.iterdir()) if p.is_file())
+
     orphans = []
-    for path in sorted(clips_dir.iterdir()):
-        if path.name in claimed or not path.is_file():
+    for path in candidates:
+        rel = str(path.relative_to(clips_dir))
+        if rel in claimed:
             continue
-        parsed = parse_clip_name(path.name)
+        parsed = parse_clip_name(rel)
         if parsed is None:
             continue
         source_idx, start_ms, end_ms = parsed
@@ -247,3 +267,46 @@ def delete_orphan_clips(
             continue
         deleted += 1
     return deleted
+
+
+def reconcile_clip_layout(library: Library, conn: sqlite3.Connection) -> int:
+    """One-time move of legacy flat clips into per-source folders.
+
+    File layout, not schema, which is why this is not a numbered migration --
+    migrations cannot move files. Runs at serve startup and before every
+    clips CLI command, and must run before anything calls plan_export in the
+    same process: a claimed flat clip that has not moved yet would read as
+    "not cut" and trigger a pointless re-encode. Idempotent -- a swept
+    library has no top-level files matching the legacy shape, so the walk
+    finds nothing. A collision (nested target already exists) leaves the
+    flat file in place and logs it rather than deleting data; the orphan
+    tooling can see it (parse_clip_name still admits the legacy shape).
+    Renames are same-directory-tree, hence atomic on one filesystem, and the
+    matching rallies.clip_path row is rewritten in the same pass so the
+    column keeps naming a file that exists.
+    """
+    moved = 0
+    for clips_dir in sorted(library.sessions_dir.glob("*/clips")):
+        for path in sorted(clips_dir.iterdir()):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            parsed = parse_clip_name(path.name)
+            if parsed is None:
+                continue
+            source_idx, start_ms, end_ms = parsed
+            target = clips_dir / clip_relpath(source_idx, start_ms, end_ms)
+            if target.exists():
+                log.warning("not moving %s: %s already exists", path, target)
+                continue
+            target.parent.mkdir(exist_ok=True)
+            old_rel = str(path.relative_to(library.root))
+            path.rename(target)
+            conn.execute(
+                "UPDATE rallies SET clip_path = ? WHERE clip_path = ?",
+                (str(target.relative_to(library.root)), old_rel),
+            )
+            conn.commit()
+            moved += 1
+    if moved:
+        log.info("moved %d clip(s) into per-source folders", moved)
+    return moved
