@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 680 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 767 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -32,7 +32,10 @@ npx vitest run                       # all test files in web/tests/
 npx vitest run tests/queue.test.ts   # one file
 ```
 
-Running it (library path is required on every command; there is no default):
+Running it (`--library` is optional now — resolution order is the flag, then
+`SPLITSTEP_LIBRARY`, then a path saved with `splitstep config set-library`; pass
+it explicitly whenever a command targets a library other than the configured
+default):
 
 ```bash
 splitstep --library /Volumes/SanDisk_2TB/SplitStep doctor

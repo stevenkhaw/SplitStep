@@ -110,11 +110,13 @@ class ClipParams:
     # fast WRONG one, and the wrongness stays invisible until someone
     # watches the reel. The real library's clips are HLG HDR
     # (color_range=tv, color_space=bt2020nc, color_primaries=bt2020,
-    # color_transfer=arib-std-b67), and make_clip now pins exactly those and
-    # refuses a source carrying anything else -- so for clips this app cut
-    # these four can no longer diverge. They stay compared because a clip is
-    # a file on a disk: one cut before the pin landed, or dropped into
-    # clips/ from outside, still reaches concat.
+    # color_transfer=arib-std-b67) -- this library's locked profile, HLG by
+    # legacy default since clips already existed before per-library locking
+    # landed -- and make_clip pins exactly the locked profile and refuses a
+    # source carrying anything else -- so for clips this app cut these four
+    # can no longer diverge. They stay compared because a clip is a file on
+    # a disk: one cut before the pin landed, or dropped into clips/ from
+    # outside, still reaches concat.
     #
     # Read through probe.color_tag, NOT video.get, so "unknown" and an absent
     # key both arrive as None. Raw reads would make two identically untagged

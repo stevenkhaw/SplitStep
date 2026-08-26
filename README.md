@@ -58,6 +58,13 @@ splitstep --library /Volumes/SplitStep doctor      # check hardware + paths
 splitstep --library /Volumes/SplitStep serve       # http://127.0.0.1:8420
 ```
 
+`--library` is optional once you've used a library once: resolution order is
+the flag shown above, then a `SPLITSTEP_LIBRARY` environment variable, then
+whatever path was last saved with `splitstep config set-library
+/Volumes/SplitStep`. The flag always wins, so a one-off command against a
+second library never needs the saved default touched — plain `splitstep
+serve` is enough once one of the three is set.
+
 `serve` starts the FastAPI app, the background job worker, and the inbox
 watcher in one process, and serves the built `web/dist` bundle at `/` — open
 `http://127.0.0.1:8420` and the UI, the `/api/*` routes, and `/media/*`
@@ -68,22 +75,34 @@ and a log warning telling you to run `npm run build`.
 Full CLI surface (`splitstep --help`):
 
 ```
-init                create a new library tree and database
-doctor              show detected hardware and library state
-serve               run the web server, worker and inbox watcher
-ingest              queue a video file for ingest
-detect              queue detection for a source
-segment             re-segment cached features
-preset add/list      manage court presets
-source set-preset    manage sources
+init                        create a new library tree and database
+doctor                      show detected hardware and library state
+config show/set-library     show or set persistent configuration
+serve                       run the web server, worker and inbox watcher
+ingest                      queue a video file for ingest
+detect                      queue detection for a source
+setup                       set a source's rotation and play region, then rebuild
+segment                     re-segment cached features
+preset add/list             manage court presets
+source set-preset           manage sources
+labels export/score         export or score the human label corpus
+clips export/orphans/prune  cut, list, and clean up rally clips
 ```
 
 ## The ingest -> detect -> review -> tune loop
 
 1. **Ingest.** Drop a video in `_inbox/`. The watcher picks it up within 5
-   seconds of the file settling (no more size growth), transcodes it to a
-   1080p proxy, extracts a thumbnail sheet, and queues detection
-   automatically. You can also queue (or force) it from the CLI:
+   seconds of the file settling (no more size growth) and registers it —
+   probes the file and moves it into `sessions/<date>/sources/NN/`. That's
+   the whole job, seconds not minutes: no transcode, no detection yet. The
+   source lands at `needs_setup` and waits there until a human confirms its
+   rotation and play region in the setup wizard (the UI's Setup route, or
+   `splitstep setup <source_id> --rotation <deg>`) — a ten-minute proxy
+   encode that turns out to have been sideways the whole time is worse than
+   a prompt. Confirming setup queues the proxy build and, once that
+   finishes, detection: from there the source moves itself through
+   `needs_setup -> building -> ingested -> detecting -> ready`. You can also
+   queue (or force) the initial registration from the CLI:
 
    ```bash
    splitstep --library /Volumes/SplitStep ingest /path/to/clip.mov --now
@@ -220,15 +239,18 @@ npm run check       # svelte-check: type errors and a11y warnings
 
 ## Current state
 
-**Plan 1 (backend core), Plan 2 (review UI) and 4K clip export are complete.**
-Ingest, transcode, detection (vision + audio), segmentation, the job queue, the
-inbox watcher, the REST API, the full review UI (queue mode, timeline mode,
-re-segment tuning, play-region editor), and cutting starred/point rallies to 4K
-clips at the locked libx264 profile all work end to end and are served from a
-single `splitstep serve` process.
+**Plan 1 (backend core), Plan 2 (review UI), 4K clip export and reel building
+are complete.** Ingest, transcode, detection (vision + audio), segmentation,
+the job queue, the inbox watcher, the REST API, the full review UI (queue
+mode, timeline mode, re-segment tuning, play-region editor), cutting
+starred/point rallies to 4K clips at the locked libx264 profile, and building
+and rendering reels (`reel_items` keyed on `(source_id, start_ms, end_ms)` by
+migration 007, the `reel` job's `-c copy` concat, `/api/reels*`) all work end
+to end and are served from a single `splitstep serve` process.
 
-**Still deferred:** reel building via `-c copy` concat and the cross-session
-rally browser with filters. The `reels`/`reel_items` tables exist unused.
+**Still deferred:** the cross-session rally browser with filters — the last
+piece of Plan 3. It only becomes meaningful once a second session exists to
+filter across.
 
 **Rejected, not deferred:** Reclaim Space (deleting originals once clips are
 cut). The library lives on a 2TB external drive that holds ~110 hours of play
@@ -253,8 +275,6 @@ result was negative, and the reasons are now measured rather than suspected:
   pose track, against 0.67/sec while actually playing — and two of those idle
   windows individually beat a confirmed rally's rate. Stereo direction and
   spectral timbre were tested too, and both fail.
-- Still genuinely unverified: playback of a real 4K-derived 1080p proxy end to
-  end in the UI.
 
 Tuning constants are now calibrated against `tests/fixtures/ground_level_source01.jsonl`,
 a committed slice of real footage — calibrating against synthetics is what
@@ -268,20 +288,25 @@ profiles on its own.
 
 ## First real use
 
-1. Shoot a session — 4K30, HDR off, AE/AF locked, phone **as high as you can**
-   (a fence mount, not propped on the court surface — this is the single
-   biggest determinant of whether detection works at all)
-   mount it.
-2. Drop it in `_inbox/`, wait for ingest and detect.
-3. Open the session, drag the play region over the court, save it.
-4. Re-run detect from the CLI so it uses the region (see "The play-region
-   step" above).
-5. Review in queue mode. Note whether rallies are being missed (raise
+1. Shoot a session — 4K30, HDR **on** (Settings > Camera > Record Video > HDR
+   Video ON — this is what records HLG, the colour profile the clip exporter
+   locks to on a library's first export; HDR off records bt709 SDR, which
+   `clips export` then refuses against an HLG-locked library), AE/AF locked,
+   phone **as high as you can** (a fence mount, not propped on the court
+   surface — this is the single biggest determinant of whether detection
+   works at all).
+2. Drop it in `_inbox/` and wait for it to register — seconds, not minutes;
+   the source lands at `needs_setup` and nothing else happens on its own
+   yet.
+3. Open the session, confirm rotation and drag the play region over the
+   court in the setup wizard, then save. That queues the proxy build and
+   detect for you; wait for the source to reach `ready`.
+4. Review in queue mode. Note whether rallies are being missed (raise
    recall — lower the threshold) or whether there is too much junk (raise
    it).
-6. Use the re-segment slider to sweep, watching the rally count and the
+5. Use the re-segment slider to sweep, watching the rally count and the
    score curve.
-7. Copy that source's `features.jsonl` to `tests/fixtures/` — done once already
+6. Copy that source's `features.jsonl` to `tests/fixtures/` — done once already
    as `ground_level_source01.jsonl`, a 1200-frame slice, which is what the
    detector's constants are now calibrated against. **Hand-labelled intervals
    are still missing**, and their absence is exactly what let the 2026-08-20

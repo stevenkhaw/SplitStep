@@ -176,10 +176,11 @@ same counter in the reel preview.
 
 - **Preview counter:** the preview already walks `resolve_items` in order; a
   "3/20" badge (and the note, when present) in the player UI is small.
-- **`note` on `reel_items`** (migration 008): per-reel-item text, soft cap ~40
-  characters, entered in the builder. It lives on the reel item, not the clip,
-  because clips are keyed `(source_id, start_ms, end_ms)` and shared — the
-  same clip can be #3 in one reel and #11 in another, with different notes.
+- **`note` on `reel_items`** (next free migration number — 010 and 011 were
+  taken by Phase 1): per-reel-item text, soft cap ~40 characters, entered in
+  the builder. It lives on the reel item, not the clip, because clips are
+  keyed `(source_id, start_ms, end_ms)` and shared — the same clip can be #3
+  in one reel and #11 in another, with different notes.
 - **Numbered render** is an opt-in toggle on the reel. Mechanism: each item
   gets one `drawtext` re-encode into a reel-specific temp file **at the locked
   colour profile**, then the existing concat pipeline — `-c copy`, parameter
