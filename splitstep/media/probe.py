@@ -5,6 +5,8 @@ from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 
+from splitstep.resources import ffprobe_exe
+
 
 class ProbeError(Exception):
     """ffprobe could not read the file."""
@@ -176,15 +178,20 @@ def ffprobe_json(path: Path, timeout: float | None = None) -> dict:
     missing ffprobe or a spun-down drive is turned into a ProbeError.
     """
     try:
+        exe = ffprobe_exe()
+    except RuntimeError as exc:
+        raise ProbeError(str(exc)) from exc
+    try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "error", "-print_format", "json",
+            [exe, "-v", "error", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
             capture_output=True, text=True, check=False, timeout=timeout,
         )
     except FileNotFoundError as exc:
-        raise ProbeError(
-            "ffprobe not found on PATH. Install it: brew install ffmpeg"
-        ) from exc
+        # ffprobe_exe() already confirmed the binary exists at exe -- this is
+        # a race guard (the drive spun down, the file vanished mid-run), not
+        # the "never installed" case that already raised above.
+        raise ProbeError(f"ffprobe vanished while running: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
         raise ProbeError(f"ffprobe timed out after {timeout}s for {path}") from exc
     if proc.returncode != 0:

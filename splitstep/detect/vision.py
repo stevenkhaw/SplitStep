@@ -6,10 +6,12 @@ from pathlib import Path
 
 import numpy as np
 
+from splitstep import resources
 from splitstep.accel import detect_accel
 from splitstep.detect.features import FeatureFrame, Player
 from splitstep.detect.geometry import Quad
 from splitstep.media.probe import probe
+from splitstep.resources import ffmpeg_exe
 
 
 @dataclass(frozen=True)
@@ -139,7 +141,6 @@ def iter_person_boxes(
     *,
     sample_fps: int = 5,
     imgsz: int = 960,
-    model_name: str = "yolo11n.pt",
 ) -> Iterator[list[Box]]:
     """Decode the proxy at sample_fps and yield person boxes per frame.
 
@@ -154,13 +155,13 @@ def iter_person_boxes(
     info = probe(proxy)
     width, height = _scaled_dims(info.width, info.height)
 
-    cmd = ["ffmpeg", "-v", "error"]
+    cmd = [ffmpeg_exe(), "-v", "error"]
     if accel.hwaccel:
         cmd += ["-hwaccel", accel.hwaccel]
     cmd += ["-i", str(proxy), "-vf", f"fps={sample_fps},scale={width}:-2",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
 
-    model = YOLO(model_name)
+    model = YOLO(resources.yolo_weights())
     frame_bytes = width * height * 3
 
     for raw in _run_frames(cmd, frame_bytes):

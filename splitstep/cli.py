@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from splitstep import appconfig
+from splitstep import appconfig, resources
 from splitstep.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from splitstep.db import jobs as jobq
 from splitstep.db.labels import latest_labels, parse_flags
@@ -192,7 +192,7 @@ def cmd_serve(args) -> int:
     # human, so initializing it is the intent. Everything else keeps open()'s
     # strict guard.
     lib = Library.open_or_create(root) if args.create else Library.open(root)
-    app = create_app(lib, spa_dist=Path(__file__).parent.parent / "web" / "dist")
+    app = create_app(lib, spa_dist=resources.spa_dist())
 
     worker = Worker(lib, HANDLERS)
     watcher = InboxWatcher(lib)

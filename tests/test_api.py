@@ -641,3 +641,10 @@ def test_note_route_clears_a_note_with_an_empty_string(client, conn, seeded):
     client.post(f"/api/rallies/{rally_id}/note", json={"note": ""})
 
     assert list_rallies(conn, seeded["session_id"])[0]["note"] == ""
+
+
+def test_missing_spa_serves_an_explanation_not_a_blank_page(library, tmp_path):
+    with TestClient(create_app(library, spa_dist=tmp_path / "nowhere")) as c:
+        r = c.get("/")
+    assert r.status_code == 503
+    assert "npm run build" in r.text

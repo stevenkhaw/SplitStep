@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import butter, sosfilt
 
+from splitstep.resources import ffmpeg_exe
+
 ENVELOPE_MS = 10
 ADAPTIVE_WINDOW_S = 2.0
 
@@ -20,7 +22,7 @@ class Hit:
 def extract_pcm(path: Path, sr: int = 22050) -> np.ndarray:
     """Decode a file's audio to mono float32 in [-1, 1]."""
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-vn",
+        [ffmpeg_exe(), "-v", "error", "-i", str(path), "-vn",
          "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
         capture_output=True,
         check=False,

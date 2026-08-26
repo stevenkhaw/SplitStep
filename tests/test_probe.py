@@ -4,6 +4,7 @@ import pytest
 
 from splitstep.accel import detect_accel
 from splitstep.media.probe import ProbeError, _pick_fps, probe
+from splitstep.resources import ffprobe_exe
 
 
 @pytest.fixture
@@ -203,7 +204,10 @@ def test_probe_reports_an_unknown_sample_aspect_ratio_as_square(tmp_path, monkey
 
     def sar_free(args, **kwargs):
         proc = real_run(args, **kwargs)
-        if args and args[0] == "ffprobe":
+        # probe.py resolves ffprobe to an absolute path via resources.ffprobe_exe()
+        # rather than passing the literal "ffprobe", so this must match on the
+        # same resolved value it does -- see splitstep/resources.py.
+        if args and args[0] == ffprobe_exe():
             proc.stdout = proc.stdout.replace('"sample_aspect_ratio": "1:1"',
                                               '"sample_aspect_ratio": "0:1"')
         return proc

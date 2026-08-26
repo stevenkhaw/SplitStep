@@ -1,8 +1,9 @@
 import platform
-import shutil
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
+
+from splitstep.resources import ffmpeg_exe
 
 
 @dataclass(frozen=True)
@@ -15,7 +16,7 @@ class Accel:
 def _ffmpeg_encoders() -> str:
     try:
         return subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
+            [ffmpeg_exe(), "-hide_banner", "-encoders"],
             capture_output=True, text=True, check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -24,8 +25,7 @@ def _ffmpeg_encoders() -> str:
 
 @lru_cache(maxsize=1)
 def detect_accel() -> Accel:
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg not found on PATH. Install it: brew install ffmpeg")
+    ffmpeg_exe()  # raises with a platform-appropriate install hint if absent
 
     encoders = _ffmpeg_encoders()
     torch_device = _torch_device()

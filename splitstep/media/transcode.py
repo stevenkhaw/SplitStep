@@ -8,6 +8,7 @@ from pathlib import Path
 
 from splitstep.accel import Accel, detect_accel
 from splitstep.media.probe import MediaInfo, probe
+from splitstep.resources import ffmpeg_exe
 
 
 class TranscodeError(Exception):
@@ -45,7 +46,7 @@ def _stream_progress(
     reads ahead in block-sized chunks, so the progress a caller is watching
     would arrive in bursts minutes apart instead of as ffmpeg emits it.
     """
-    cmd = ["ffmpeg", "-v", "error", "-y", "-nostats", "-progress", "pipe:1", *args]
+    cmd = [ffmpeg_exe(), "-v", "error", "-y", "-nostats", "-progress", "pipe:1", *args]
     last = -1.0
     with tempfile.TemporaryFile("w+") as stderr:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr, text=True)
@@ -132,7 +133,7 @@ def run_ffmpeg(
         return
     try:
         proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", *args],
+            [ffmpeg_exe(), "-v", "error", "-y", *args],
             capture_output=True, text=True, check=False, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
