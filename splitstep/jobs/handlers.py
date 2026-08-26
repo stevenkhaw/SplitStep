@@ -337,10 +337,19 @@ def _clip_color_profile(conn, library: Library, info, src: Path):
     legacy module-pinned HLG profile (every pre-migration clip was cut under
     it, so it is a fact about those files, not a guess); else this source's
     own tags, which become the library's profile permanently. Locked at
-    check time rather than after a successful encode: the worker is
-    single-threaded so nothing races it, and a first export that fails
-    mid-encode for an unrelated reason still locked a profile read from
-    valid tags -- the owner's camera either way.
+    check time rather than after a successful encode: within one `Worker`'s
+    single thread nothing races it, and a first export that fails mid-encode
+    for an unrelated reason still locked a profile read from valid tags --
+    the owner's camera either way. That guarantee is per-process, not
+    per-library: two `splitstep serve` instances pointed at the same
+    `library.db` -- the exact "two workers on one library.db" scenario the
+    Tauri single-instance plugin exists to prevent (see
+    docs/superpowers/specs/2026-08-26-mac-app-distribution-design.md) -- each
+    run their own single-threaded Worker, and two such processes racing each
+    other's first clip export could both read `stored is None` and each lock
+    their own reading. Last write wins, and concat's pre-flight parameter
+    check (see `media/concat.py`) is the net under that: a mismatched profile
+    shows up there as a divergence, not as a silently wrong reel.
 
     An untagged source can never become the profile: unknown pixels locking
     the library would bless every future untagged source, exactly the

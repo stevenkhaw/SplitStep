@@ -732,6 +732,25 @@ def test_import_strips_any_client_path_from_the_filename(client, library):
     assert (library.inbox / "evil.mp4").exists()
 
 
+def test_import_strips_leading_dots_so_the_file_is_not_hidden(client, library):
+    # A dot-prefixed name would land invisible to both the watcher (which
+    # skips dotfiles on purpose) and the inbox listing -- forever, since
+    # nothing ever revisits an already-imported file.
+    r = client.post("/api/import", files={"file": (".hidden.mp4", b"x")})
+    assert r.status_code == 200
+    assert r.json()["name"] == "hidden.mp4"
+    assert (library.inbox / "hidden.mp4").exists()
+    assert [p.name for p in library.inbox.iterdir()] == ["hidden.mp4"]
+
+
+def test_import_refuses_a_bare_dot_suffix(client, library):
+    # ".mp4" has no basename once its leading dot is stripped for the check
+    # above -- correctly falls through to the same 415 a suffixless upload gets.
+    r = client.post("/api/import", files={"file": (".mp4", b"x")})
+    assert r.status_code == 415
+    assert list(library.inbox.iterdir()) == []
+
+
 def test_inbox_route_reports_unsupported_and_quarantined_files(client, library):
     (library.inbox / "match.webm").write_bytes(b"x")
     failed = library.inbox / "failed"

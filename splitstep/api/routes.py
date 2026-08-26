@@ -796,6 +796,12 @@ def api_import(request: Request, file: UploadFile):
     """
     library = _library(request)
     name = Path(file.filename or "").name  # strip any client-supplied path
+    # Strip leading dots before the suffix check. Left alone, ".hidden.mp4"
+    # would land dot-prefixed in _inbox -- invisible to both the watcher
+    # (which skips dotfiles on purpose, see above) and the inbox listing,
+    # forever, while this route still returned 200. ".mp4" alone still has
+    # no suffix once stripped ("mp4"), so it correctly falls through to 415.
+    name = name.lstrip(".")
     if not name or Path(name).suffix.lower() not in VIDEO_SUFFIXES:
         raise HTTPException(
             status_code=415,

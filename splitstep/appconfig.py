@@ -32,6 +32,20 @@ def load_config() -> dict:
         return json.loads(config_path().read_text())
     except FileNotFoundError:
         return {}
+    except json.JSONDecodeError as exc:
+        # LibraryUnconfigured, not a bare re-raise: a config file that cannot
+        # be parsed carries no library path, which is exactly the condition
+        # that exception already names, and every caller (main()'s except
+        # clauses) already turns it into a friendly stderr message and exit 2
+        # instead of a raw traceback. A corrupt file is functionally identical
+        # to a missing one from the resolver's point of view -- both mean
+        # "no library configured" -- so it gets the same friendly path, with
+        # the file's path in the message so the fix (edit or delete it) is
+        # obvious.
+        raise LibraryUnconfigured(
+            f"Config file at {config_path()} is not valid JSON ({exc}). "
+            "Fix it or delete the file and re-run `splitstep config set-library <path>`."
+        ) from exc
 
 
 def save_config(cfg: dict) -> None:

@@ -50,5 +50,17 @@ def test_missing_config_file_loads_empty(isolated_config):
     assert appconfig.load_config() == {}
 
 
+def test_corrupt_config_file_raises_library_unconfigured_naming_the_path(isolated_config):
+    # A corrupt file gets the same friendly path as a missing library: both
+    # mean "no library configured", and this lets main()'s existing
+    # LibraryUnconfigured handler turn it into exit 2 with a message instead
+    # of a raw json.JSONDecodeError traceback.
+    appconfig.config_path().write_text("{not valid json")
+    with pytest.raises(LibraryUnconfigured) as exc:
+        resolve_library(None)
+    msg = str(exc.value)
+    assert str(appconfig.config_path()) in msg
+
+
 def test_tilde_expands(isolated_config):
     assert resolve_library("~/lib") == Path("~/lib").expanduser()
