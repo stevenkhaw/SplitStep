@@ -1,10 +1,12 @@
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from splitstep import appconfig
 from splitstep.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from splitstep.db import jobs as jobq
 from splitstep.db.labels import latest_labels, parse_flags
@@ -29,7 +31,7 @@ from splitstep.watcher import InboxWatcher
 
 
 def _library(args) -> Library:
-    return Library.open(Path(args.library).expanduser())
+    return Library.open(appconfig.resolve_library(args.library))
 
 
 def _format_ts(ms: int) -> str:
@@ -76,7 +78,7 @@ def _parse_quad(raw: str) -> Quad:
 def cmd_init(args) -> int:
     # Deliberately not _library(args): that requires library.db to already
     # exist, which is exactly what this command creates.
-    lib = Library.create(Path(args.library).expanduser())
+    lib = Library.create(appconfig.resolve_library(args.library))
     print(f"initialized library at {lib.root}")
     for sub in (lib.inbox, lib.sessions_dir, lib.reels_dir):
         print(f"  {sub}")
@@ -106,6 +108,30 @@ def cmd_doctor(args) -> int:
         for r in rows:
             print(f"  {r['session_id']}/{r['idx']:02d}  {r['status']:<12}"
                   f"  {r['width']}x{r['height']}  rotation {r['rotation_deg']}")
+    return 0
+
+
+def cmd_config_show(args) -> int:
+    cfg = appconfig.load_config()
+    print(f"config file: {appconfig.config_path()}")
+    print(f"library:     {cfg.get('library') or 'unset'}")
+    env = os.environ.get(appconfig.ENV_VAR)
+    if env:
+        print(f"{appconfig.ENV_VAR} (overrides the file): {env}")
+    return 0
+
+
+def cmd_config_set_library(args) -> int:
+    path = Path(args.path).expanduser()
+    if not path.is_dir():
+        # Refuse rather than mkdir: choosing where a library lives is the
+        # picker's/user's job, and a typo here must not create a stray tree.
+        print(f"not a directory: {path}", file=sys.stderr)
+        return 1
+    cfg = appconfig.load_config()
+    cfg["library"] = str(path)
+    appconfig.save_config(cfg)
+    print(f"library set to {path}")
     return 0
 
 
@@ -161,7 +187,11 @@ def cmd_serve(args) -> int:
 
     from splitstep.api.app import create_app
 
-    lib = _library(args)
+    root = appconfig.resolve_library(args.library)
+    # --create is the app's first-run path: the folder was just picked by a
+    # human, so initializing it is the intent. Everything else keeps open()'s
+    # strict guard.
+    lib = Library.open_or_create(root) if args.create else Library.open(root)
     app = create_app(lib, spa_dist=Path(__file__).parent.parent / "web" / "dist")
 
     worker = Worker(lib, HANDLERS)
@@ -488,7 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     parser = argparse.ArgumentParser(prog="splitstep")
-    parser.add_argument("--library", required=True, help="path to the library root")
+    parser.add_argument("--library", help="path to the library root")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init", help="create a new library tree and database")
@@ -497,9 +527,21 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("doctor", help="show detected hardware and library state")
     p.set_defaults(func=cmd_doctor)
 
+    p = sub.add_parser("config", help="show or set persistent configuration")
+    config_sub = p.add_subparsers(dest="config_command", required=True)
+
+    cs = config_sub.add_parser("show", help="print the config file and resolved values")
+    cs.set_defaults(func=cmd_config_show)
+
+    cl = config_sub.add_parser("set-library", help="remember a default library path")
+    cl.add_argument("path")
+    cl.set_defaults(func=cmd_config_set_library)
+
     p = sub.add_parser("serve", help="run the web server, worker and inbox watcher")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8420)
+    p.add_argument("--create", action="store_true",
+                   help="initialize the library first if the directory is empty")
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("ingest", help="queue a video file for ingest")
@@ -587,6 +629,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except LibraryAlreadyInitialized as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except appconfig.LibraryUnconfigured as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from splitstep import cli
+from splitstep import appconfig, cli
 from splitstep.cli import _format_ts, main
 from splitstep.db.rallies import list_rallies
 from splitstep.db.schema import connect, migrate
@@ -752,3 +752,38 @@ def test_clips_prune_on_an_unknown_session_fails(library, conn, capsys):
     rc = main(["--library", str(library.root), "clips", "prune", "nope", "--yes"])
     assert rc == 1
     assert "not found" in capsys.readouterr().err.lower()
+
+
+# -- optional --library / config commands -------------------------------------
+
+@pytest.fixture(autouse=True)
+def isolated_appconfig(tmp_path, monkeypatch):
+    # Same isolation as tests/test_appconfig.py: never touch the real config.
+    monkeypatch.setattr(appconfig, "config_path", lambda: tmp_path / "appconfig.json")
+    monkeypatch.delenv(appconfig.ENV_VAR, raising=False)
+
+
+def test_library_flag_is_now_optional_and_env_var_works(library, monkeypatch, capsys):
+    monkeypatch.setenv(appconfig.ENV_VAR, str(library.root))
+    assert main(["doctor"]) == 0
+    assert str(library.root) in capsys.readouterr().out
+
+
+def test_no_library_anywhere_exits_2_with_guidance(capsys):
+    assert main(["doctor"]) == 2
+    err = capsys.readouterr().err
+    assert "--library" in err and appconfig.ENV_VAR in err
+
+
+def test_config_set_library_then_commands_need_no_flag(library, capsys):
+    assert main(["config", "set-library", str(library.root)]) == 0
+    assert main(["doctor"]) == 0
+
+
+def test_config_set_library_refuses_a_missing_directory(tmp_path, capsys):
+    assert main(["config", "set-library", str(tmp_path / "nope")]) == 1
+
+
+def test_config_show_reports_unset(capsys):
+    assert main(["config", "show"]) == 0
+    assert "unset" in capsys.readouterr().out

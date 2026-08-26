@@ -67,6 +67,24 @@ class Library:
             conn.close()
         return cls(root=root)
 
+    @classmethod
+    def open_or_create(cls, root: Path) -> "Library":
+        """Open the library at `root`, initializing it first if the directory
+        exists but holds no library.db.
+
+        This is the first-run path for the app's folder picker: the user just
+        chose the directory, so "no library.db here" means "make me one", not
+        "the drive fell off". `open()`'s refusal stays untouched for every
+        other caller -- an unattended `serve` after an unclean eject must
+        still fail loudly rather than build a second library on internal
+        storage. The directory itself must already exist; nothing here ever
+        mkdirs a root (see InboxWatcher.start for the hazard).
+        """
+        root = Path(root)
+        if (root / "library.db").exists():
+            return cls.open(root)
+        return cls.create(root)
+
     @property
     def db_path(self) -> Path:
         return self.root / "library.db"

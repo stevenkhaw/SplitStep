@@ -111,3 +111,23 @@ def test_create_raises_when_the_root_is_not_mounted(tmp_path):
     with pytest.raises(LibraryNotMounted):
         Library.create(missing)
     assert not missing.exists()
+
+
+def test_open_or_create_initializes_an_empty_directory(tmp_path):
+    lib = Library.open_or_create(tmp_path)
+    assert (tmp_path / "library.db").exists()
+    assert (tmp_path / "_inbox").is_dir()
+    assert lib.root == tmp_path
+
+
+def test_open_or_create_opens_an_existing_library_untouched(tmp_path):
+    Library.create(tmp_path)
+    before = (tmp_path / "library.db").stat().st_mtime_ns
+    lib = Library.open_or_create(tmp_path)
+    assert lib.root == tmp_path
+    assert (tmp_path / "library.db").stat().st_mtime_ns == before
+
+
+def test_open_or_create_still_refuses_a_missing_root(tmp_path):
+    with pytest.raises(LibraryNotMounted):
+        Library.open_or_create(tmp_path / "nope")
