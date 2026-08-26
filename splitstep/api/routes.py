@@ -4,7 +4,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -71,6 +71,7 @@ from splitstep.reels import (
     resolve_items,
 )
 from splitstep.setup import queue_setup
+from splitstep.watcher import VIDEO_SUFFIXES
 
 from .media import range_response
 
@@ -775,6 +776,46 @@ def api_retry_job(job_id: str, request: Request):
         # Present but not failed -- done, queued, or running again already.
         raise HTTPException(status_code=409, detail="Only a failed job can be retried")
     return {"ok": True}
+
+
+@router.post("/api/import")
+def api_import(request: Request, file: UploadFile):
+    """Stream an upload into `_inbox/`, where the watcher takes over.
+
+    The route writes, the watcher ingests -- importing this way and dropping
+    a file in Finder are the same pipeline from the first probe onward.
+    Loopback upload is fast enough for multi-GB originals, and it is the one
+    mechanism that works identically in a plain browser and in the app.
+
+    Written to a dot-prefixed temp name first: the watcher skips dotfiles,
+    so it can never see a half-streamed upload (its is_stable check guards
+    Finder copies, but an http stream that stalls for a while would pass a
+    size-settle check while still incomplete). os.replace onto the final
+    name is atomic within the filesystem, so the watcher sees either nothing
+    or a complete file.
+    """
+    library = _library(request)
+    name = Path(file.filename or "").name  # strip any client-supplied path
+    if not name or Path(name).suffix.lower() not in VIDEO_SUFFIXES:
+        raise HTTPException(
+            status_code=415,
+            detail="Not a video file. Supported: "
+                   + ", ".join(sorted(VIDEO_SUFFIXES)),
+        )
+    dest = library.inbox / name
+    if dest.exists():
+        # Keep both: the same phone exports the same default names, and a
+        # second session's IMG_0001 must not overwrite the first's.
+        dest = library.inbox / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+    tmp = library.inbox / f".upload-{uuid.uuid4().hex}{dest.suffix}"
+    try:
+        with tmp.open("wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                out.write(chunk)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return {"name": dest.name}
 
 
 @router.get("/media/{session_id}/{idx}/proxy.mp4")

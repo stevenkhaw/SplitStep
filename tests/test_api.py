@@ -699,3 +699,34 @@ def test_retry_route_requeues_only_failed_jobs(client, conn, seeded):
     jobq.finish(conn, job_id, error="boom")
     assert client.post(f"/api/jobs/{job_id}/retry").status_code == 200
     assert client.post("/api/jobs/nope/retry").status_code == 404
+
+
+def test_import_streams_into_the_inbox(client, library):
+    r = client.post("/api/import",
+                    files={"file": ("IMG_1234.MOV", b"fake video bytes")})
+    assert r.status_code == 200
+    name = r.json()["name"]
+    assert (library.inbox / name).read_bytes() == b"fake video bytes"
+    # No half-written temp left behind, and nothing dot-prefixed for the
+    # watcher to trip on.
+    assert [p.name for p in library.inbox.iterdir()] == [name]
+
+
+def test_import_refuses_a_non_video_suffix(client, library):
+    r = client.post("/api/import", files={"file": ("notes.txt", b"hi")})
+    assert r.status_code == 415
+    assert list(library.inbox.iterdir()) == []
+
+
+def test_import_keeps_both_files_on_a_name_collision(client, library):
+    client.post("/api/import", files={"file": ("a.mp4", b"one")})
+    client.post("/api/import", files={"file": ("a.mp4", b"two")})
+    names = sorted(p.name for p in library.inbox.iterdir())
+    assert len(names) == 2 and names[0] == "a.mp4" and names[1].endswith(".mp4")
+
+
+def test_import_strips_any_client_path_from_the_filename(client, library):
+    r = client.post("/api/import", files={"file": ("../../evil.mp4", b"x")})
+    assert r.status_code == 200
+    assert r.json()["name"] == "evil.mp4"
+    assert (library.inbox / "evil.mp4").exists()
