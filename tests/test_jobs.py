@@ -478,3 +478,69 @@ def test_enqueue_once_returns_none_when_a_job_is_already_pending(conn):
 def test_enqueue_once_does_not_match_a_prefix_source_id(conn):
     enqueue_once(conn, "detect", "src-1", {"source_id": "src-1"})
     assert enqueue_once(conn, "detect", "src-10", {"source_id": "src-10"}) is not None
+
+
+def _enqueue_once_after_barrier(db_path, idx, barrier, results):
+    """Race helper for test_enqueue_once_is_atomic_across_connections.
+
+    Defined at module scope (not nested in the test's loop) so it never closes
+    over a loop variable -- every input it needs is an explicit argument.
+    """
+    from splitstep.db.schema import connect
+
+    worker_conn = connect(db_path)
+    try:
+        barrier.wait()
+        job_id = enqueue_once(worker_conn, "detect", "src-1", {"source_id": "src-1"})
+        results[idx] = job_id
+    finally:
+        worker_conn.close()
+
+
+def test_enqueue_once_is_atomic_across_connections(library):
+    """Reproduces the race the TODO describes: handle_build_proxy used to run a
+    SELECT for an in-flight 'detect' job and a separate INSERT with no lock
+    between them, and every serve process gets its own thread and its own sqlite
+    connection, so two concurrent detects of the same source could each pass the
+    SELECT and each INSERT. This drives two separate connections at a barrier,
+    mirroring what two concurrent serve processes actually get.
+    BEGIN IMMEDIATE closes this: the write lock serializes the check-and-insert,
+    so only one thread succeeds and the other sees the pending job.
+    """
+    from splitstep.db.schema import connect, migrate
+
+    setup_conn = connect(library.db_path)
+    migrate(setup_conn)
+    try:
+        for _ in range(30):
+            barrier = threading.Barrier(2)
+            results = [None, None]
+
+            t1 = threading.Thread(
+                target=_enqueue_once_after_barrier,
+                args=(library.db_path, 0, barrier, results),
+            )
+            t2 = threading.Thread(
+                target=_enqueue_once_after_barrier,
+                args=(library.db_path, 1, barrier, results),
+            )
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            # One thread should have gotten a job_id, the other None
+            assert (results[0] is not None and results[1] is None) or (
+                results[0] is None and results[1] is not None
+            ), f"expected one success and one None, got {results}"
+            # Exactly one detect job for src-1 should exist
+            row = setup_conn.execute(
+                "SELECT COUNT(*) c FROM jobs WHERE type='detect'"
+                " AND json_extract(payload, '$.source_id') = 'src-1'"
+            ).fetchone()
+            assert row["c"] == 1, f"expected 1 detect job, found {row['c']}"
+            # Clean up for next iteration
+            setup_conn.execute("DELETE FROM jobs")
+            setup_conn.commit()
+    finally:
+        setup_conn.close()
