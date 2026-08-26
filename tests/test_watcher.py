@@ -63,3 +63,13 @@ def test_scan_does_not_enqueue_the_same_file_twice(library, conn):
 def test_scan_accepts_uppercase_suffixes(library, conn):
     (library.inbox / "IMG_0001.MOV").write_bytes(b"x" * 1024)
     assert len(scan_inbox(library, conn, settle_s=0.2)) == 1
+
+
+def test_non_video_files_are_logged_once_not_every_scan(library, conn, caplog):
+    (library.inbox / "match.webm").write_bytes(b"x")
+    reported: set[str] = set()
+    with caplog.at_level("WARNING"):
+        scan_inbox(library, conn, settle_s=0.01, reported=reported)
+        scan_inbox(library, conn, settle_s=0.01, reported=reported)
+    mentions = [r for r in caplog.records if "match.webm" in r.getMessage()]
+    assert len(mentions) == 1

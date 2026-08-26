@@ -818,6 +818,31 @@ def api_import(request: Request, file: UploadFile):
     return {"name": dest.name}
 
 
+@router.get("/api/inbox")
+def api_inbox(request: Request):
+    """What the inbox is silently sitting on: files the watcher will never
+    ingest (wrong suffix) and files that failed ingest (quarantined by
+    _move_to_failed with a sibling .error.txt). Both were previously
+    invisible to the UI -- "I dropped it and nothing happened" was the
+    reported experience.
+    """
+    library = _library(request)
+    unsupported = sorted(
+        p.name for p in library.inbox.iterdir()
+        if p.is_file() and not p.name.startswith(".")
+        and p.suffix.lower() not in VIDEO_SUFFIXES
+    )
+    failed = []
+    failed_dir = library.inbox / "failed"
+    if failed_dir.is_dir():
+        for err in sorted(failed_dir.glob("*.error.txt")):
+            failed.append({
+                "name": err.name.removesuffix(".error.txt"),
+                "error": err.read_text().strip(),
+            })
+    return {"unsupported": unsupported, "failed": failed}
+
+
 @router.get("/media/{session_id}/{idx}/proxy.mp4")
 def api_proxy(session_id: str, idx: int, request: Request,
               range: str | None = Header(default=None)):

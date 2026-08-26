@@ -49,13 +49,23 @@ def _already_queued(conn: sqlite3.Connection, path: Path) -> bool:
 
 
 def scan_inbox(
-    library: Library, conn: sqlite3.Connection, *, settle_s: float = 3.0
+    library: Library,
+    conn: sqlite3.Connection,
+    *,
+    settle_s: float = 3.0,
+    reported: set[str] | None = None,
 ) -> list[str]:
     enqueued: list[str] = []
     for path in sorted(library.inbox.iterdir()):
         if not path.is_file() or path.name.startswith("."):
             continue
         if path.suffix.lower() not in VIDEO_SUFFIXES:
+            # Once per file, not once per 5-second scan: the set is the
+            # watcher's memory. Before this, a .webm dropped in the inbox
+            # vanished silently, forever -- no log line, no UI signal.
+            if reported is not None and path.name not in reported:
+                reported.add(path.name)
+                log.warning("ignoring non-video file in inbox: %s", path.name)
             continue
         if _already_queued(conn, path):
             continue
@@ -76,11 +86,12 @@ class InboxWatcher:
         migrate(self.conn)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._reported: set[str] = set()
 
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                scan_inbox(self.library, self.conn)
+                scan_inbox(self.library, self.conn, reported=self._reported)
             except Exception:  # one bad scan must not kill the watcher thread
                 log.exception("inbox scan failed")
             self._stop.wait(SCAN_INTERVAL_S)

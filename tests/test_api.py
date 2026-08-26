@@ -730,3 +730,20 @@ def test_import_strips_any_client_path_from_the_filename(client, library):
     assert r.status_code == 200
     assert r.json()["name"] == "evil.mp4"
     assert (library.inbox / "evil.mp4").exists()
+
+
+def test_inbox_route_reports_unsupported_and_quarantined_files(client, library):
+    (library.inbox / "match.webm").write_bytes(b"x")
+    failed = library.inbox / "failed"
+    failed.mkdir()
+    (failed / "broken.mp4").write_bytes(b"x")
+    (failed / "broken.mp4.error.txt").write_text("ProbeError: no video stream")
+    body = client.get("/api/inbox").json()
+    assert body["unsupported"] == ["match.webm"]
+    assert body["failed"] == [
+        {"name": "broken.mp4", "error": "ProbeError: no video stream"}
+    ]
+
+
+def test_inbox_route_is_empty_when_the_inbox_is(client, library):
+    assert client.get("/api/inbox").json() == {"unsupported": [], "failed": []}
