@@ -78,7 +78,11 @@ Shell responsibilities:
   fifteen-minute detect running under a hidden window.
 - Relaunch dialog if the sidecar process dies.
 - Native folder picker for first run (a browser page cannot read a picked
-  folder's absolute path; the dialog must be native).
+  folder's absolute path; the dialog must be native). The shell passes
+  `--create` only on that first-run launch, always paired with the
+  freshly-picked `--library <path>`; every later launch passes plain
+  `--library <path>` with no `--create`, so the server-side guard requiring
+  the flag alongside `--create` is never in tension with normal startup.
 - Dock-icon drop → copy into `_inbox/`; the existing watcher takes over.
 - Native notification when detection finishes, by polling `/api/jobs` — no
   server change needed.

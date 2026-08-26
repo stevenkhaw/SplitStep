@@ -228,6 +228,21 @@ def test_serve_subcommand_routes_to_cmd_serve(library, monkeypatch):
     assert calls == {"host": "127.0.0.1", "port": 9000}
 
 
+def test_serve_create_without_explicit_library_flag_refuses(tmp_path, monkeypatch, capsys):
+    # Deliberately does NOT monkeypatch cmd_serve: the guard runs before any
+    # Library call or uvicorn.run, so this exercises the real function and
+    # never starts a server. An env var stands in for "a path configured in
+    # some earlier session" -- exactly what --create must not act on.
+    empty_mount = tmp_path / "empty_mount"
+    empty_mount.mkdir()
+    monkeypatch.setenv(appconfig.ENV_VAR, str(empty_mount))
+    rc = main(["serve", "--create"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--library" in err
+    assert list(empty_mount.iterdir()) == []
+
+
 # -- preset / source set-preset ---------------------------------------------
 
 QUAD_ARG = "0.1,0.9 0.9,0.9 0.7,0.3 0.3,0.3"

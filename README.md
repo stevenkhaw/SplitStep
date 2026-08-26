@@ -63,7 +63,9 @@ the flag shown above, then a `SPLITSTEP_LIBRARY` environment variable, then
 whatever path was last saved with `splitstep config set-library
 /Volumes/SplitStep`. The flag always wins, so a one-off command against a
 second library never needs the saved default touched — plain `splitstep
-serve` is enough once one of the three is set.
+serve` is enough once one of the three is set. `serve --create` initializes a
+fresh library at startup and requires that same `--library` flag explicitly —
+it will not create one at a path that only came from the env var or config.
 
 `serve` starts the FastAPI app, the background job worker, and the inbox
 watcher in one process, and serves the built `web/dist` bundle at `/` — open

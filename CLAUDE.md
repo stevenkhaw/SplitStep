@@ -42,6 +42,10 @@ splitstep --library /Volumes/SanDisk_2TB/SplitStep doctor
 splitstep --library /Volumes/SanDisk_2TB/SplitStep serve   # :8420
 ```
 
+`serve --create` initializes a fresh library and requires that `--library`
+flag explicitly — it refuses to create one at a path resolved only from
+`SPLITSTEP_LIBRARY` or the config file.
+
 UI iteration wants two terminals — `splitstep serve` for API/media, `npm run dev`
 for Vite on :5173 (it proxies `/api` and `/media` to :8420). Anything else:
 `npm run build` once, then `serve` alone.

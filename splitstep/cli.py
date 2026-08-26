@@ -183,6 +183,20 @@ def cmd_setup(args) -> int:
 
 
 def cmd_serve(args) -> int:
+    if args.create and args.library is None:
+        # --create builds a library. A path resolved from SPLITSTEP_LIBRARY or
+        # the config file was chosen in some earlier session, not this one --
+        # letting --create act on it would bypass exactly the guard
+        # Library.open() exists to enforce: an unclean-ejected drive leaves an
+        # empty mountpoint that passes is_dir()/os.access(), and open_or_create
+        # would read that as "nothing here yet, make one" and silently start a
+        # second library where the real one used to be mounted. Requiring the
+        # flag explicitly means creation only ever targets a path a human (or
+        # the Tauri picker) chose in this invocation. Checked first, before
+        # any Library call, so this never touches disk or starts a server.
+        print("error: --create requires an explicit --library <path>", file=sys.stderr)
+        return 2
+
     import uvicorn
 
     from splitstep.api.app import create_app
