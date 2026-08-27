@@ -8,6 +8,24 @@ Do this in a **second macOS user account** — the poor man's clean machine.
 System Settings → Users & Groups → Add User. Log into it. Nothing in
 `~/Library/Application Support/splitstep` exists there, which is the point.
 
+## Already verified on Steven's own account (2026-08-27)
+
+Done, do not redo:
+
+- [x] Gatekeeper. Tested by writing a quarantine flag onto a copy of the dmg
+      rather than needing a second account — the flag moved from `0081`
+      (downloaded) to `0181` (user-approved), so the dialog appeared and was
+      cleared through the documented path.
+- [x] Installed to /Applications, replacing a previous copy.
+- [x] Opened the real library on the SanDisk drive: chooser appeared, Choose
+      folder worked, the button read **Open** (not Create), and the app came
+      up on 304 rallies.
+- [x] `mode` stayed `dev` after opening — friend mode is only written when a
+      library is created, which is the intended behaviour.
+- [x] Quit left no sidecar, no pidfile and nothing listening.
+
+Still open below.
+
 ## Install
 
 - [ ] Copy `SplitStep.dmg` across (AirDrop to yourself, or a USB stick)
