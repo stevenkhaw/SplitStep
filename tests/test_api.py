@@ -714,6 +714,21 @@ def test_jobs_route_carries_error_detail(client, conn, seeded):
     assert failed["error_detail"] == "Traceback..."
 
 
+def test_config_roundtrip(client, tmp_path, monkeypatch):
+    # Point the config file into tmp: this route writes the developer's real
+    # per-user config otherwise, and a test that mutates ~/Library is a test
+    # that fails someone's tomorrow.
+    from splitstep import appconfig
+
+    monkeypatch.setattr(appconfig, "config_path", lambda: tmp_path / "config.json")
+    assert client.get("/api/config").json() == {"mode": "dev"}
+    r = client.post("/api/config/mode", json={"mode": "friend"})
+    assert r.status_code == 200
+    assert r.json() == {"mode": "friend"}
+    assert client.get("/api/config").json() == {"mode": "friend"}
+    assert client.post("/api/config/mode", json={"mode": "expert"}).status_code == 422
+
+
 def test_retry_route_requeues_only_failed_jobs(client, conn, seeded):
     job_id = jobq.enqueue(conn, "detect", {"source_id": seeded["source_id"]})
     assert client.post(f"/api/jobs/{job_id}/retry").status_code == 409

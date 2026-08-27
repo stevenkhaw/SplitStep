@@ -5,11 +5,13 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from splitstep import appconfig
 from splitstep.accel import detect_accel
 from splitstep.db import jobs as jobq
 from splitstep.db.labels import (
@@ -876,6 +878,23 @@ def api_setup(source_id: str, body: SetupBody, request: Request):
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"job_id": job_id}
+
+
+class ModeBody(BaseModel):
+    # Validated by pydantic rather than in the handler so an unknown mode is
+    # a 422 like every other malformed body in this file, not a bespoke 400.
+    mode: Literal["friend", "dev"]
+
+
+@router.get("/api/config")
+def api_config(request: Request):
+    return {"mode": appconfig.get_mode()}
+
+
+@router.post("/api/config/mode")
+def api_set_mode(body: ModeBody, request: Request):
+    appconfig.set_mode(body.mode)
+    return {"mode": appconfig.get_mode()}
 
 
 @router.get("/api/jobs")

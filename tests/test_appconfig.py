@@ -64,3 +64,26 @@ def test_corrupt_config_file_raises_library_unconfigured_naming_the_path(isolate
 
 def test_tilde_expands(isolated_config):
     assert resolve_library("~/lib") == Path("~/lib").expanduser()
+
+
+def test_mode_defaults_to_dev(isolated_config):
+    assert appconfig.get_mode() == "dev"
+
+
+def test_unknown_mode_in_the_file_reads_as_dev(isolated_config):
+    # A hand-edited config with a typo'd mode must not strand the UI in an
+    # undefined state; the resolver collapses anything unrecognized to 'dev'.
+    save_config({"mode": "expert"})
+    assert appconfig.get_mode() == "dev"
+
+
+def test_set_mode_preserves_other_keys(isolated_config):
+    save_config({"library": "/some/path"})
+    appconfig.set_mode("friend")
+    assert appconfig.get_mode() == "friend"
+    assert appconfig.load_config()["library"] == "/some/path"
+
+
+def test_set_mode_rejects_unknown_values(isolated_config):
+    with pytest.raises(ValueError):
+        appconfig.set_mode("expert")

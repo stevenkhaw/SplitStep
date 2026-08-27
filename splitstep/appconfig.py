@@ -54,6 +54,27 @@ def save_config(cfg: dict) -> None:
     path.write_text(json.dumps(cfg, indent=1) + "\n")
 
 
+MODES = ("friend", "dev")
+
+
+def get_mode() -> str:
+    # 'dev' when the key is absent: a dev checkout never wrote it, and the
+    # Tauri shell (Phase 3) writes 'friend' on first run -- so absence itself
+    # is the dev signal, no second flag needed. Unknown values also collapse
+    # to 'dev': a hand-edited typo must not strand the UI in a mode no gate
+    # was written for.
+    mode = load_config().get("mode", "dev")
+    return mode if mode in MODES else "dev"
+
+
+def set_mode(mode: str) -> None:
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}")
+    cfg = load_config()
+    cfg["mode"] = mode
+    save_config(cfg)
+
+
 def resolve_library(flag: str | None) -> Path:
     if flag:
         return Path(flag).expanduser()
