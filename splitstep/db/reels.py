@@ -5,9 +5,12 @@ from datetime import UTC, datetime
 
 Span = tuple[str, int, int]
 
-# Short enough to burn legibly beneath the counter at 4K and to fit the
-# builder's inline field -- the same trim-then-measure rule rally notes use.
-ITEM_NOTE_MAX_CHARS = 40
+# Roomy enough for a real coaching sentence -- the first live pass of notes
+# measured ~110 characters, and the 40 this started at forced truncation of
+# exactly the content the feature exists to carry. The burn wraps long notes
+# across lines (see media/numbered.py), so legibility no longer caps length;
+# 200 is where a note stops being a caption and starts being a paragraph.
+ITEM_NOTE_MAX_CHARS = 200
 
 
 def _now() -> str:
@@ -136,10 +139,24 @@ def add_items(conn: sqlite3.Connection, reel_id: str, spans: list[Span]) -> int:
             if key in existing:
                 continue
             existing.add(key)
+            # Seed the item's note from the exact-span rally's note, when one
+            # exists. The reviewer writes coaching notes during review, then
+            # builds the reel FROM those rallies -- discovering the reel has
+            # its own empty note field, one item at a time, cost a full pass
+            # of retyping before this seed existed (2026-08-26). Exact span,
+            # not overlap, for the same reason resolve_items matches exactly:
+            # an item IS a clip and the clip is named for these bounds. A
+            # copy at add time, deliberately not a live fallback at render
+            # time: the item's note stays independently editable, and a
+            # later rally edit cannot silently change what an already-clean
+            # reel would burn.
             conn.execute(
-                "INSERT INTO reel_items (reel_id,source_id,start_ms,end_ms,position)"
-                " VALUES (?,?,?,?,?)",
-                (reel_id, source_id, start_ms, end_ms, position),
+                "INSERT INTO reel_items (reel_id,source_id,start_ms,end_ms,position,note)"
+                " VALUES (?,?,?,?,?,COALESCE("
+                "  (SELECT note FROM rallies WHERE source_id=? AND start_ms=? AND end_ms=?),"
+                "  ''))",
+                (reel_id, source_id, start_ms, end_ms, position,
+                 source_id, start_ms, end_ms),
             )
             position += 1
             added += 1

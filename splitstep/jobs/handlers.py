@@ -502,7 +502,9 @@ def handle_reel(library: Library, payload: dict,
             total = len(items)
             for i, (item, src) in enumerate(zip(items, inputs), start=1):
                 png_i = tmp_dir / f"{i:03d}.png"
-                render_overlay_png(png_i, counter=f"{i}/{total}", note=item.note, font=font)
+                # Spaced like the review queue's own "10 / 122" pill -- the
+                # burn mirrors the counter the reviewer already reads.
+                render_overlay_png(png_i, counter=f"{i} / {total}", note=item.note, font=font)
                 dst_i = tmp_dir / f"{i:03d}.mp4"
                 make_numbered_intermediate(
                     src, dst_i,

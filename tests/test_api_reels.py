@@ -137,7 +137,7 @@ def test_item_note_refuses_an_over_long_note(client, session):
 
     res = client.post(f"/api/reels/{slug}/items/note", json={
         "source_id": session["source_id"], "start_ms": 1000, "end_ms": 5000,
-        "note": "x" * 41,
+        "note": "x" * 201,
     })
 
     assert res.status_code == 422

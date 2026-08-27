@@ -1,6 +1,6 @@
 import pytest
 
-from splitstep.db.rallies import replace_rallies
+from splitstep.db.rallies import replace_rallies, set_note
 from splitstep.db.reels import (
     add_items,
     create_reel,
@@ -290,6 +290,28 @@ def test_set_item_note_round_trips(conn, seeded):
 def test_set_item_note_on_a_missing_item_is_false(conn, seeded):
     reel = create_reel(conn, "r")
     assert set_item_note(conn, reel["id"], seeded["source_id"], 1, 2, "x") is False
+
+
+def test_add_items_seeds_the_note_from_the_exact_span_rally(conn, seeded):
+    # The reviewer's coaching notes live on rallies; a reel built from those
+    # rallies must not present 25 empty note fields to retype (the first
+    # live pass did exactly that). Exact span only -- an overlap-matched
+    # note would caption a different swing than the clip shows.
+    replace_rallies(conn, seeded["session_id"], seeded["source_id"],
+                    [Interval(1000, 2000, 0.8), Interval(9000, 14000, 0.7)])
+    rally = conn.execute(
+        "SELECT id FROM rallies WHERE start_ms = 1000").fetchone()
+    set_note(conn, rally["id"], "good nadal-shot")
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [
+        (seeded["source_id"], 1000, 2000),   # noted rally
+        (seeded["source_id"], 9000, 14000),  # rally without a note
+        (seeded["source_id"], 50, 60),       # no rally at all (orphan add)
+    ])
+    notes = {(r["start_ms"]): r["note"] for r in list_items(conn, reel["id"])}
+    assert notes[1000] == "good nadal-shot"
+    assert notes[9000] == ""
+    assert notes[50] == ""
 
 
 def test_set_item_note_marks_the_reel_dirty(conn, seeded):

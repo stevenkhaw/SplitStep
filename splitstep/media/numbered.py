@@ -21,6 +21,7 @@ clip files are never modified: the same clip can be #3 in one reel and #11
 in another.
 """
 
+import textwrap
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -51,8 +52,12 @@ def _draw_line(
     internally -- PIL just does it explicitly now.
     """
     left, top, right, bottom = draw.textbbox((_MARGIN, y), text, font=font)
-    draw.rectangle(
+    # Rounded, matching the review queue's own on-screen counter pill -- the
+    # burn should read as the same UI element the reviewer already knows,
+    # not a third style of caption.
+    draw.rounded_rectangle(
         (left - _BOX_PAD, top - _BOX_PAD, right + _BOX_PAD, bottom + _BOX_PAD),
+        radius=_BOX_PAD,
         fill=_BOX_FILL,
     )
     draw.text((_MARGIN, y), text, font=font, fill=_TEXT_FILL)
@@ -74,9 +79,15 @@ def render_overlay_png(dst: Path, *, counter: str, note: str, font: str) -> None
     # regular weight, by default) -- see resources.overlay_font.
     _draw_line(draw, counter, ImageFont.truetype(font, _COUNTER_SIZE), _MARGIN)
     if note:
-        _draw_line(
-            draw, note, ImageFont.truetype(font, _NOTE_SIZE), _MARGIN + _COUNTER_SIZE + 48
-        )
+        # Wrapped, not truncated: real notes are coaching sentences (the
+        # first live pass measured ~110 characters), and cutting one off
+        # mid-thought defeats why it was written. ~48 chars at _NOTE_SIZE
+        # keeps each line inside roughly half the 3840px frame.
+        note_font = ImageFont.truetype(font, _NOTE_SIZE)
+        y = _MARGIN + _COUNTER_SIZE + 48
+        for line in textwrap.wrap(note, width=48):
+            _draw_line(draw, line, note_font, y)
+            y += _NOTE_SIZE + 2 * _BOX_PAD
 
     canvas.save(dst)
 

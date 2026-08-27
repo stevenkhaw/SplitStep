@@ -466,9 +466,11 @@
       <!-- Visible whenever a rendered file exists, dirty or not -- a stale
            render is still a real file someone may want to grab. -->
       {#if detail.reel.rendered_path}
+        <!-- text-accent, not text-dim: it sat unnoticed in gray beside the
+             equally gray path text (2026-08-26). -->
         <button
           data-reveal-rendered
-          class="text-dim hover:text-fg motion-safe:transition-colors"
+          class="text-accent hover:brightness-110 motion-safe:transition-colors"
           onclick={revealRendered}
         >reveal file</button>
       {/if}

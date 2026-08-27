@@ -397,7 +397,7 @@ describe('ReelItemList notes', () => {
     flushSync()
     note()!.click()
     flushSync()
-    typeInto(noteInput()!, 'x'.repeat(41))
+    typeInto(noteInput()!, 'x'.repeat(201))
     flushSync()
     expect(noteSave()!.disabled).toBe(true)
   })

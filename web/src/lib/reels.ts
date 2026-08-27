@@ -162,7 +162,7 @@ export function normalizedReelName(input: string): string | null {
  * caption pill with room to wrap, while an item note is burned into the
  * corner of a 4K frame at the numbered render's fixed size.
  */
-export const ITEM_NOTE_MAX_CHARS = 40
+export const ITEM_NOTE_MAX_CHARS = 200
 
 /**
  * Trim, cap-check. `null` means refuse -- the input is over the cap and Save
