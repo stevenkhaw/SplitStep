@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveSelectedTab, scopeToSource, sourceTabs } from '../src/lib/sources'
+import { resolveSelectedTab, scopeToSource, scopedStatus, sourceTabs } from '../src/lib/sources'
 import type { Rally, Source } from '../src/lib/types'
 
 function source(over: Partial<Source> = {}): Source {
@@ -151,5 +151,29 @@ describe('scopeToSource', () => {
     const detail = { session: { id: 's1' }, rallies: [rally({ id: 'r1', source_id: 'src1' })] }
     const scoped = scopeToSource(detail, 'src1')
     expect(scoped.session).toEqual({ id: 's1' })
+  })
+})
+
+describe('scopedStatus', () => {
+  const detail = {
+    sources: [
+      { id: 'src1', status: 'ready' },
+      { id: 'src2', status: 'failed' },
+    ],
+    session: { status: 'detecting' },
+  }
+
+  it('reports the selected source\'s own status', () => {
+    expect(scopedStatus(detail, 'src2')).toBe('failed')
+  })
+
+  it('falls back to the session status with no tab selected', () => {
+    expect(scopedStatus(detail, null)).toBe('detecting')
+  })
+
+  it('falls back to the session status when the id matches nothing', () => {
+    // A stale selection after the source list changed: the session-level
+    // truth beats a wrong-but-plausible per-source guess.
+    expect(scopedStatus(detail, 'gone')).toBe('detecting')
   })
 })

@@ -121,7 +121,14 @@ export function formatBytes(bytes: number): string {
     value /= 1024
     unit += 1
   }
-  const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value)
+  // Round before formatting, and promote when rounding crossed the unit
+  // boundary: 1048051712 bytes is 1023.6 MB, which must read "1 GB", not
+  // the out-of-range "1024 MB".
+  let rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value)
+  if (rounded >= 1024 && unit < units.length - 1) {
+    unit += 1
+    rounded = Math.round((value / 1024) * 10) / 10
+  }
   return `${rounded} ${units[unit]}`
 }
 

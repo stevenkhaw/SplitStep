@@ -492,8 +492,13 @@
     </p>
     <!-- M3: this screen used to render no help line at all, so the only way
          into label mode -- pressing L -- was undiscoverable exactly when a
-         reviewer who just finished a pass is most likely to want it. -->
-    <p class="mt-4 font-data text-data text-faint">L label</p>
+         reviewer who just finished a pass is most likely to want it. Gated
+         like every other hint site: friend mode makes the keypress a no-op
+         (Session.openLabel), and advertising a dead key on the app's most
+         triumphant screen is worse than saying nothing. -->
+    {#if appmode.current === 'dev'}
+      <p class="mt-4 font-data text-data text-faint">L label</p>
+    {/if}
     <!-- Two rows, four actions: cut, and compile. The reel buttons are
          ADDITIONS beside Plan A's export pair, never replacements -- cutting
          clips and compiling a reel are different decisions, and only the

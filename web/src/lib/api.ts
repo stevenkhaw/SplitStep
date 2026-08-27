@@ -181,6 +181,10 @@ export const api = {
 
   jobs: () => req<Job[]>('/api/jobs'),
   retryJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
+  detectSource: (id: string) =>
+    req<{ job_id: string | null; already_running: boolean }>(`/api/sources/${id}/detect`, {
+      method: 'POST',
+    }),
 
   importFile: (file: File) => {
     const body = new FormData()

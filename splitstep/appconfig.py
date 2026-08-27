@@ -51,7 +51,15 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cfg, indent=1) + "\n")
+    # Temp-file + os.replace, not a direct write_text: write_text truncates
+    # before it writes, so a concurrent reader (another request thread's
+    # get_mode, another process's resolve_library) could catch the file
+    # half-written and misread "no library configured". The replace is atomic
+    # within the filesystem, so readers see the old file or the new one,
+    # never a torn middle.
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(cfg, indent=1) + "\n")
+    os.replace(tmp, path)
 
 
 MODES = ("friend", "dev")
@@ -62,8 +70,15 @@ def get_mode() -> str:
     # Tauri shell (Phase 3) writes 'friend' on first run -- so absence itself
     # is the dev signal, no second flag needed. Unknown values also collapse
     # to 'dev': a hand-edited typo must not strand the UI in a mode no gate
-    # was written for.
-    mode = load_config().get("mode", "dev")
+    # was written for. A file too corrupt to parse gets the same treatment
+    # on this read path -- LibraryUnconfigured is the CLI's friendly exit,
+    # but /api/config calls this on every app boot and must never 500 over
+    # a config problem the serve process itself (started via --library)
+    # does not have.
+    try:
+        mode = load_config().get("mode", "dev")
+    except LibraryUnconfigured:
+        return "dev"
     return mode if mode in MODES else "dev"
 
 

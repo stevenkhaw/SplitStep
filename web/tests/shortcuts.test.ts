@@ -41,12 +41,12 @@ describe('isHelpKey', () => {
 describe('shortcutGroups', () => {
   it('covers all three keyboard modes', () => {
     expect(MODES).toEqual(['queue', 'timeline', 'label'])
-    for (const m of MODES) expect(shortcutGroups(m).length).toBeGreaterThan(0)
+    for (const m of MODES) expect(shortcutGroups(m, 'dev').length).toBeGreaterThan(0)
   })
 
   it('gives every entry at least one key and a label', () => {
     for (const m of MODES) {
-      for (const g of shortcutGroups(m)) {
+      for (const g of shortcutGroups(m, 'dev')) {
         expect(g.title).not.toBe('')
         for (const s of g.items) {
           expect(s.keys.length).toBeGreaterThan(0)
@@ -72,8 +72,8 @@ describe('primaryShortcuts', () => {
   // out of date the way a hand-written sentence did.
   it('is drawn from the same list the overlay renders', () => {
     for (const m of MODES) {
-      const all = shortcutGroups(m).flatMap((g) => g.items)
-      for (const s of primaryShortcuts(m)) {
+      const all = shortcutGroups(m, 'dev').flatMap((g) => g.items)
+      for (const s of primaryShortcuts(m, 'dev')) {
         expect(all).toContainEqual(s)
       }
     }
@@ -81,7 +81,7 @@ describe('primaryShortcuts', () => {
 
   it('stays short enough to sit on one line', () => {
     for (const m of MODES) {
-      expect(primaryShortcuts(m).length).toBeLessThanOrEqual(6)
+      expect(primaryShortcuts(m, 'dev').length).toBeLessThanOrEqual(6)
     }
   })
 })
@@ -119,14 +119,14 @@ describe('the queue reference matches the handler it documents', () => {
   // Spot-checks against QueueMode's own switch. If a binding moves, this is
   // what says the documentation moved with it.
   it('lists the review verdicts', () => {
-    const items = shortcutGroups('queue').flatMap((g) => g.items)
+    const items = shortcutGroups('queue', 'dev').flatMap((g) => g.items)
     expect(items.find((s) => s.keys.includes('S'))?.label).toMatch(/star/i)
     expect(items.find((s) => s.keys.includes('X'))?.label).toMatch(/reject/i)
     expect(items.find((s) => s.keys.includes('P'))?.label).toMatch(/point/i)
   })
 
   it('lists the speed keys as one entry, not four', () => {
-    const speed = shortcutGroups('queue')
+    const speed = shortcutGroups('queue', 'dev')
       .flatMap((g) => g.items)
       .find((s) => s.label.match(/speed/i))
     expect(speed?.keys).toEqual(['`', '1', '2', '3'])
@@ -135,7 +135,7 @@ describe('the queue reference matches the handler it documents', () => {
 
 describe('the label reference matches its verdict and flag maps', () => {
   it('lists all four verdicts and all four boundary flags', () => {
-    const items = shortcutGroups('label').flatMap((g) => g.items)
+    const items = shortcutGroups('label', 'dev').flatMap((g) => g.items)
     for (const k of ['1', '2', '3', '4', 'Q', 'W', 'O', 'P']) {
       expect(items.some((s) => s.keys.includes(k))).toBe(true)
     }
@@ -153,7 +153,7 @@ describe('timeline split bindings', () => {
     // Past six the strip wraps and stops being glanceable, which is the
     // failure it replaces. The frame-step pair leaves for the `?` overlay --
     // they are a mirror pair, discoverable from one another.
-    const strip = primaryShortcuts('timeline')
+    const strip = primaryShortcuts('timeline', 'dev')
     expect(strip).toHaveLength(6)
     expect(strip.flatMap((s) => s.keys)).toEqual(['[', ']', 'C', 'U', 'Esc', '?'])
   })

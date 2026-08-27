@@ -98,6 +98,39 @@
     name = ''
     status = null
     error = null
+    offerDetect = false
+  }
+
+  // True after an assignment succeeds: the one moment "run detection again"
+  // is the natural next step. The Phase-1 detect route exists precisely so
+  // this success message stops sending people to a terminal (the old copy
+  // read "re-run detect (CLI: splitstep detect)" -- a dead end for anyone
+  // without the dev checkout).
+  let offerDetect = $state(false)
+
+  async function redetect() {
+    if (!source || busy) return
+    // Same cost warning the re-segment panel gives at click time: a
+    // re-detect rebuilds from detector intervals, so starred/rejected carry
+    // over by overlap but manual boundary edits and hand-made rallies do
+    // not survive it.
+    const sure = window.confirm(
+      'Re-detect this video with the new play region? Starred and rejected ' +
+        'carry over; manual boundary edits and split rallies are lost. ' +
+        'Detection takes a while — the jobs badge tracks it.',
+    )
+    if (!sure) return
+    busy = true
+    error = null
+    try {
+      await api.detectSource(source.id)
+      offerDetect = false
+      status = 'Detection queued — the jobs badge above tracks it.'
+    } catch (e) {
+      error = e
+    } finally {
+      busy = false
+    }
   }
 
   async function save() {
@@ -118,8 +151,9 @@
       // so it's immediately reusable on another source without a reload.
       await refreshPresets()
       status =
-        'Saved and assigned. Existing rallies on this source were detected without this ' +
-        'region -- re-run detect (CLI: splitstep detect) for it to take effect.'
+        'Saved and assigned. Existing rallies were detected without this region — ' +
+        'run detection again for it to take effect.'
+      offerDetect = true
       onassigned()
     } catch (e) {
       error = e
@@ -141,8 +175,9 @@
     try {
       await api.setPreset(source.id, preset.id)
       status =
-        `Assigned "${preset.name}". Existing rallies on this source were detected without ` +
-        'this region -- re-run detect (CLI: splitstep detect) for it to take effect.'
+        `Assigned "${preset.name}". Existing rallies were detected without this ` +
+        'region — run detection again for it to take effect.'
+      offerDetect = true
       onassigned()
     } catch (e) {
       error = e
@@ -229,6 +264,15 @@
 
         {#if status}
           <p class="mt-2 font-data text-caption text-accent">{status}</p>
+        {/if}
+        {#if offerDetect}
+          <button
+            class="mt-2 text-caption text-accent hover:underline disabled:opacity-40"
+            onclick={redetect}
+            disabled={busy}
+          >
+            {busy ? 'working…' : 'Run detection now'}
+          </button>
         {/if}
         {#if error}
           <p class="mt-2 font-data text-data text-danger">{describeApiError(error, 'source').message}</p>

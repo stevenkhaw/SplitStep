@@ -87,3 +87,20 @@ def test_set_mode_preserves_other_keys(isolated_config):
 def test_set_mode_rejects_unknown_values(isolated_config):
     with pytest.raises(ValueError):
         appconfig.set_mode("expert")
+
+
+def test_corrupt_config_reads_as_dev_but_refuses_writes(isolated_config):
+    # Read path: /api/config runs on every app boot and must never fail over
+    # a config problem the serve process itself does not have. Write path:
+    # overwriting an unparseable file could discard a hand-edited library
+    # path, so set_mode propagates the friendly error instead.
+    appconfig.config_path().write_text("{not valid json")
+    assert appconfig.get_mode() == "dev"
+    with pytest.raises(LibraryUnconfigured):
+        appconfig.set_mode("friend")
+
+
+def test_save_config_leaves_no_temp_file_behind(isolated_config):
+    save_config({"mode": "dev"})
+    names = [p.name for p in appconfig.config_path().parent.iterdir()]
+    assert names == ["config.json"]

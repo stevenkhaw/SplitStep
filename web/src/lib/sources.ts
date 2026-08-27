@@ -65,3 +65,18 @@ export function scopeToSource<T extends { rallies: Rally[] }>(detail: T, sourceI
   if (sourceId === null) return detail
   return { ...detail, rallies: detail.rallies.filter((r) => r.source_id === sourceId) }
 }
+
+/**
+ * The status the scoped view should report: the selected source's own, or
+ * the session's when no tab is selected — and the session's again when the
+ * id matches nothing (a stale selection after the source list changed),
+ * because a wrong-but-plausible per-source status is worse than the
+ * session-level truth. Lives here beside scopeToSource so the empty-queue
+ * copy's input is testable; inline in Session.svelte it was not.
+ */
+export function scopedStatus(
+  detail: { sources: { id: string; status: string }[]; session: { status: string } },
+  sourceId: string | null,
+): string {
+  return detail.sources.find((s) => s.id === sourceId)?.status ?? detail.session.status
+}

@@ -23,9 +23,11 @@ export interface Shortcut {
   /** One entry per key that does the same thing, e.g. the four speed keys. */
   keys: string[]
   label: string
-  /** Bindings friend mode hides (the tuning tools). The filter lives here,
-   *  in the one place bindings are written down, so the strip, the overlay
-   *  and the handlers cannot disagree about what friend mode contains. */
+  /** Bindings friend mode hides (the tuning tools). The strip and the `?`
+   *  overlay render from this flag; the behavioral gate is separate and
+   *  hand-written (Session.openLabel returns early in friend mode), so a
+   *  new devOnly binding needs BOTH: tag it here so the reference stops
+   *  advertising it, and gate its handler so the keypress goes dead. */
   devOnly?: true
 }
 
@@ -168,13 +170,19 @@ function visible(groups: ShortcutGroup[], appMode: AppMode): ShortcutGroup[] {
     .filter((g) => g.items.length > 0)
 }
 
-export function shortcutGroups(mode: ShortcutMode, appMode: AppMode = 'dev'): ShortcutGroup[] {
+// appMode is required, not defaulted: a default of 'dev' would fail open --
+// a future surface rendering shortcuts could compile clean while advertising
+// the tuning keys to friend mode. The compiler forcing every caller to make
+// the friend/dev decision is the cheapest gate there is.
+export function shortcutGroups(mode: ShortcutMode, appMode: AppMode): ShortcutGroup[] {
   return visible(BY_MODE[mode], appMode)
 }
 
-/** Every key a mode binds, flattened -- what the duplicate check reads. */
+/** Every key a mode binds, flattened -- what the duplicate check reads.
+ *  Always the full dev set: a key hidden in friend mode still conflicts if
+ *  bound twice. */
 export function shortcutKeys(mode: ShortcutMode): string[] {
-  return shortcutGroups(mode).flatMap((g) => g.items.flatMap((s) => s.keys))
+  return shortcutGroups(mode, 'dev').flatMap((g) => g.items.flatMap((s) => s.keys))
 }
 
 // Indices into the groups above rather than copies, so the inline strip is
@@ -191,7 +199,7 @@ const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
 }
 
 /** The handful that stay visible under the video. */
-export function primaryShortcuts(mode: ShortcutMode, appMode: AppMode = 'dev'): Shortcut[] {
+export function primaryShortcuts(mode: ShortcutMode, appMode: AppMode): Shortcut[] {
   return PRIMARY[mode].filter((s) => appMode === 'dev' || !s.devOnly)
 }
 

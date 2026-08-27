@@ -167,6 +167,13 @@ describe('formatBytes', () => {
     expect(formatBytes(725 * 1024 * 1024)).toBe('725 MB')
   })
 
+  it('promotes when rounding crosses a unit boundary', () => {
+    // 1023.6 MB rounds to 1024 -- an out-of-range "1024 MB" -- so it must
+    // promote to the next unit instead.
+    expect(formatBytes(1023.6 * 1024 ** 2)).toBe('1 GB')
+    expect(formatBytes(1023.6 * 1024 ** 3)).toBe('1 TB')
+  })
+
   it('switches to GB and keeps one decimal below 10', () => {
     expect(formatBytes(1024 * 1024 * 1024)).toBe('1 GB')
     expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe('2.5 GB')

@@ -131,4 +131,10 @@ describe('emptyQueueCopy', () => {
     expect(emptyQueueCopy('ready', 'dev')).toMatch(/re-segment/i)
     expect(emptyQueueCopy('ready', 'friend')).not.toMatch(/re-segment|threshold/i)
   })
+
+  it('treats an unknown status as settled, never as progress', () => {
+    // A status added server-side without a SESSION_LABELS entry must not
+    // make this copy promise "still running" for a state that isn't moving.
+    expect(emptyQueueCopy('archived', 'friend')).not.toMatch(/running/i)
+  })
 })

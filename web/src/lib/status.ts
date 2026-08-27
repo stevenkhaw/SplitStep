@@ -42,14 +42,6 @@ export function sessionStatus(s: Session): StatusBadge {
 }
 
 /**
- * Supersedes lib/reels.ts's `reelStateLabel`, which this replaced: same three
- * render states, plus the empty case the list page also has to draw, plus the
- * tone. Three states and not two because `rendered_path` survives a
- * membership change (see mark_dirty) -- the file is still on disk and still
- * watchable, it is merely out of date, and collapsing "never rendered" and
- * "stale" would hide that there is something to watch right now.
- */
-/**
  * The empty-queue sentence, by why the queue is empty.
  *
  * The hardcoded copy this replaces promised "wait for detection to finish"
@@ -57,17 +49,22 @@ export function sessionStatus(s: Session): StatusBadge {
  * and pointed at the re-segment panel, which friend mode cannot see. The
  * status decides whether progress is actually pending; the app mode decides
  * whether the re-segment pointer names something on screen.
+ *
+ * Mid-flight is read off SESSION_LABELS' tone rather than a second list of
+ * statuses: the table above is the one place the pipeline vocabulary is
+ * classified, and an unknown status must fall through to the settled copy --
+ * a wrong "still running" promises progress that never comes, which is the
+ * exact lie this function exists to remove.
  */
 export function emptyQueueCopy(sourceStatus: string, appMode: AppMode): string {
   if (sourceStatus === 'failed') {
     return 'Detection failed for this video — open the jobs badge above to retry it.'
   }
   if (sourceStatus === 'needs_setup') {
-    // Nothing is running here: the pipeline is waiting on the human, and
-    // "still running" would promise progress that never comes.
+    // Nothing is running here: the pipeline is waiting on the human.
     return 'This video still needs its court set up before detection can start.'
   }
-  if (sourceStatus !== 'ready' && sourceStatus !== 'reviewed') {
+  if (SESSION_LABELS[sourceStatus]?.tone === 'active') {
     return 'No rallies yet — detection is still running.'
   }
   return appMode === 'dev'
@@ -75,6 +72,14 @@ export function emptyQueueCopy(sourceStatus: string, appMode: AppMode): string {
     : 'No rallies were found in this video.'
 }
 
+/**
+ * Supersedes lib/reels.ts's `reelStateLabel`, which this replaced: same three
+ * render states, plus the empty case the list page also has to draw, plus the
+ * tone. Three states and not two because `rendered_path` survives a
+ * membership change (see mark_dirty) -- the file is still on disk and still
+ * watchable, it is merely out of date, and collapsing "never rendered" and
+ * "stale" would hide that there is something to watch right now.
+ */
 export function reelStatus(r: Reel): StatusBadge {
   if (r.item_count === 0) return { label: 'Empty', tone: 'quiet' }
   // `dirty` is set whenever the item list changes, so a rendered reel whose

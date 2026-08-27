@@ -6,24 +6,19 @@
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
   import { appmode } from '../lib/appmode.svelte'
+  import { librarySize } from '../lib/librarysize.svelte'
   import { startPolling } from '../lib/polling'
   import { navigate } from '../lib/router.svelte'
-  import { formatBytes } from '../lib/size'
+  import { formatBytes } from '../lib/reels'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
   let settingsOpen = $state(false)
-  // null until it loads; the header renders nothing rather than a
-  // placeholder that would churn. Fetched once per visit -- the number
-  // moves at ingest/export pace, not poll pace.
-  let libraryBytes = $state<number | null>(null)
-  $effect(() => {
-    api
-      .libraryStats()
-      .then((s) => (libraryBytes = s.bytes))
-      .catch(() => {})
-  })
+  // Stale-while-revalidate: the store keeps the last figure across route
+  // remounts, so the header doesn't blank and the server doesn't re-walk
+  // the drive on every navigation back to this page.
+  void librarySize.refresh()
   let error = $state<unknown>(null)
   // Session.svelte already has a "Loading…" state for its in-flight fetch;
   // this didn't, so the empty-library copy ("Nothing yet...") was what a
@@ -32,47 +27,39 @@
   let loading = $state(true)
   let clickBusy = $state(false)
 
+  // One owner for session fetching. An immediate tick, then a 3s poll that
+  // lives only while the library is empty: the first-run card's waiting
+  // step promises "this list updates on its own", and the watcher's ingest
+  // is the update it waits for. Deliberately NOT a second effect gated on
+  // `sessions.length` -- the fetcher reassigns `sessions`, and an effect
+  // that reads what its own callback writes tears itself down and restarts
+  // a poller whose first tick fires immediately, collapsing the interval
+  // into a hot loop. This effect reads no reactive state synchronously, so
+  // it runs exactly once per mount.
   $effect(() => {
     let cancelled = false
-    loading = true
-    // Cleared at the start of each attempt rather than left to linger from
-    // a previous one -- defensive even though nothing here currently
-    // retriggers this effect (no reactive reads besides the static `api`
-    // import), so a future retry/refresh affordance doesn't inherit a
-    // stale error alongside a successful refetch.
-    error = null
-
-    api
-      .listSessions()
-      .then((s) => {
-        if (!cancelled) sessions = s
-      })
-      .catch((e) => {
-        if (!cancelled) error = e
-      })
-      .finally(() => {
-        if (!cancelled) loading = false
-      })
-
-    return () => {
-      cancelled = true
-    }
-  })
-
-  // While the library is empty the page polls: the first-run card's waiting
-  // step promises "this list updates on its own", and the watcher's ingest
-  // is the update it is waiting for. Tears down the moment a session
-  // exists, so a populated library never pays for it.
-  $effect(() => {
-    if (loading || sessions.length > 0) return
     const poller = startPolling(async () => {
       try {
-        sessions = await api.listSessions()
-      } catch {
-        // the server may be restarting; keep polling
+        const next = await api.listSessions()
+        if (cancelled) return
+        sessions = next
+        // Success clears a boot-time failure: without this, a server that
+        // came back mid-poll stayed hidden behind a stale error note.
+        error = null
+        if (next.length > 0) poller.stop()
+      } catch (e) {
+        if (cancelled) return
+        // Surface only the first failure as the page state; later ticks
+        // keep quietly retrying, which is the recovery this poll exists for.
+        if (loading) error = e
+      } finally {
+        if (!cancelled) loading = false
       }
     }, 3000)
-    return () => poller.stop()
+    return () => {
+      cancelled = true
+      poller.stop()
+    }
   })
 
   async function handleSessionClick(session: Session) {
@@ -120,13 +107,19 @@
   }
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === 'Escape' && settingsOpen) settingsOpen = false
+  }}
+/>
+
 <header class="mb-6 flex items-baseline justify-between">
   <h1 class="text-display font-semibold">Sessions</h1>
   <div class="flex items-center gap-4">
-    {#if libraryBytes !== null}
+    {#if librarySize.bytes !== null}
       <!-- The keep-everything policy's one disk affordance: informational,
            no action attached (spec 2026-08-26). -->
-      <span class="font-data text-data text-faint">{formatBytes(libraryBytes)}</span>
+      <span class="font-data text-data text-faint">{formatBytes(librarySize.bytes)}</span>
     {/if}
     <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/reels')}>Reels</button>
@@ -135,7 +128,16 @@
               aria-expanded={settingsOpen}
               onclick={() => (settingsOpen = !settingsOpen)}>Settings</button>
       {#if settingsOpen}
-        <div class="absolute right-0 z-10 mt-2 w-72 rounded-lg border border-line bg-surface p-4
+        <!-- Same dismissal pair the jobs panel beside this one offers:
+             Escape (svelte:window below) and clicking anywhere else. The
+             backdrop is transparent -- it exists to catch the outside
+             click, not to dim the page for a two-line popover. -->
+        <div
+          class="fixed inset-0 z-10"
+          role="presentation"
+          onclick={() => (settingsOpen = false)}
+        ></div>
+        <div class="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-line bg-surface p-4
                     text-left shadow-2xl">
           <label class="flex items-start gap-2 text-body">
             <input
@@ -164,7 +166,7 @@
 {:else if loading}
   <p class="text-body text-dim">Loading…</p>
 {:else if sessions.length === 0}
-  <FirstRun sessionCount={sessions.length} {loading} />
+  <FirstRun />
 {:else}
   <ul class="space-y-2">
     {#each sessions as s (s.id)}

@@ -751,6 +751,27 @@ def test_config_roundtrip(client, tmp_path, monkeypatch):
     assert client.post("/api/config/mode", json={"mode": "expert"}).status_code == 422
 
 
+def test_config_routes_survive_a_corrupt_config_file(client, tmp_path, monkeypatch):
+    from splitstep import appconfig
+
+    monkeypatch.setattr(appconfig, "config_path", lambda: tmp_path / "config.json")
+    (tmp_path / "config.json").write_text("{not valid json")
+    # Read never 500s over a corrupt file; the write refuses with the
+    # friendly fix-or-delete sentence rather than silently rewriting it.
+    assert client.get("/api/config").json() == {"mode": "dev"}
+    r = client.post("/api/config/mode", json={"mode": "friend"})
+    assert r.status_code == 500
+    assert "config" in r.json()["detail"].lower()
+
+
+def test_library_stats_refuses_when_the_db_is_gone(client, library):
+    library.db_path.rename(library.root / "library.db.gone")
+    try:
+        assert client.get("/api/library/stats").status_code == 503
+    finally:
+        (library.root / "library.db.gone").rename(library.db_path)
+
+
 def test_retry_route_requeues_only_failed_jobs(client, conn, seeded):
     job_id = jobq.enqueue(conn, "detect", {"source_id": seeded["source_id"]})
     assert client.post(f"/api/jobs/{job_id}/retry").status_code == 409

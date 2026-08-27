@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import { dismissals } from '../lib/dismissals.svelte'
   import { activeJobsLabel, jobRows } from '../lib/jobs'
   import { startPolling } from '../lib/polling'
   import type { Job } from '../lib/types'
@@ -30,28 +31,37 @@
     }
   })
 
-  // In-memory on purpose: a dismissal means "stop showing me this corpse",
-  // and a restart re-listing old failures is honest, not a bug. Reassigned
-  // (not mutated) so the $derived below sees it.
-  let dismissed = $state<ReadonlySet<string>>(new Set())
-  let retrying = $state<string | null>(null)
+  // A Set, not a single slot: with two failed jobs, one retry finishing
+  // must not re-enable the other's still-in-flight button.
+  let retrying = $state<ReadonlySet<string>>(new Set())
 
   async function retry(id: string) {
-    retrying = id
+    retrying = new Set([...retrying, id])
+    // A retried job reuses its row id, so a stale dismissal would hide the
+    // job if it fails again -- clearing it is what lets the fresh failure
+    // resurface (see lib/dismissals.svelte.ts).
+    dismissals.clear(id)
     try {
       await api.retryJob(id)
-      jobs = await api.jobs()
+      // No manual jobs refresh: the 3s poll is the one writer of `jobs`,
+      // which keeps a slow poll response from overwriting a fresher manual
+      // fetch. The row updates on the next tick.
     } catch {
       // A 409 means the job is no longer failed -- the next poll shows its
       // real state either way; nothing useful to add here.
     } finally {
-      retrying = null
+      const next = new Set(retrying)
+      next.delete(id)
+      retrying = next
     }
   }
 
   const label = $derived(activeJobsLabel(jobs, nowMs))
-  const rows = $derived(jobRows(jobs, nowMs, dismissed))
-  const failed = $derived(jobs.filter((j) => j.status === 'failed' && !dismissed.has(j.id)))
+  const rows = $derived(jobRows(jobs, nowMs, dismissals.ids))
+  // Derived from `rows`, not re-filtered from raw `jobs`: jobRows owns the
+  // dismissal rule, and a second copy here is how the pill and the panel
+  // would drift apart.
+  const failed = $derived(rows.filter((r) => r.status === 'failed'))
 
   // Closes itself once the queue drains and nothing failed: the badge is the
   // only control that dismisses the panel, and it stops rendering at the
@@ -154,15 +164,15 @@
                 <button
                   type="button"
                   class="text-accent hover:underline disabled:opacity-50"
-                  disabled={retrying === r.id}
+                  disabled={retrying.has(r.id)}
                   onclick={() => retry(r.id)}
                 >
-                  {retrying === r.id ? 'Retrying…' : 'Retry'}
+                  {retrying.has(r.id) ? 'Retrying…' : 'Retry'}
                 </button>
                 <button
                   type="button"
                   class="text-accent hover:underline"
-                  onclick={() => (dismissed = new Set([...dismissed, r.id]))}
+                  onclick={() => dismissals.add(r.id)}
                 >
                   Dismiss
                 </button>

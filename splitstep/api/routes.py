@@ -891,6 +891,14 @@ def api_library_stats(request: Request):
     page calls it, once per visit, never from a poll.
     """
     library = _library(request)
+    # Same hazard Library.open guards at startup: an unclean eject leaves an
+    # empty mountpoint that still walks cleanly. Without this, a missing
+    # drive renders as a confident "0 B" instead of an error.
+    if not library.db_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="Library not reachable — is the drive plugged in?",
+        )
     total = 0
     for root, _dirs, files in os.walk(library.root):
         for name in files:
@@ -914,7 +922,14 @@ def api_config(request: Request):
 
 @router.post("/api/config/mode")
 def api_set_mode(body: ModeBody, request: Request):
-    appconfig.set_mode(body.mode)
+    # The write path does NOT silently repair a corrupt config the way
+    # get_mode's read path tolerates one: overwriting an unparseable file
+    # could discard a hand-edited library path the user meant to keep. The
+    # friendly sentence (fix or delete the file) travels as the detail.
+    try:
+        appconfig.set_mode(body.mode)
+    except appconfig.LibraryUnconfigured as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"mode": appconfig.get_mode()}
 
 
