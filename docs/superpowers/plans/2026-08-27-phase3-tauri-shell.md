@@ -19,7 +19,13 @@
 - **`pytest` runs with `filterwarnings = ["error"]`.** A new warning fails the suite.
 - **All frontend logic lives in `web/src/lib/` with vitest coverage.** Components are thin shells. Logic in a `.svelte` file is untestable — jsdom has no `<video>`.
 - **Design tokens only.** Colours and type sizes come from `web/src/app.css`'s `@theme` block. No raw Tailwind palette steps (`bg-neutral-800`), no arbitrary sizes (`text-[11px]`). Roles: `bg`/`surface`/`surface-2`/`line`, text `fg`/`dim`/`faint`, semantic `star`/`point`/`accent`/`danger`; type `display`/`title`/`body`/`data`/`caption`; `font-data` carries `tabular-nums` and every count, size and path belongs in it.
-- **`web/dist` must stay byte-identical to what `npm run build` produces today**, because it ships inside the sidecar. The launcher builds to `web/dist-launcher/` via a separate config.
+- **`web/dist` keeps its own build.** The launcher builds to `web/dist-launcher/`
+  via a separate config so no entry is added to `vite.config.ts`. The app
+  bundle's JS is unaffected (166 modules, no launcher code in it), but its CSS
+  is NOT byte-identical: Tailwind v4 scans the project from `app.css`, so the
+  launcher's utility classes land in both stylesheets — about 110 bytes. Giving
+  the launcher its own stylesheet would mean a second `@theme` block, which
+  CLAUDE.md forbids, so the shared scan is the cheaper of the two.
 - **Baseline suites, green before and after every task:** 837 pytest, 628 vitest, `svelte-check` 0 errors.
 - **Never touch the live library** at `/Volumes/SanDisk_2TB/SplitStep` from a build or a test.
 - **Bundle payload is flat at `sys._MEIPASS`**, the layout `splitstep/resources.py` alone writes down: `ffmpeg`, `ffprobe`, `yolo11n.pt`, `font.ttf`, `web_dist/`.
@@ -1046,7 +1052,11 @@ Expected: `✓ built in`, and a `dist-launcher/launcher.html` in the output list
 cd web && npm run build 2>&1 | grep -E "index-.*\.(js|css)"
 ```
 
-Expected: the same hashed filenames as before this task. Different hashes mean the launcher leaked into the app bundle.
+Expected: `166 modules transformed` and a JS chunk of the same size as before.
+The hashes DO change — Tailwind's project-wide scan adds the launcher's utility
+classes to the shared stylesheet, and the JS hash follows the CSS asset name it
+imports. What must not change is the module count, and `grep -c "Launcher" dist/assets/index-*.js`
+must be 0.
 
 - [ ] **Step 9: Type-check and run the suite**
 

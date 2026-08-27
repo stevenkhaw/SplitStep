@@ -43,3 +43,4 @@ yolo11n.pt
 packaging/build/
 packaging/dist/
 packaging/vendor/
+web/dist-launcher/

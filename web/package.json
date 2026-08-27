@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:launcher": "vite build --config vite.launcher.config.ts",
+    "dev:launcher": "vite --config vite.launcher.config.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
