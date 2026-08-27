@@ -32,7 +32,7 @@ from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
 from splitstep.media.concat import concat_clips
 from splitstep.media.files import find_original
-from splitstep.media.numbered import make_numbered_intermediate
+from splitstep.media.numbered import make_numbered_intermediate, render_overlay_png
 from splitstep.media.probe import display_size, probe
 from splitstep.media.transcode import (
     HLG_PROFILE,
@@ -494,20 +494,20 @@ def handle_reel(library: Library, payload: dict,
         # when they were exported -- or they predate migration 011, which is
         # exactly what HLG_PROFILE is the legacy answer for.
         profile = get_color_profile(conn) or HLG_PROFILE
-        font = resources.drawtext_font()
+        font = resources.overlay_font()
         tmp_dir = library.reels_dir / f".{reel['slug']}.numbered.{uuid.uuid4().hex[:8]}"
         tmp_dir.mkdir(parents=True)
         try:
             intermediates: list[Path] = []
             total = len(items)
             for i, (item, src) in enumerate(zip(items, inputs), start=1):
+                png_i = tmp_dir / f"{i:03d}.png"
+                render_overlay_png(png_i, counter=f"{i}/{total}", note=item.note, font=font)
                 dst_i = tmp_dir / f"{i:03d}.mp4"
                 make_numbered_intermediate(
                     src, dst_i,
-                    counter=f"{i}/{total}",
-                    note=item.note,
+                    overlay_png=png_i,
                     color_profile=profile,
-                    font=font,
                 )
                 intermediates.append(dst_i)
                 # One coarse tick per finished clip: the per-clip encode is

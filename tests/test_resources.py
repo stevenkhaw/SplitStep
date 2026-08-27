@@ -51,7 +51,7 @@ def test_unfrozen_spa_is_the_source_tree():
 
 def test_bundled_font_wins(frozen):
     (frozen / "font.ttf").write_bytes(b"")
-    assert resources.drawtext_font() == str(frozen / "font.ttf")
+    assert resources.overlay_font() == str(frozen / "font.ttf")
 
 
 def test_env_font_is_the_escape_hatch_for_a_mac_without_the_system_paths(
@@ -60,12 +60,13 @@ def test_env_font_is_the_escape_hatch_for_a_mac_without_the_system_paths(
     font = tmp_path / "custom.ttf"
     font.write_bytes(b"")
     monkeypatch.setenv("SPLITSTEP_FONT", str(font))
-    assert resources.drawtext_font() == str(font)
+    assert resources.overlay_font() == str(font)
 
 
 def test_system_font_resolves_on_this_mac(monkeypatch):
-    # No bundle, no env override -- this Mac's own Arial Bold/Arial must
-    # still resolve, since that fallback is the whole point of the list.
+    # No bundle, no env override -- this Mac's own Arial Bold/Arial/
+    # Helvetica.ttc must still resolve, since that fallback is the whole
+    # point of the list.
     monkeypatch.delenv("SPLITSTEP_FONT", raising=False)
-    found = resources.drawtext_font()
+    found = resources.overlay_font()
     assert Path(found).is_file()

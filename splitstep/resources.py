@@ -72,17 +72,22 @@ def spa_dist() -> Path:
     return Path(__file__).parent.parent / "web" / "dist"
 
 
-# macOS system faces drawtext can use directly, most specific first. .ttf
-# only -- .ttc collections are inconsistently handled by fontfile=. The
-# bundled font (Phase 3 ships an OFL face) wins when present; the env var
-# is the escape hatch for a Mac without these paths.
+# macOS system faces for the numbered-reel overlay, most specific first.
+# PIL's ImageFont.truetype loads both .ttf and .ttc (a collection loads its
+# first, regular-weight face by default) -- unlike the old drawtext path,
+# there is no fontfile= quoting to worry a .ttc's format. The bundled font
+# (Phase 3 ships an OFL face) wins when present; the env var is the escape
+# hatch for a Mac without these paths; Helvetica.ttc is last because the two
+# Arial faces above it are more specific matches for what drawtext used to
+# ship, and .ttc stays the final fallback rather than the first choice.
 _SYSTEM_FONTS = (
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
 )
 
 
-def drawtext_font() -> str:
+def overlay_font() -> str:
     bundled = _bundled("font.ttf")
     if bundled is not None:
         return str(bundled)
@@ -93,5 +98,5 @@ def drawtext_font() -> str:
         if Path(candidate).is_file():
             return candidate
     raise RuntimeError(
-        "No font for the numbered overlay. Set SPLITSTEP_FONT to a .ttf path."
+        "No font for the numbered overlay. Set SPLITSTEP_FONT to a .ttf or .ttc path."
     )

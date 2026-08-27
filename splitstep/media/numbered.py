@@ -1,6 +1,18 @@
 """Burned-in counter and note for a numbered reel render.
 
-Each reel item gets one drawtext re-encode into a temp intermediate at the
+Composited as a PNG overlay, not drawtext: this machine's ffmpeg (Homebrew's
+default `ffmpeg` formula) has no libfreetype/libfontconfig, so `drawtext`
+does not exist in `-filters` at all -- not a font problem, a missing filter.
+`overlay`, unlike `drawtext`, has no optional font/text dependency and ships
+in the barest ffmpeg builds, so this survives any machine or bundle the same
+way -- including whatever ffmpeg ends up bundled with the distributed app.
+PIL (already a conda-env dependency via ultralytics) renders the typography
+instead and hands ffmpeg a plain image to composite. That also removes every
+text-escaping concern drawtext's filtergraph syntax used to need: a note can
+contain a colon, a comma, a quote, a backslash, anything, because none of it
+ever enters ffmpeg's argument parsing as text.
+
+Each reel item still gets one re-encode into a temp intermediate at the
 library's locked colour profile; the existing concat pipeline (pre-flight
 parameter check, -c copy, duration probe) then runs over the intermediates
 unchanged -- every intermediate is encoded identically, so stream-copy
@@ -11,55 +23,82 @@ in another.
 
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont
+
 from splitstep.media.transcode import CLIP_CRF, CLIP_FPS, ProgressFn, run_ffmpeg
 
 # Sized against the locked 3840x2160 frame: legible on a phone screen
 # without shouting over the footage.
+_FRAME_WIDTH = 3840
+_FRAME_HEIGHT = 2160
 _MARGIN = 64
 _COUNTER_SIZE = 120
 _NOTE_SIZE = 72
-_BOX = "box=1:boxcolor=black@0.45:boxborderw=24"
+_BOX_PAD = 24
+_BOX_FILL = (0, 0, 0, 115)  # black at ~45% alpha (115/255)
+_TEXT_FILL = (255, 255, 255, 255)
 
 
-def _escape(text: str) -> str:
-    """Escape a literal for a drawtext option value.
+def _draw_line(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, y: int
+) -> None:
+    """One line of text on its own translucent box, boxed by its real ink extent.
 
-    expansion=none already keeps %-sequences literal; what remains is the
-    filtergraph parser itself: backslash first (it is the escape), then the
-    quote that would end the value, then the option and filter separators.
+    `textbbox` rather than a guessed box size: font metrics vary between the
+    counter's and the note's size (and between whatever font ends up
+    resolved), so a fixed box would either clip descenders or waste space.
+    This is the same measurement drawtext's own `box=1` used to do
+    internally -- PIL just does it explicitly now.
     """
-    for ch in ("\\", "'", ":", ","):
-        text = text.replace(ch, "\\" + ch)
-    return text
-
-
-def drawtext_filters(counter: str, note: str, font: str) -> str:
-    common = f"fontfile='{_escape(font)}':fontcolor=white:{_BOX}:expansion=none"
-    counter_filter = (
-        f"drawtext=text='{_escape(counter)}':{common}"
-        f":fontsize={_COUNTER_SIZE}:x={_MARGIN}:y={_MARGIN}"
+    left, top, right, bottom = draw.textbbox((_MARGIN, y), text, font=font)
+    draw.rectangle(
+        (left - _BOX_PAD, top - _BOX_PAD, right + _BOX_PAD, bottom + _BOX_PAD),
+        fill=_BOX_FILL,
     )
-    filters = [counter_filter]
+    draw.text((_MARGIN, y), text, font=font, fill=_TEXT_FILL)
+
+
+def render_overlay_png(dst: Path, *, counter: str, note: str, font: str) -> None:
+    """A full-frame transparent PNG carrying the counter and (optional) note.
+
+    Full-frame and RGBA rather than a cropped label image: overlay is then
+    always `0:0` with no position math on the ffmpeg side, and a mostly-
+    transparent 4K PNG compresses to a few KB, so the size cost of not
+    cropping is negligible next to a video re-encode.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = Image.new("RGBA", (_FRAME_WIDTH, _FRAME_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    # ImageFont.truetype loads both .ttf and .ttc (collection index 0, the
+    # regular weight, by default) -- see resources.overlay_font.
+    _draw_line(draw, counter, ImageFont.truetype(font, _COUNTER_SIZE), _MARGIN)
     if note:
-        filters.append(
-            f"drawtext=text='{_escape(note)}':{common}"
-            f":fontsize={_NOTE_SIZE}:x={_MARGIN}:y={_MARGIN + _COUNTER_SIZE + 48}"
+        _draw_line(
+            draw, note, ImageFont.truetype(font, _NOTE_SIZE), _MARGIN + _COUNTER_SIZE + 48
         )
-    return ",".join(filters)
+
+    canvas.save(dst)
 
 
 def make_numbered_intermediate(
     src: Path,
     dst: Path,
     *,
-    counter: str,
-    note: str,
+    overlay_png: Path,
     color_profile: tuple[str, str, str, str],
-    font: str,
     on_progress: ProgressFn | None = None,
     duration_ms: int | None = None,
 ) -> None:
-    """One clip, re-encoded whole with the overlay, at the locked profile.
+    """One clip, re-encoded whole with a pre-rendered overlay composited in.
+
+    Takes an already-rendered `overlay_png` rather than rendering one itself:
+    the caller (`handle_reel`) already owns the per-item temp directory and
+    names each item's intermediate `NNN.mp4`, so having it name and render
+    `NNN.png` there too keeps every per-item filename decision in one place
+    instead of splitting it between this module and the handler. It also
+    keeps this function's own contract -- and its tests -- purely about the
+    ffmpeg composition, with no PIL/font involvement to mock or skip.
 
     Video settings mirror make_clip's encode exactly -- same encoder, rate,
     CRF, pixel format, colour flags -- so every intermediate carries
@@ -71,7 +110,8 @@ def make_numbered_intermediate(
     dst.parent.mkdir(parents=True, exist_ok=True)
     run_ffmpeg([
         "-i", str(src),
-        "-vf", drawtext_filters(counter, note, font),
+        "-i", str(overlay_png),
+        "-filter_complex", "[0:v][1:v]overlay=0:0",
         "-r", str(CLIP_FPS),
         "-c:v", "libx264",
         "-profile:v", "high",
