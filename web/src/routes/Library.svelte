@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Credits from '../components/Credits.svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
   import FirstRun from '../components/FirstRun.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
@@ -185,6 +186,7 @@
               {/if}
             </div>
           {/if}
+          <Credits />
         </div>
       {/if}
     </div>
