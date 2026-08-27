@@ -8,6 +8,7 @@
   import TimelineMode from '../components/TimelineMode.svelte'
   import { api } from '../lib/api'
   import { navigate } from '../lib/router.svelte'
+  import { resolveSelectedTab, scopeToSource, sourceTabs } from '../lib/sources'
   import type { Rally, SessionDetail, Source } from '../lib/types'
 
   interface Props {
@@ -19,6 +20,13 @@
   let error = $state<unknown>(null)
   let mode = $state<'queue' | 'timeline' | 'label'>('queue')
   let focusedRallyId = $state<string | null>(null)
+  // Which video's tab is selected, or null for "no tab UI" -- a session
+  // with one (or zero) reviewable sources, where `tabs.length <= 1` below
+  // and this never leaves null, so the page stays pixel-identical to
+  // before tabs existed. Distinct from "tabs exist but none picked yet":
+  // the fetch sites below always resolve this to a real tab id the same
+  // tick `detail` lands, via `resolveSelectedSource`.
+  let selectedSourceId = $state<string | null>(null)
   // The live-merged rallies QueueMode hands to openTimeline (see
   // QueueController.liveSnapshot) -- threaded through so TimelineMode's
   // OverviewBand can color a rally starred/rejected earlier in this queue
@@ -29,19 +37,49 @@
 
   // Bumped only when the rally *set* actually needs QueueMode/TimelineMode
   // to remount: the initial load (or a navigation to a different session
-  // entirely, below), re-segmentation (a different id/count), or a bounds
+  // entirely, below), re-segmentation (a different id/count), a bounds
   // edit made in TimelineMode (same ids, but QueueController/TimelineMode
   // each hold their own frozen copy of start_ms/end_ms that a remount is
-  // what refreshes). QuadEditor's onassigned refetch deliberately does NOT
-  // bump this: assigning a play-region preset never changes rally content,
-  // so forcing a remount there would only needlessly discard QueueMode's
-  // undo stack for a change it has nothing to do with (Finding 6,
+  // what refreshes), or switching video tabs -- a different `selectedSourceId`
+  // scopes `detail` to a different rally set the same way a re-segment does,
+  // and QueueController/TimelineMode are just as unaware of that swap as they
+  // are of a server-side one. QuadEditor's onassigned refetch deliberately
+  // does NOT bump this: assigning a play-region preset never changes rally
+  // content, so forcing a remount there would only needlessly discard
+  // QueueMode's undo stack for a change it has nothing to do with (Finding 6,
   // "QuadEditor's onassigned has the same shape"). See the `{#key}` below
   // for where this is consumed.
   let rallyRevision = $state(0)
 
   const needsSetupSources = $derived(detail?.sources.filter((s) => s.status === 'needs_setup') ?? [])
   const readySources = $derived(detail?.sources.filter((s) => s.status !== 'needs_setup') ?? [])
+
+  // One entry per reviewable (non-needs_setup) source, ordered by idx. Empty
+  // for a session with zero or one such source, which is exactly when the
+  // tab strip below renders nothing and `selectedSourceId` stays null --
+  // a single-video session must be pixel-identical to before tabs existed.
+  const tabs = $derived(detail ? sourceTabs(detail.sources, detail.rallies) : [])
+
+  // Called from both places `detail` is replaced by a fetch (the load
+  // effect and closeTimeline's refetch) so the two cannot drift on the rule
+  // itself -- that rule (resolveSelectedTab, lib/sources.ts) is pure and
+  // tested there; this just wires its result back into state.
+  function resolveSelectedSource(d: SessionDetail): void {
+    selectedSourceId = resolveSelectedTab(sourceTabs(d.sources, d.rallies), selectedSourceId)
+  }
+
+  // Switching tabs scopes the mode block to a different rally set, which is
+  // the same "QueueController/TimelineMode are holding stale state" problem
+  // a re-segment causes -- so it resets the same fields closeTimeline/openLabel
+  // reset on a mode change, plus bumps rallyRevision (see its comment above)
+  // to force the remount.
+  function selectTab(sourceId: string): void {
+    selectedSourceId = sourceId
+    mode = 'queue'
+    focusedRallyId = null
+    timelineRallies = null
+    rallyRevision += 1
+  }
 
   function openSetupWizard(source: Source) {
     navigate(`/setup/${source.id}`)
@@ -74,6 +112,7 @@
       .then((d) => {
         if (cancelled) return
         detail = d
+        resolveSelectedSource(d)
         rallyRevision += 1
       })
       .catch((e) => {
@@ -120,6 +159,7 @@
       .getSession(id)
       .then((d) => {
         detail = d
+        resolveSelectedSource(d)
         rallyRevision += 1
         mode = 'queue'
       })
@@ -206,6 +246,30 @@
   {/if}
 
   <!--
+    Only rendered once there is more than one video to choose between --
+    `tabs` is already empty/single for a needs_setup-only or one-source
+    session, and a lone tab would be a control with nothing to switch to.
+    Queue/label/timeline all scope to whichever tab is selected below; the
+    quad editor and re-segment panel are deliberately never scoped (see
+    their own props further down) since they carry their own source pickers.
+  -->
+  {#if tabs.length > 1}
+    <div class="mb-4 flex gap-1 border-b border-line">
+      {#each tabs as tab (tab.id)}
+        <button
+          class="border-b-2 px-3 py-1.5 font-data text-data motion-safe:transition-colors
+                 {selectedSourceId === tab.id
+            ? 'border-accent text-fg'
+            : 'border-transparent text-dim hover:text-fg'}"
+          onclick={() => selectTab(tab.id)}
+        >
+          Video {String(tab.idx).padStart(2, '0')} · {tab.rallyCount}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!--
     Keyed on a revision counter, not the rallies array's identity -- see
     `rallyRevision` above for which callers bump it and why. QueueController
     (in QueueMode) is built once from `detail.rallies` at construction -- by
@@ -213,21 +277,27 @@
     the mount -- so the only way for it to see a replaced/edited rally set
     is to remount, which bumping this key forces. Switching between queue/
     timeline via T/esc does NOT bump this, so that toggle never remounts
-    either mode needlessly.
+    either mode needlessly. Switching video tabs (`selectTab`) bumps it too,
+    for the same reason: it scopes `detail` to a different source's rallies,
+    which QueueController/TimelineMode need a fresh construction to see.
   -->
   {#key rallyRevision}
     {#if mode === 'queue'}
       <QueueMode
-        {detail}
+        detail={scopeToSource(detail, selectedSourceId)}
         onopen_timeline={openTimeline}
         onopen_label={openLabel}
         startAtRallyId={focusedRallyId}
       />
     {:else if mode === 'label'}
-      <LabelMode {detail} onclose={closeLabel} startAtRallyId={focusedRallyId} />
+      <LabelMode
+        detail={scopeToSource(detail, selectedSourceId)}
+        onclose={closeLabel}
+        startAtRallyId={focusedRallyId}
+      />
     {:else if focusedRallyId}
       <TimelineMode
-        {detail}
+        detail={scopeToSource(detail, selectedSourceId)}
         rallyId={focusedRallyId}
         initialRallies={timelineRallies ?? undefined}
         onclose={closeTimeline}
