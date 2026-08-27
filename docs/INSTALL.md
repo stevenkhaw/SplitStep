@@ -5,14 +5,19 @@ one extra step, once.
 
 1. Copy `SplitStep.dmg` to your Mac and double-click it.
 2. Drag **SplitStep** into your Applications folder.
-3. **Right-click** SplitStep in Applications and choose **Open** — do not
-   double-click it the first time.
-4. macOS says it cannot verify the developer. Click **Open**.
-5. If there is no Open button, go to **System Settings → Privacy & Security**,
-   scroll down, and click **Open Anyway** next to SplitStep. Then repeat
-   step 3.
+3. Open SplitStep. macOS refuses, saying it **can't verify it's free of
+   malware**. This is expected — it means the app isn't registered with
+   Apple, not that anything is wrong with it. Click **Done**.
+4. Open **System Settings → Privacy & Security** and scroll down. There is a
+   line about SplitStep being blocked, with an **Open Anyway** button. Click
+   it, and confirm with Touch ID or your password.
+5. Open SplitStep again. It starts.
 
-After that first launch it opens normally, forever.
+After that it opens normally, forever.
+
+> On macOS 14 and earlier you can skip steps 3–4 by right-clicking SplitStep
+> and choosing **Open**. Apple removed that shortcut in macOS 15, so on any
+> recent Mac the Privacy & Security route above is the only way through.
 
 ## First run
 

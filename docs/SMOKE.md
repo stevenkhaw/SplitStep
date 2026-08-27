@@ -12,8 +12,10 @@ System Settings → Users & Groups → Add User. Log into it. Nothing in
 
 Done, do not redo:
 
-- [ ] **Gatekeeper — NOT verified. An earlier version of this file claimed it
-      was; that was wrong.** The quarantine flag moving from `0081` to `0181`
+- [x] **Gatekeeper — verified 2026-08-27, after two wrong answers.** A
+      quarantined copy of the ad-hoc signed build shows "can't verify it's
+      free of malware" — the bypassable unidentified-developer dialog, not
+      "damaged". History, because it is easy to get wrong: The quarantine flag moving from `0081` to `0181`
       only proves something was approved, not that the app launched. It did
       not: a quarantined copy reported **"damaged"**, because Tauri shipped
       only the signature the LINKER applies to the arm64 executable, which
