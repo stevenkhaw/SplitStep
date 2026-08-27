@@ -144,26 +144,26 @@ describe('Reel builder', () => {
     expect(render().disabled).toBe(true)
   })
 
-  it('enables Render once every clip is ready, and renders plain by default', async () => {
+  it('enables Render once every clip is ready, and renders numbered by default', async () => {
     await open(detail([item(1000), item(9000)]))
     expect(render().disabled).toBe(false)
     render().click()
     flushSync()
-    // The numbered checkbox is unchecked out of the box: a numbered render
-    // re-encodes every clip, so the fast plain render must be the default,
-    // never something a reviewer opts out of after the fact.
-    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', false)
+    // The numbered checkbox is checked out of the box (Steven's call,
+    // 2026-08-26): the overlay is the reason a render happens at all, and
+    // unticking stays the escape hatch for a fast plain -c copy render.
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true)
   })
 
-  it('passes numbered:true once the checkbox is checked', async () => {
+  it('passes numbered:false once the checkbox is unchecked', async () => {
     await open(detail([item(1000), item(9000)]))
     const checkbox = host.querySelector('[data-numbered]') as HTMLInputElement
-    checkbox.checked = true
+    checkbox.checked = false
     checkbox.dispatchEvent(new Event('change', { bubbles: true }))
     flushSync()
     render().click()
     flushSync()
-    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true)
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', false)
   })
 
   it('cutting reports the four counts separately', async () => {
