@@ -4,9 +4,13 @@
   import Reels from './routes/Reels.svelte'
   import Session from './routes/Session.svelte'
   import Setup from './routes/Setup.svelte'
+  import { appmode } from './lib/appmode.svelte'
   import { createRouter } from './lib/router.svelte'
 
   const router = createRouter()
+  // Fire-and-forget: the store defaults to 'dev' and corrects itself when
+  // this lands; nothing below blocks on it.
+  appmode.load()
 </script>
 
 <main class="mx-auto max-w-6xl p-6">

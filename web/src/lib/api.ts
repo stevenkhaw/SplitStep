@@ -1,5 +1,7 @@
 import { ApiError } from './errors'
 import type {
+  AppConfig,
+  AppMode,
   Clip,
   ExportResult,
   Job,
@@ -171,6 +173,10 @@ export const api = {
     post(`/api/sources/${sourceId}/preset`, { preset_id }),
 
   jobs: () => req<Job[]>('/api/jobs'),
+
+  config: () => req<AppConfig>('/api/config'),
+  setMode: (mode: AppMode) =>
+    req<AppConfig>('/api/config/mode', { method: 'POST', body: JSON.stringify({ mode }) }),
 
   proxyUrl: (sessionId: string, idx: number) => `/media/${sessionId}/${idx}/proxy.mp4`,
   frameUrl: (sessionId: string, idx: number, atMs = 0) =>

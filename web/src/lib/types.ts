@@ -72,6 +72,16 @@ export interface Preset {
   created_at: string
 }
 
+/** The server-side app mode (splitstep/appconfig.py). 'friend' hides the
+ *  tuning tools -- label mode and the re-segment panel -- behind the
+ *  Advanced toggle; 'dev' is the full surface and the default for a
+ *  checkout whose config never wrote the key. */
+export interface AppConfig {
+  mode: 'friend' | 'dev'
+}
+
+export type AppMode = AppConfig['mode']
+
 export interface Job {
   id: string
   type: string
