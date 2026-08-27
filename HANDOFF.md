@@ -126,22 +126,47 @@ spec so it does not get relitigated: Tauri *is* a webview, so porting means
 abandoning Tauri too, discarding ~20k lines of tested frontend including
 VideoDeck's cross-source seeking, and keeping Python regardless.
 
-Three findings from building it, all fixed:
+Five findings from building it, all fixed, and the first is the one worth
+reading:
 
-1. **The orphan.** Force-quit or crash the shell and its Python child keeps
-   running, holding `library.db` — the single-instance plugin guards the app,
-   not the server, so the next launch would spawn a *second* worker against
-   one database. Reproduced, then fixed with a pid file reaped on next launch
-   (checked against the process name first, because pids are recycled).
-2. **`--library` is a top-level flag, not a `serve` flag**, so the frozen
+1. **The frozen app shipped with no migrations, and it looked like it
+   worked.** `collect_submodules` gathers `.py` files; the migrations are
+   `.sql`, found at runtime via `Path(__file__).parent`. Nothing collected
+   them, so the app created a `library.db` with `user_version 0` and *no
+   tables*, then 500ed on the first route touching the database. Every check
+   I had run passed, because `/api/config` — the health check — never opens
+   the database. Caught only by asking `/api/sessions` from an installed
+   `.app`. Fixed, and `build_app.sh` now counts `.sql` files in the freeze
+   against the source tree and refuses to build if they disagree.
+2. **Quitting leaked the server.** Neither `ExitRequested` nor `Exit` reaches
+   the handler reliably on macOS — verified with `lsof`, the process was
+   sleeping and still LISTENing. Waiting to be told the parent died was the
+   wrong shape; the frozen entry point now watches `getppid()` and SIGTERMs
+   itself when reparented to launchd. That also covers SIGKILL, which no
+   event can. Verified: clean quit under 5 s, and a `kill -9` of the shell
+   also under 5 s.
+3. **Tauri rewrites `../` in bundle resources to an `_up_` segment**, so the
+   server landed at `Resources/_up_/packaging/dist/...` and `server_exe`
+   would have missed it — an app that builds, installs, passes Gatekeeper,
+   opens a window and never starts. Fixed with the map form of `resources`.
+4. **`--library` is a top-level flag, not a `serve` flag**, so the frozen
    entry point has to reorder argv before injecting the subcommand.
-3. **The bundled font had to be instanced to Bold.** Google Fonts ships
+5. **The bundled font had to be instanced to Bold.** Google Fonts ships
    Roboto Condensed only as a variable font now, and `media/numbered.py`
    selects no variation — a variable file would silently render Regular and
    lighten a burn you verified frame-by-frame at Bold.
 
-Suites: 846 pytest, 650 vitest, 8 cargo tests, ruff clean, svelte-check 0.
-The evermeet ffmpeg is **9.0.1** — the same version the concat demuxer's
+There is also a pid-file reaper for anything that still slips past the
+watchdog: the single-instance plugin guards the app, not the server, so a
+stray sidecar would let the next launch put a second worker on one database.
+
+Verified against the shipped artifact, not the dev tree: the `.dmg`
+(**430 MB**) was mounted, the `.app` copied out as an install would, and it
+created a fresh library reaching `user_version 12` with 9 tables, answered
+`/api/sessions`, `/api/jobs`, `/api/library/stats`, `/api/reels` and the SPA
+all 200, spawned its sidecar from inside the bundle on an OS-assigned port,
+and quit clean. Suites: 846 pytest, 650 vitest, 9 cargo tests, ruff clean,
+svelte-check 0. The evermeet ffmpeg is **9.0.1** — the same version the concat demuxer's
 measured misbehaviour was characterised against, so the media layer's guards
 still describe the ffmpeg that ships.
 
@@ -155,9 +180,11 @@ still describe the ffmpeg that ships.
 - **Phase 2: shipped and merged** (see the section above) —
   `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` for what each of the
   9 tasks was meant to do. Unreviewed in the running UI.
-- **Phase 3: built.** See the section above. What remains is yours: run the
-  clean-account smoke checklist, because a second macOS user account is the
-  only honest test of a Gatekeeper flow and a first run.
+- **Phase 3: built and the `.dmg` verified end to end.** See above. What
+  remains is yours: `docs/SMOKE.md`, the clean-account checklist. A second
+  macOS user account is the only honest test of Gatekeeper and a true first
+  run, and the notification-on-detect-finish has never fired against real
+  footage.
 
 ## How this project is worked on (hard-won, don't relearn)
 
