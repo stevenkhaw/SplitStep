@@ -23,7 +23,14 @@ import type {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: init?.body ? { 'content-type': 'application/json' } : undefined,
+    // FormData is the one body that must NOT get this header: the browser
+    // writes multipart/form-data with its own boundary, and a manual
+    // content-type here would send a boundary-less header the server cannot
+    // parse. Everything else with a body is JSON.
+    headers:
+      init?.body && !(init.body instanceof FormData)
+        ? { 'content-type': 'application/json' }
+        : undefined,
   })
   if (!res.ok) {
     const raw = await res.text().catch(() => '')
@@ -174,6 +181,12 @@ export const api = {
 
   jobs: () => req<Job[]>('/api/jobs'),
   retryJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
+
+  importFile: (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return req<{ name: string }>('/api/import', { method: 'POST', body })
+  },
 
   config: () => req<AppConfig>('/api/config'),
   setMode: (mode: AppMode) =>

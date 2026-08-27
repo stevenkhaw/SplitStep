@@ -1,10 +1,12 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
+  import FirstRun from '../components/FirstRun.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
   import { appmode } from '../lib/appmode.svelte'
+  import { startPolling } from '../lib/polling'
   import { navigate } from '../lib/router.svelte'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
@@ -44,6 +46,22 @@
     return () => {
       cancelled = true
     }
+  })
+
+  // While the library is empty the page polls: the first-run card's waiting
+  // step promises "this list updates on its own", and the watcher's ingest
+  // is the update it is waiting for. Tears down the moment a session
+  // exists, so a populated library never pays for it.
+  $effect(() => {
+    if (loading || sessions.length > 0) return
+    const poller = startPolling(async () => {
+      try {
+        sessions = await api.listSessions()
+      } catch {
+        // the server may be restarting; keep polling
+      }
+    }, 3000)
+    return () => poller.stop()
   })
 
   async function handleSessionClick(session: Session) {
@@ -130,9 +148,7 @@
 {:else if loading}
   <p class="text-body text-dim">Loading…</p>
 {:else if sessions.length === 0}
-  <p class="text-body text-dim">
-    Nothing yet. Drop a video into <code>_inbox/</code> and it will appear here.
-  </p>
+  <FirstRun sessionCount={sessions.length} {loading} />
 {:else}
   <ul class="space-y-2">
     {#each sessions as s (s.id)}
