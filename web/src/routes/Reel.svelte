@@ -384,10 +384,15 @@
       onclick={cutMissing}
     >{busy ? 'Working…' : 'Cut missing clips'}</button>
 
+    <!-- The one filled button in this row: rendering is the page's primary
+         action and was invisible among five identical outlined buttons.
+         Filled accent needs the explicit text-bg (app.css: a white label on
+         accent measures ~2:1), same idiom as Session.svelte's setup buttons. -->
     <button
       data-render
-      class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
-             hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors"
+      class="rounded bg-accent px-3 py-1.5 font-data text-data font-medium text-bg
+             hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40
+             motion-safe:transition-colors"
       disabled={blocked !== null || busy}
       title={blocked ?? ''}
       onclick={render}
