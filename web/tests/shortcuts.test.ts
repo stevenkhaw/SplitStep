@@ -86,6 +86,35 @@ describe('primaryShortcuts', () => {
   })
 })
 
+describe('friend mode filtering', () => {
+  const flatKeys = (gs: ReturnType<typeof shortcutGroups>) =>
+    gs.flatMap((g) => g.items.flatMap((s) => s.keys))
+
+  it('hides dev-only shortcuts in friend mode and keeps them in dev', () => {
+    expect(flatKeys(shortcutGroups('queue', 'dev'))).toContain('L')
+    expect(flatKeys(shortcutGroups('queue', 'friend'))).not.toContain('L')
+  })
+
+  it('keeps the strip a subset of the overlay in both app modes', () => {
+    for (const appMode of ['friend', 'dev'] as const) {
+      for (const m of MODES) {
+        const all = shortcutGroups(m, appMode).flatMap((g) => g.items)
+        for (const s of primaryShortcuts(m, appMode)) {
+          expect(all).toContain(s)
+        }
+      }
+    }
+  })
+
+  it('drops a group outright rather than rendering it empty', () => {
+    for (const m of MODES) {
+      for (const g of shortcutGroups(m, 'friend')) {
+        expect(g.items.length).toBeGreaterThan(0)
+      }
+    }
+  })
+})
+
 describe('the queue reference matches the handler it documents', () => {
   // Spot-checks against QueueMode's own switch. If a binding moves, this is
   // what says the documentation moved with it.

@@ -1,4 +1,5 @@
 import { isEditableTarget } from './keyboard'
+import type { AppMode } from './types'
 
 /**
  * The keyboard reference, as data.
@@ -22,6 +23,10 @@ export interface Shortcut {
   /** One entry per key that does the same thing, e.g. the four speed keys. */
   keys: string[]
   label: string
+  /** Bindings friend mode hides (the tuning tools). The filter lives here,
+   *  in the one place bindings are written down, so the strip, the overlay
+   *  and the handlers cannot disagree about what friend mode contains. */
+  devOnly?: true
 }
 
 export interface ShortcutGroup {
@@ -59,7 +64,7 @@ const QUEUE: ShortcutGroup[] = [
     title: 'Open',
     items: [
       { keys: ['T'], label: 'Timeline, to fix the boundaries' },
-      { keys: ['L'], label: 'Label mode, to judge the detector' },
+      { keys: ['L'], label: 'Label mode, to judge the detector', devOnly: true },
       { keys: ['?'], label: 'This list' },
     ],
   },
@@ -153,8 +158,18 @@ const BY_MODE: Record<ShortcutMode, ShortcutGroup[]> = {
   label: LABEL,
 }
 
-export function shortcutGroups(mode: ShortcutMode): ShortcutGroup[] {
-  return BY_MODE[mode]
+/** Friend mode drops the devOnly entries and any group that leaves empty.
+ *  Item objects pass through by reference on purpose: the strip-subset test
+ *  (and the strip itself) compare by identity. */
+function visible(groups: ShortcutGroup[], appMode: AppMode): ShortcutGroup[] {
+  if (appMode === 'dev') return groups
+  return groups
+    .map((g) => ({ ...g, items: g.items.filter((s) => !s.devOnly) }))
+    .filter((g) => g.items.length > 0)
+}
+
+export function shortcutGroups(mode: ShortcutMode, appMode: AppMode = 'dev'): ShortcutGroup[] {
+  return visible(BY_MODE[mode], appMode)
 }
 
 /** Every key a mode binds, flattened -- what the duplicate check reads. */
@@ -176,8 +191,8 @@ const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
 }
 
 /** The handful that stay visible under the video. */
-export function primaryShortcuts(mode: ShortcutMode): Shortcut[] {
-  return PRIMARY[mode]
+export function primaryShortcuts(mode: ShortcutMode, appMode: AppMode = 'dev'): Shortcut[] {
+  return PRIMARY[mode].filter((s) => appMode === 'dev' || !s.devOnly)
 }
 
 /**

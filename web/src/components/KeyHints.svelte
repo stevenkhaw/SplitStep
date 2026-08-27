@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { appmode } from '../lib/appmode.svelte'
   import { primaryShortcuts, shortcutGroups, isHelpKey } from '../lib/shortcuts'
   import type { ShortcutMode } from '../lib/shortcuts'
 
@@ -47,8 +48,8 @@
     else restoreTo?.focus()
   })
 
-  const groups = $derived(shortcutGroups(mode))
-  const primary = $derived(primaryShortcuts(mode))
+  const groups = $derived(shortcutGroups(mode, appmode.current))
+  const primary = $derived(primaryShortcuts(mode, appmode.current))
   // A fixed minimum width and centred glyph, so every key reads as the same
   // object. Without it the boxes size to their content and the two narrow
   // ones -- `,` and `.` -- render as a low, off-centre speck in a box wide

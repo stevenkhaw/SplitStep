@@ -8,6 +8,7 @@
   import ResegmentPanel from '../components/ResegmentPanel.svelte'
   import TimelineMode from '../components/TimelineMode.svelte'
   import { api } from '../lib/api'
+  import { appmode } from '../lib/appmode.svelte'
   import { navigate } from '../lib/router.svelte'
   import { resolveSelectedTab, scopeToSource, sourceTabs } from '../lib/sources'
   import type { ExportResult, Rally, SessionDetail, Source } from '../lib/types'
@@ -192,6 +193,11 @@
   // is `focusedRallyId` truthiness only reached in the TimelineMode `{:else
   // if}`, never in the `mode === 'label'` check above it.
   function openLabel(rallyId: string | null) {
+    // Friend mode hides label mode rather than deleting it; the keybinding
+    // an old muscle-memory presses must not open a surface the reference no
+    // longer lists -- and every corpus write should stay behind a surface
+    // the reviewer can see.
+    if (appmode.current === 'friend') return
     focusedRallyId = rallyId
     mode = 'label'
   }
