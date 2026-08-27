@@ -146,9 +146,26 @@ fn is_our_server(pid: i32) -> bool {
 /// reason: the dev loop must not need a bundle to exist.
 pub fn server_exe(resource_dir: Option<&Path>) -> PathBuf {
     if let Some(dir) = resource_dir {
-        let bundled = dir.join("splitstep-server").join("splitstep-server");
-        if bundled.is_file() {
-            return bundled;
+        for candidate in [
+            // Where tauri.conf.json's resources MAP puts it. The map form
+            // names the destination, so this is the layout we ship.
+            dir.join("splitstep-server").join("splitstep-server"),
+            // Where the resources LIST form puts it. Tauri sanitizes the
+            // leading ".." of "../packaging/dist/splitstep-server" into an
+            // "_up_" segment -- verified against a real bundle, where the
+            // server landed at Contents/Resources/_up_/packaging/dist/.
+            // Kept as a fallback because reverting the map to a list is a
+            // one-character-looking edit that would otherwise produce an app
+            // that builds, installs, launches, and never starts its server.
+            dir.join("_up_")
+                .join("packaging")
+                .join("dist")
+                .join("splitstep-server")
+                .join("splitstep-server"),
+        ] {
+            if candidate.is_file() {
+                return candidate;
+            }
         }
     }
     PathBuf::from("../packaging/dist/splitstep-server/splitstep-server")
@@ -215,6 +232,19 @@ mod tests {
         record(0);
         reap_orphan();
         assert!(!pidfile().exists(), "a handled pidfile is always removed");
+    }
+
+    #[test]
+    fn server_exe_finds_the_up_layout_too() {
+        // The list form of `resources` produces this, and an app that cannot
+        // find its server launches to a window that never loads.
+        let dir = std::env::temp_dir().join("splitstep-up-layout-test");
+        let nested = dir.join("_up_/packaging/dist/splitstep-server");
+        std::fs::create_dir_all(&nested).unwrap();
+        let exe = nested.join("splitstep-server");
+        std::fs::write(&exe, b"#!/bin/sh\n").unwrap();
+        assert_eq!(server_exe(Some(&dir)), exe);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

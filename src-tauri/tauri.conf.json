@@ -24,9 +24,9 @@
     "icon": [
       "icons/icon.icns"
     ],
-    "resources": [
-      "../packaging/dist/splitstep-server"
-    ],
+    "resources": {
+      "../packaging/dist/splitstep-server": "splitstep-server"
+    },
     "macOS": {
       "minimumSystemVersion": "12.0"
     }
