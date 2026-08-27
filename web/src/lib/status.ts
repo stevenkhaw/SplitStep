@@ -62,6 +62,11 @@ export function emptyQueueCopy(sourceStatus: string, appMode: AppMode): string {
   if (sourceStatus === 'failed') {
     return 'Detection failed for this video — open the jobs badge above to retry it.'
   }
+  if (sourceStatus === 'needs_setup') {
+    // Nothing is running here: the pipeline is waiting on the human, and
+    // "still running" would promise progress that never comes.
+    return 'This video still needs its court set up before detection can start.'
+  }
   if (sourceStatus !== 'ready' && sourceStatus !== 'reviewed') {
     return 'No rallies yet — detection is still running.'
   }

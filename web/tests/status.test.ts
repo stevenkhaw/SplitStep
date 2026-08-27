@@ -114,10 +114,17 @@ describe('emptyQueueCopy', () => {
     expect(emptyQueueCopy('failed', 'friend')).not.toMatch(/re-segment/i)
   })
 
-  it('says detection is still running for anything short of ready', () => {
-    for (const s of ['ingesting', 'building', 'detecting', 'needs_setup']) {
+  it('says detection is still running for anything mid-pipeline', () => {
+    for (const s of ['ingesting', 'building', 'ingested', 'detecting']) {
       expect(emptyQueueCopy(s, 'dev')).toMatch(/still running|on its way/i)
     }
+  })
+
+  it('points a needs_setup source at the wizard, not at a wait', () => {
+    // Nothing is running for needs_setup -- the pipeline is waiting on the
+    // human, and "still running" would promise progress that never comes.
+    expect(emptyQueueCopy('needs_setup', 'friend')).toMatch(/set.?up|court/i)
+    expect(emptyQueueCopy('needs_setup', 'friend')).not.toMatch(/running/i)
   })
 
   it('points dev at the re-segment panel and friend at nothing it cannot see', () => {
