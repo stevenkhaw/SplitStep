@@ -140,6 +140,40 @@ class OrphanClip:
     size_bytes: int
 
 
+def walk_clip_files(clips_dir: Path) -> list[Path]:
+    """Every file `find_orphan_clips` (and the session clips-listing API
+    route) must consider: files directly in `clips_dir`, plus files one
+    level below it.
+
+    Shared rather than reimplemented per caller, because the shape is easy
+    to get subtly wrong and both callers need the exact same one. `iterdir()`
+    rather than `glob("*.mp4")`, and walked one level deep, not just the top:
+    `clip_relpath` names a clip `<idx>/<start>-<end>.mp4`, one folder per
+    source, so the files a caller must see live a level below `clips_dir`
+    now. A bare top-level `iterdir()` would silently miss every nested clip;
+    a recursive walk would silently pick up whatever a source-index-looking
+    directory happens to contain. So each top-level entry is a candidate if
+    it is a file (a stray legacy flat clip, or anything else dropped directly
+    in `clips/`), and if it is a directory its own files are added one level
+    down and no further -- a dotted directory is skipped, the same as a
+    dotted file, since `make_clip` never writes one and nothing here should
+    be looking inside it either way.
+
+    Callers still gate every candidate through `parse_clip_name` themselves:
+    this only decides which files are looked at, not which ones are
+    recognised -- that split is what lets the listing route and the orphan
+    sweep apply the same walk while asking different questions of what it
+    finds.
+    """
+    candidates: list[Path] = []
+    for entry in sorted(clips_dir.iterdir()):
+        if entry.is_file():
+            candidates.append(entry)
+        elif entry.is_dir() and not entry.name.startswith("."):
+            candidates.extend(p for p in sorted(entry.iterdir()) if p.is_file())
+    return candidates
+
+
 def find_orphan_clips(
     library: Library, conn: sqlite3.Connection, session_id: str
 ) -> list[OrphanClip]:
@@ -158,21 +192,12 @@ def find_orphan_clips(
     or un-pointed after it was cut is not stranded, because a rally still
     holds those bounds and the verdict is one keystroke from changing back.
 
-    `iterdir()` rather than `glob("*.mp4")`, and walked one level deep, not
-    just the top: `clip_relpath` names a clip `<idx>/<start>-<end>.mp4`, one
-    folder per source, so the files this function must see live a level
-    below `clips_dir` now. A bare top-level `iterdir()` would silently miss
-    every nested clip; a recursive walk would silently pick up whatever a
-    source-index-looking directory happens to contain. So each top-level
-    entry is a candidate if it is a file (a stray legacy flat clip, or
-    anything else dropped directly in `clips/`), and if it is a directory
-    its own files are added one level down and no further -- a dotted
-    directory is skipped, the same as a dotted file, since `make_clip` never
-    writes one and nothing here should be looking inside it either way.
-    `parse_clip_name` is the real gate on both tiers -- it admits exactly
-    the names this library writes, in either shape, so an encode in flight
-    and a file the user dropped in here are both left alone, and only what
-    we cut can be swept.
+    The walk itself is `walk_clip_files` -- see its docstring for why it is
+    top-level-plus-one-level, not a bare `iterdir()` or a full recursive
+    walk. `parse_clip_name` is the real gate on what it finds -- it admits
+    exactly the names this library writes, in either shape, so an encode in
+    flight and a file the user dropped in here are both left alone, and only
+    what we cut can be swept.
     """
     clips_dir = library.clips_dir(session_id)
     if not clips_dir.is_dir():
@@ -207,15 +232,8 @@ def find_orphan_clips(
         )
     }
 
-    candidates: list[Path] = []
-    for entry in sorted(clips_dir.iterdir()):
-        if entry.is_file():
-            candidates.append(entry)
-        elif entry.is_dir() and not entry.name.startswith("."):
-            candidates.extend(p for p in sorted(entry.iterdir()) if p.is_file())
-
     orphans = []
-    for path in candidates:
+    for path in walk_clip_files(clips_dir):
         rel = str(path.relative_to(clips_dir))
         if rel in claimed:
             continue

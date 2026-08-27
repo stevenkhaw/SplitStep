@@ -1,4 +1,5 @@
 import os
+import platform
 import sqlite3
 import subprocess
 import threading
@@ -17,6 +18,7 @@ from splitstep.db.schema import connect
 from splitstep.db.sessions import add_source, find_or_create_session_for_date
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import Interval
+from splitstep.media.clips import clip_relpath
 from splitstep.media.transcode import TranscodeError
 
 
@@ -766,3 +768,188 @@ def test_inbox_route_reports_unsupported_and_quarantined_files(client, library):
 
 def test_inbox_route_is_empty_when_the_inbox_is(client, library):
     assert client.get("/api/inbox").json() == {"unsupported": [], "failed": []}
+
+
+def _cut(library, session_id, source_idx, start_ms, end_ms, payload=b"pretend clip bytes"):
+    """Stand in for a finished encode: a file at the nested name a real
+    clip job would have written, mirroring test_orphans.py's `_cut`.
+    """
+    path = library.clips_dir(session_id) / clip_relpath(source_idx, start_ms, end_ms)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    return path
+
+
+def test_clips_route_lists_nested_clips_sorted_by_source_then_start(client, library, conn, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    _second_id, second_idx = add_source(
+        conn, session_id, recorded_at="2026-08-19T11:00:00Z", duration_ms=60_000,
+        width=3840, height=2160, fps=30.0, original_name="IMG_0002.MOV",
+    )
+    # Written out of order on purpose -- the route sorts, the filesystem
+    # walk (by directory listing order) does not.
+    _cut(library, session_id, second_idx, 500, 2000, payload=b"cd")
+    _cut(library, session_id, idx, 9000, 14000, payload=b"ab")
+    _cut(library, session_id, idx, 1000, 5000, payload=b"a")
+
+    body = client.get(f"/api/sessions/{session_id}/clips").json()
+    assert body["clips"] == [
+        {"source_idx": idx, "start_ms": 1000, "end_ms": 5000,
+         "relpath": clip_relpath(idx, 1000, 5000), "size_bytes": 1},
+        {"source_idx": idx, "start_ms": 9000, "end_ms": 14000,
+         "relpath": clip_relpath(idx, 9000, 14000), "size_bytes": 2},
+        {"source_idx": second_idx, "start_ms": 500, "end_ms": 2000,
+         "relpath": clip_relpath(second_idx, 500, 2000), "size_bytes": 2},
+    ]
+
+
+def test_clips_route_excludes_foreign_and_in_flight_files(client, library, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    _cut(library, session_id, idx, 9000, 14000)
+    clips_dir = library.clips_dir(session_id)
+    # A file we never wrote, dropped directly in clips/ by the user.
+    (clips_dir / "notes.txt").write_bytes(b"not a clip")
+    # make_clip's own temp-file shape: a live encode's dot-prefixed .part
+    # sibling, which parse_clip_name is deliberately strict enough to reject.
+    (clips_dir / ".01-9000-14000.deadbeef.part.mp4").write_bytes(b"in flight")
+
+    body = client.get(f"/api/sessions/{session_id}/clips").json()
+    assert body["clips"] == [
+        {"source_idx": idx, "start_ms": 9000, "end_ms": 14000,
+         "relpath": clip_relpath(idx, 9000, 14000), "size_bytes": 18},
+    ]
+
+
+def test_clips_route_is_empty_before_any_export(client, seeded):
+    # clips/ is created by the first encode -- see find_orphan_clips'
+    # docstring. Its absence is the ordinary pre-export state, not an error.
+    body = client.get(f"/api/sessions/{seeded['session_id']}/clips").json()
+    assert body == {"clips": []}
+
+
+def test_clips_route_404s_for_an_unknown_session(client):
+    assert client.get("/api/sessions/nope/clips").status_code == 404
+
+
+def test_clip_media_returns_full_body(client, library, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    _cut(library, session_id, idx, 9000, 14000, payload=b"0123456789")
+    r = client.get(f"/media/clips/{session_id}/{idx}/9000-14000.mp4")
+    assert r.status_code == 200
+    assert r.content == b"0123456789"
+
+
+def test_clip_media_serves_partial_content_for_a_range(client, library, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    _cut(library, session_id, idx, 9000, 14000, payload=b"0123456789")
+    r = client.get(f"/media/clips/{session_id}/{idx}/9000-14000.mp4",
+                   headers={"Range": "bytes=2-5"})
+    assert r.status_code == 206
+    assert r.content == b"2345"
+
+
+def test_clip_media_404s_for_a_non_clip_name(client, library, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    # A name parse_clip_name never admits must 404 before any path is even
+    # built, whether or not a file happens to sit there.
+    clips_dir = library.clips_dir(session_id)
+    (clips_dir / f"{idx:02d}").mkdir(parents=True, exist_ok=True)
+    (clips_dir / f"{idx:02d}" / "evil.txt").write_bytes(b"not a clip")
+    assert client.get(f"/media/clips/{session_id}/{idx}/evil.txt").status_code == 404
+
+
+def test_clip_media_404s_for_a_parseable_but_absent_clip(client, seeded):
+    session_id, idx = seeded["session_id"], seeded["idx"]
+    # Well-formed name, nothing on disk -- range_response's own is_file()
+    # check is what 404s this, not the parse gate.
+    assert client.get(f"/media/clips/{session_id}/{idx}/9999-19999.mp4").status_code == 404
+
+
+def _record_calls(monkeypatch):
+    """Stand a recorder in for subprocess.run so a reveal test can assert on
+    the argv shape without actually popping Finder open on the test runner.
+    """
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append((argv, kw)))
+    return calls
+
+
+def test_reveal_endpoint_reveals_a_file_on_darwin(client, library, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    calls = _record_calls(monkeypatch)
+    target = library.root / "sessions" / "2026-08-18" / "clips" / "01" / "9000-14000.mp4"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"clip")
+
+    r = client.post("/api/clips/reveal",
+                     json={"relpath": str(target.relative_to(library.root))})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == ["open", "-R", str(target)]
+    assert kwargs.get("check") is False
+
+
+def test_reveal_endpoint_reveals_a_directory_on_darwin(client, library, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    calls = _record_calls(monkeypatch)
+    clips_dir = library.root / "sessions" / "2026-08-18" / "clips"
+    clips_dir.mkdir(parents=True)
+
+    r = client.post("/api/clips/reveal",
+                     json={"relpath": str(clips_dir.relative_to(library.root))})
+    assert r.status_code == 200
+    argv, kwargs = calls[0]
+    assert argv == ["open", str(clips_dir)]
+    assert kwargs.get("check") is False
+
+
+def test_reveal_endpoint_refuses_a_relative_escape(client, library, tmp_path, monkeypatch):
+    calls = _record_calls(monkeypatch)
+    # Same failure mode test_reel_media_404s_for_an_escaping_relative_rendered_path
+    # covers for reels: a ".." relative path resolves outside the library
+    # root just as surely as an absolute one, and must not reach the
+    # subprocess call. Disambiguated by library.root.name rather than a
+    # fixed filename, since tmp_path's parent is the shared pytest basetemp.
+    outside = tmp_path.parent / f"outside-{library.root.name}.txt"
+    outside.write_bytes(b"x")
+    r = client.post("/api/clips/reveal", json={"relpath": f"../{outside.name}"})
+    assert r.status_code == 404
+    assert calls == []
+
+
+def test_reveal_endpoint_refuses_an_absolute_path(client, library, monkeypatch, tmp_path_factory):
+    calls = _record_calls(monkeypatch)
+    outside_dir = tmp_path_factory.mktemp("outside")
+    outside = outside_dir / "secret.txt"
+    outside.write_bytes(b"x")
+    # Path.__truediv__ silently discards library.root here -- library.root /
+    # str(outside) is just outside again, since outside is absolute (the
+    # same trap rendered_file's docstring documents for reels). The
+    # resolve-then-compare containment check has to catch it anyway.
+    r = client.post("/api/clips/reveal", json={"relpath": str(outside)})
+    assert r.status_code == 404
+    assert calls == []
+
+
+def test_reveal_endpoint_404s_for_a_missing_file(client, library, monkeypatch):
+    calls = _record_calls(monkeypatch)
+    r = client.post("/api/clips/reveal",
+                     json={"relpath": "sessions/2026-08-18/clips/01/9000-14000.mp4"})
+    assert r.status_code == 404
+    assert calls == []
+
+
+def test_reveal_endpoint_does_not_shell_out_on_non_darwin(client, library, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    calls = _record_calls(monkeypatch)
+    target = library.root / "sessions" / "2026-08-18" / "clips" / "01" / "9000-14000.mp4"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"clip")
+
+    r = client.post("/api/clips/reveal",
+                     json={"relpath": str(target.relative_to(library.root))})
+    assert r.status_code == 200
+    assert r.json() == {"ok": False, "reason": "reveal is only supported on macOS"}
+    assert calls == []

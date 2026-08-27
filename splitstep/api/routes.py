@@ -1,5 +1,7 @@
 import os
+import platform
 import sqlite3
+import subprocess
 import threading
 import uuid
 from pathlib import Path
@@ -60,7 +62,8 @@ from splitstep.db.sessions import (
 from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
-from splitstep.export import SETS, column_for, plan_export
+from splitstep.export import SETS, column_for, plan_export, walk_clip_files
+from splitstep.media.clips import parse_clip_name
 from splitstep.media.files import find_original
 from splitstep.media.frames import extract_frame
 from splitstep.media.probe import ProbeError
@@ -285,6 +288,17 @@ class SessionReelBody(BaseModel):
         return v
 
 
+class RevealBody(BaseModel):
+    """A library-relative path -- a clip file, or a `clips/` directory --
+    to reveal in Finder. No format validation here: the route's own
+    resolve-then-contain check is what has to hold regardless of shape, so
+    a validator that pre-approved "looks like a relpath" would just be a
+    second, weaker copy of that same check.
+    """
+
+    relpath: str
+
+
 def _conn(request: Request) -> sqlite3.Connection:
     return request.app.state.conns.get()
 
@@ -362,6 +376,90 @@ def api_export(session_id: str, body: ExportBody, request: Request):
         "unavailable": plan.unavailable,
         "total": plan.total,
     }
+
+
+@router.get("/api/sessions/{session_id}/clips")
+def api_list_clips(session_id: str, request: Request):
+    """Every cut clip on disk for this session, read straight off the
+    filesystem rather than a database table.
+
+    The disk is the truth for clips, the same reasoning `plan_export`'s
+    existence checks and `find_orphan_clips` both rely on: a clip either
+    exists at the path its span implies, or it does not, and nothing in the
+    schema records which -- `rallies.clip_path` names what WAS cut, not what
+    is on disk right now (see `delete_orphan_clips`'s docstring), so it is
+    not a substitute for looking.
+
+    Walk and gate mirror `find_orphan_clips` exactly (`walk_clip_files`,
+    then `parse_clip_name` on each candidate's path relative to `clips_dir`)
+    on purpose -- this route and the orphan sweep must agree on what counts
+    as "a clip we cut", or the panel could list a file the sweep would
+    delete out from under it, or hide one the sweep would leave alone.
+    """
+    conn = _conn(request)
+    if get_session(conn, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    library = _library(request)
+    clips_dir = library.clips_dir(session_id)
+    if not clips_dir.is_dir():
+        # clips/ is created by the first encode -- see find_orphan_clips'
+        # docstring. Absence is the ordinary pre-export state, not an error.
+        return {"clips": []}
+
+    clips = []
+    for path in walk_clip_files(clips_dir):
+        rel = str(path.relative_to(clips_dir))
+        parsed = parse_clip_name(rel)
+        if parsed is None:
+            continue
+        source_idx, start_ms, end_ms = parsed
+        clips.append({
+            "source_idx": source_idx, "start_ms": start_ms, "end_ms": end_ms,
+            "relpath": rel, "size_bytes": path.stat().st_size,
+        })
+    clips.sort(key=lambda c: (c["source_idx"], c["start_ms"]))
+    return {"clips": clips}
+
+
+@router.post("/api/clips/reveal")
+def api_reveal_clip(body: RevealBody, request: Request):
+    """Ask Finder to reveal a clip file, or a `clips/` folder, on disk.
+
+    A deliberate local-first affordance, not a general file browser: this
+    only has to work on the same Mac the browser tab is already open on. The
+    Tauri shell's Phase 3 (see the mac-app-distribution design doc under
+    docs/superpowers/specs/) replaces this with a native reveal command;
+    this stays a thin `open`/`open -R` shim until that lands.
+
+    Containment before existence, and both before touching a subprocess:
+    `body.relpath` is joined onto `library.root` and resolved, then checked
+    with `is_relative_to` against the library root resolved the same way --
+    `Path.__truediv__` silently discards the left operand when the right is
+    absolute (`library.root / "/etc/passwd"` is just `Path("/etc/passwd")`,
+    the same trap `rendered_file` in reels.py documents), which is exactly
+    why the check has to run on the resolved result rather than trusting the
+    join. A path that fails containment 404s the same as one that is simply
+    missing -- the response never distinguishes "outside the library" from
+    "not there", so this cannot be used to probe the filesystem outside the
+    library root for what exists.
+    """
+    library = _library(request)
+    resolved = (library.root / body.relpath).resolve()
+    if not resolved.is_relative_to(library.root.resolve()) or not resolved.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if platform.system() != "Darwin":
+        return {"ok": False, "reason": "reveal is only supported on macOS"}
+
+    # check=False, explicit: `open` exiting non-zero (Finder not running,
+    # e.g. over SSH) is not this route's problem to raise on -- it already
+    # did the one thing it is responsible for, asking Finder to reveal a
+    # path that passed containment and existence.
+    if resolved.is_dir():
+        subprocess.run(["open", str(resolved)], check=False)
+    else:
+        subprocess.run(["open", "-R", str(resolved)], check=False)
+    return {"ok": True}
 
 
 def _session_id_for_rally(conn, rally_id: str) -> str:
@@ -876,6 +974,41 @@ def api_inbox(request: Request):
 def api_proxy(session_id: str, idx: int, request: Request,
               range: str | None = Header(default=None)):
     path = _library(request).source_dir(session_id, idx) / "proxy.mp4"
+    return range_response(path, range)
+
+
+@router.get("/media/clips/{session_id}/{source_idx}/{name}")
+def api_clip_media(session_id: str, source_idx: int, name: str, request: Request,
+                    range: str | None = Header(default=None)):
+    """Stream one cut clip with 206 range support, the same as `api_proxy`
+    and `api_reel_media`.
+
+    `rendered_file` in reels.py's docstring sets the repo's standard of
+    care here: a path handed to a file operation must be checked against a
+    *resolved* containment boundary, because a bare join can be defeated
+    (`Path.__truediv__` silently discards the left operand when the right
+    is absolute) and ".." components survive a naive string check. This
+    route meets that standard by a different, stricter mechanism than
+    `rendered_file`'s resolve-then-compare, rather than by copying it:
+    `source_idx` is a typed `int` path param (Starlette's converter admits
+    only digits, so no ".." or "/" can arrive through it), and `name` uses
+    the default single-segment converter, whose regex is `[^/]+` -- a "/"
+    cannot survive inside one path segment, so a multi-component escape
+    like "../../etc/passwd" cannot even reach this function; Starlette's own
+    routing has nowhere to send it. What is left after that -- a same-segment
+    trick like a literal ".." as the whole `name` -- is exactly what the
+    `parse_clip_name` gate below closes: its regex is anchored at both ends
+    and admits only digits, a single interior dash, and a literal ".mp4"
+    suffix, so ".." fails to parse and 404s before any path is built at all.
+    Structural exclusion (there is no character the route or the regex will
+    carry through to a filesystem call) rather than a check performed on a
+    path already constructed, which is the stronger of the two shapes
+    `rendered_file`'s reasoning distinguishes.
+    """
+    relpath = f"{source_idx:02d}/{name}"
+    if parse_clip_name(relpath) is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    path = _library(request).clips_dir(session_id) / f"{source_idx:02d}" / name
     return range_response(path, range)
 
 
