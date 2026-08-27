@@ -33,12 +33,14 @@
   let busy = $state(false)
   let editingName = $state(false)
   let nameBuffer = $state('')
-  // Off by default: a numbered render re-encodes every clip (~4-8x footage
-  // duration, see the reel job's numbered branch) to burn in the counter and
-  // notes, where a plain render is the fast -c copy path. Defaulting to the
-  // slow path would make every render pay that cost even when nobody asked
-  // for the overlay.
-  let numbered = $state(false)
+  // On by default at Steven's request (2026-08-26): the numbered overlay is
+  // the reason he renders at all, so the default follows the common case.
+  // The cost asymmetry still matters -- numbered re-encodes every clip
+  // (~4-8x footage duration, see the reel job's numbered branch) where plain
+  // is the fast -c copy path -- which is why this stays a visible checkbox
+  // rather than becoming the only mode: unticking it is the escape hatch
+  // for a quick plain render.
+  let numbered = $state(true)
   // Two-step, inline: the first press only reveals what pressing it again
   // destroys (deleteConfirmationText below, rendered where confirmingDelete
   // gates the markup), never a browser confirm() -- a native dialog cannot
