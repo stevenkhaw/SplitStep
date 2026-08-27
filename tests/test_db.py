@@ -49,8 +49,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 11
-    assert migrate(conn) == 11
+    assert migrate(conn) == 12
+    assert migrate(conn) == 12
 
 
 def test_no_two_migrations_share_a_number():
@@ -159,7 +159,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 11
+    assert migrate(conn) == 12
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -219,7 +219,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 11
+    assert migrate(conn) == 12
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.
@@ -277,7 +277,7 @@ def test_migration_008_backfills_seen_at_from_reviewed_at(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 11
+    assert migrate(conn) == 12
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     assert rows["r_reviewed"]["seen_at"] == rows["r_reviewed"]["reviewed_at"]
@@ -670,7 +670,7 @@ def test_migration_009_rebuilds_rallies_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 11
+    assert migrate(conn) == 12
 
     row = conn.execute("SELECT * FROM rallies").fetchone()
     # Every column, not just the two being altered: the whole risk of a

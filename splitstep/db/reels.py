@@ -5,6 +5,10 @@ from datetime import UTC, datetime
 
 Span = tuple[str, int, int]
 
+# Short enough to burn legibly beneath the counter at 4K and to fit the
+# builder's inline field -- the same trim-then-measure rule rally notes use.
+ITEM_NOTE_MAX_CHARS = 40
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -167,6 +171,22 @@ def remove_item(
         _mark_dirty(conn, reel_id)
     conn.commit()
     return cur.rowcount > 0
+
+
+def set_item_note(
+    conn: sqlite3.Connection, reel_id: str, source_id: str,
+    start_ms: int, end_ms: int, note: str,
+) -> bool:
+    """Set one item's note, keyed by the span like every reel-item write.
+    False when the reel has no such item -- the caller turns that into a 404
+    rather than this function guessing."""
+    cur = conn.execute(
+        "UPDATE reel_items SET note = ? WHERE reel_id = ? AND source_id = ?"
+        " AND start_ms = ? AND end_ms = ?",
+        (note, reel_id, source_id, start_ms, end_ms),
+    )
+    conn.commit()
+    return cur.rowcount == 1
 
 
 def set_order(conn: sqlite3.Connection, reel_id: str, spans: list[Span]) -> None:

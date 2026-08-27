@@ -95,6 +95,7 @@ def test_get_a_reel_resolves_its_items(client, conn, session, library):
     assert item["duration_ms"] == 4000
     assert item["clip_ready"] is False
     assert item["rally"]["idx"] == 1
+    assert item["note"] == ""
 
 
 def test_get_an_unknown_reel_is_404(client):

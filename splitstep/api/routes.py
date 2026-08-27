@@ -1139,6 +1139,7 @@ def _item_json(item) -> dict:
         "position": item.position,
         "clip_ready": item.clip_ready,
         "rally": item.rally,
+        "note": item.note,
     }
 
 

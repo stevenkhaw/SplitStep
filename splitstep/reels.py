@@ -34,6 +34,7 @@ class ReelItem:
     clip_relpath: str
     clip_ready: bool
     rally: dict | None
+    note: str
 
     @property
     def duration_ms(self) -> int:
@@ -88,6 +89,7 @@ def resolve_items(
             clip_relpath=name,
             clip_ready=(library.clips_dir(source["session_id"]) / name).exists(),
             rally=dict(rally) if rally is not None else None,
+            note=row["note"],
         ))
     return items
 

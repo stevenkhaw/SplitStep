@@ -14,6 +14,7 @@ from splitstep.db.reels import (
     mark_rendered,
     remove_item,
     rename_reel,
+    set_item_note,
     set_order,
     slugify,
     unique_slug,
@@ -276,3 +277,16 @@ def test_delete_reel_removes_the_row_and_cascades_its_items(conn, seeded):
     assert conn.execute(
         "SELECT COUNT(*) c FROM reel_items WHERE reel_id = ?", (reel["id"],)
     ).fetchone()["c"] == 0
+
+
+def test_set_item_note_round_trips(conn, seeded):
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 2000)])
+    assert set_item_note(conn, reel["id"], seeded["source_id"], 1000, 2000, "match point") is True
+    row = list_items(conn, reel["id"])[0]
+    assert row["note"] == "match point"
+
+
+def test_set_item_note_on_a_missing_item_is_false(conn, seeded):
+    reel = create_reel(conn, "r")
+    assert set_item_note(conn, reel["id"], seeded["source_id"], 1, 2, "x") is False
