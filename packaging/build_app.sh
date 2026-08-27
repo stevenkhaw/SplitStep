@@ -19,12 +19,11 @@ echo "==> icon"
 echo "==> freeze the server"
 (cd packaging && "$PY/pyinstaller" --noconfirm --distpath dist --workpath build splitstep.spec)
 
-# Tauri's beforeBuildCommand would rebuild the web bundles a second time; the
-# freeze above already copied web/dist into the bundle, so it is skipped here
-# rather than run twice against a payload that is already sealed.
+# beforeBuildCommand is empty in tauri.conf.json, so this does not rebuild
+# the web bundles behind us -- the freeze above has already copied web/dist
+# into the payload, and a second build would race a sealed bundle.
 echo "==> app"
-(cd src-tauri && "$CARGO/cargo" tauri build --no-bundle --target aarch64-apple-darwin \
-  && "$CARGO/cargo" tauri bundle --target aarch64-apple-darwin)
+(cd src-tauri && "$CARGO/cargo" tauri build --target aarch64-apple-darwin)
 
 echo "==> done"
 ls -lh src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg

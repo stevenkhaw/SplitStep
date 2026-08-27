@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../web/dist-launcher",
     "devUrl": "http://localhost:5174",
-    "beforeDevCommand": "cd ../web && npm run dev:launcher",
-    "beforeBuildCommand": "cd ../web && npm run build && npm run build:launcher"
+    "beforeDevCommand": "cd web && npm run dev:launcher",
+    "beforeBuildCommand": ""
   },
   "app": {
     "withGlobalTauri": true,

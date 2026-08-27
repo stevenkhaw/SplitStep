@@ -100,6 +100,51 @@ is pre-existing, and belongs in the Phase 3 plan.
 Nothing here has been driven by hand in the browser beyond the reviewer's own
 checks — that is the first morning item below.
 
+## Phase 3 shipped: there is a `.dmg` (2026-08-27, overnight)
+
+**SplitStep is a Mac app now.** Tauri v2 shell, PyInstaller sidecar, unsigned
+arm64 `.dmg`. Design in
+`docs/superpowers/specs/2026-08-27-phase3-tauri-shell-design.md`, plan in
+`docs/superpowers/plans/2026-08-27-phase3-tauri-shell.md`, install
+instructions for your friend in `docs/INSTALL.md`.
+
+Decided with you in four rounds of questions, so the reasoning is not lost:
+arm64 only, unsigned with the Gatekeeper dance documented, ffmpeg from
+evermeet.cx, icon generated from the design tokens, and the `.dmg` handed
+over as a file rather than hosted.
+
+**The shape that changed:** the library chooser is not a native dialog, it is
+a **front layer** — a real screen, rendered by Tauri from its own bundle,
+before any Python exists. It has to be: `Library.open()` refuses without a
+`library.db`, so there is no server to serve a page asking which library the
+server should open. It is skipped entirely on a normal launch; you see it on
+a first run, when the drive is missing, or when you ask for it from
+Settings → Change library. Switching re-points and never moves anything.
+
+**A Rust port was raised and rejected**, and the reasoning is written into the
+spec so it does not get relitigated: Tauri *is* a webview, so porting means
+abandoning Tauri too, discarding ~20k lines of tested frontend including
+VideoDeck's cross-source seeking, and keeping Python regardless.
+
+Three findings from building it, all fixed:
+
+1. **The orphan.** Force-quit or crash the shell and its Python child keeps
+   running, holding `library.db` — the single-instance plugin guards the app,
+   not the server, so the next launch would spawn a *second* worker against
+   one database. Reproduced, then fixed with a pid file reaped on next launch
+   (checked against the process name first, because pids are recycled).
+2. **`--library` is a top-level flag, not a `serve` flag**, so the frozen
+   entry point has to reorder argv before injecting the subcommand.
+3. **The bundled font had to be instanced to Bold.** Google Fonts ships
+   Roboto Condensed only as a variable font now, and `media/numbered.py`
+   selects no variation — a variable file would silently render Regular and
+   lighten a burn you verified frame-by-frame at Bold.
+
+Suites: 846 pytest, 650 vitest, 8 cargo tests, ruff clean, svelte-check 0.
+The evermeet ffmpeg is **9.0.1** — the same version the concat demuxer's
+measured misbehaviour was characterised against, so the media layer's guards
+still describe the ffmpeg that ships.
+
 ## The roadmap (per the distribution spec)
 
 - **Gate 0: first-pass done (see above); human half remains.** Steven's
@@ -110,11 +155,9 @@ checks — that is the first morning item below.
 - **Phase 2: shipped and merged** (see the section above) —
   `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` for what each of the
   9 tasks was meant to do. Unreviewed in the running UI.
-- **Phase 3:** Tauri v2 shell + PyInstaller bundle + `.dmg`. The spec's
-  Architecture section carries the contract (`resources.py` already resolves
-  bundle-first; `--create` is first-run-only in the shell; the 503 no-UI
-  page should branch on `resources.bundle_dir()` so a friend never reads
-  "run npm").
+- **Phase 3: built.** See the section above. What remains is yours: run the
+  clean-account smoke checklist, because a second macOS user account is the
+  only honest test of a Gatekeeper flow and a first run.
 
 ## How this project is worked on (hard-won, don't relearn)
 
