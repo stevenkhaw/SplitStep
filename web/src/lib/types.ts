@@ -142,6 +142,10 @@ export interface ReelItem {
   position: number
   clip_ready: boolean
   rally: Rally | null
+  /** Free text, capped at ITEM_NOTE_MAX_CHARS (lib/reels.ts), burned into
+   *  the corner of the clip when the reel is rendered numbered. Empty string
+   *  when unset -- the server always sends the field, never omits it. */
+  note: string
 }
 
 /** How a reel addresses an item: a span of a source, never a rally id --

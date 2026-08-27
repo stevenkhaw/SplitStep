@@ -153,3 +153,27 @@ export function normalizedReelName(input: string): string | null {
   const trimmed = input.trim()
   return trimmed === '' ? null : trimmed
 }
+
+/**
+ * The longest note that still fits the numbered render's burned-in caption
+ * without shrinking the type. Mirrors ITEM_NOTE_MAX_CHARS in
+ * splitstep/db/reels.py -- deliberately a different, tighter cap than a
+ * rally's own NOTE_MAX_CHARS (120): a rally note is read on screen, in a
+ * caption pill with room to wrap, while an item note is burned into the
+ * corner of a 4K frame at the numbered render's fixed size.
+ */
+export const ITEM_NOTE_MAX_CHARS = 40
+
+/**
+ * Trim, cap-check. `null` means refuse -- the input is over the cap and Save
+ * must be disabled, mirroring the server's own validator
+ * (`ItemNoteBody.check_note` in splitstep/api/routes.py) so a click never
+ * round-trips just to learn what this already knows. `''` is a legal result,
+ * distinct from `null`: clearing a note is a normal edit, not a rejection,
+ * and the server stores `''` for it the same as it would any other trimmed
+ * value.
+ */
+export function normalizedItemNote(raw: string): string | null {
+  const note = raw.trim()
+  return note.length > ITEM_NOTE_MAX_CHARS ? null : note
+}

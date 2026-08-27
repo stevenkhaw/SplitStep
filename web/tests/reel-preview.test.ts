@@ -13,6 +13,7 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
     position: 0,
     clip_ready: true,
     rally: null,
+    note: '',
     ...overrides,
   }
 }

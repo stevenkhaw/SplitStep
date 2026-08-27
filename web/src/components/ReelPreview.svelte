@@ -62,14 +62,36 @@
   </div>
 
   {#if current}
-    <VideoDeck
-      src={proxy(current)}
-      startMs={current.start_ms}
-      endMs={current.end_ms}
-      nextSrc={next ? proxy(next) : undefined}
-      nextStartMs={next?.start_ms}
-      {onended}
-    />
+    <div class="relative">
+      <VideoDeck
+        src={proxy(current)}
+        startMs={current.start_ms}
+        endMs={current.end_ms}
+        nextSrc={next ? proxy(next) : undefined}
+        nextStartMs={next?.start_ms}
+        {onended}
+      />
+      <!-- Corner badge over the video itself, not just the header line above
+           -- the header can scroll out of view on a small window, and the
+           badge is what a reviewer glances at while actually watching.
+           `bg-black/60 text-fg` is the letterbox-literal exception design
+           tokens otherwise ban raw palette/opacity values for: this sits
+           directly on top of playing video, where a token surface colour
+           would be see-through, and VideoDeck's own click-to-play/error
+           overlays already use the same literal black scrim for the same
+           reason. -->
+      <div
+        class="pointer-events-none absolute bottom-2 right-2 max-w-xs rounded
+               bg-black/60 px-2 py-1 text-right font-data text-fg"
+      >
+        <div class="text-data tabular-nums">
+          {Math.min(position.index + 1, position.total)}/{position.total}
+        </div>
+        {#if current.note}
+          <div class="truncate text-caption text-fg/80">{current.note}</div>
+        {/if}
+      </div>
+    </div>
   {:else}
     <div class="flex h-40 flex-col items-center justify-center gap-3 rounded bg-black">
       <p class="font-data text-data text-dim">

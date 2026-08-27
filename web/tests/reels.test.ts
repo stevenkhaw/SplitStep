@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ITEM_NOTE_MAX_CHARS,
   canWatchRendered,
   deleteConfirmationText,
   formatBytes,
   missingClipCount,
+  normalizedItemNote,
   normalizedReelName,
   reelMembershipKey,
   renderBlockedReason,
@@ -27,6 +29,7 @@ function item(overrides: Partial<ReelItem> = {}): ReelItem {
     position: 0,
     clip_ready: true,
     rally: null,
+    note: '',
     ...overrides,
   }
 }
@@ -199,5 +202,26 @@ describe('normalizedReelName', () => {
 
   it('is null for pure whitespace even with tabs and newlines', () => {
     expect(normalizedReelName('\t\n ')).toBeNull()
+  })
+})
+
+describe('normalizedItemNote', () => {
+  it('trims surrounding whitespace', () => {
+    expect(normalizedItemNote('  deep lob  ')).toBe('deep lob')
+  })
+
+  it('passes a note exactly at the cap', () => {
+    const exact = 'x'.repeat(ITEM_NOTE_MAX_CHARS)
+    expect(normalizedItemNote(exact)).toBe(exact)
+  })
+
+  it('refuses a note one character over the cap', () => {
+    const over = 'x'.repeat(ITEM_NOTE_MAX_CHARS + 1)
+    expect(normalizedItemNote(over)).toBeNull()
+  })
+
+  it('keeps an empty string -- clearing the note is legal', () => {
+    expect(normalizedItemNote('')).toBe('')
+    expect(normalizedItemNote('   ')).toBe('')
   })
 })

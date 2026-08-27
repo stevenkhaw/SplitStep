@@ -14,6 +14,7 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
     position: 0,
     clip_ready: true,
     rally: null,
+    note: '',
     ...overrides,
   }
 }
@@ -42,6 +43,7 @@ const mockApi = {
   addReelItems: vi.fn().mockResolvedValue({ added: 1, existing: 0, total: 1 }),
   removeReelItem: vi.fn().mockResolvedValue({ removed: true, total: 0 }),
   setReelOrder: vi.fn().mockResolvedValue({ ok: true }),
+  setReelItemNote: vi.fn().mockResolvedValue({ ok: true }),
   exportReelClips: vi.fn().mockResolvedValue({
     queued: 2, already_cut: 0, in_flight: 0, unavailable: 0, total: 2,
   }),
@@ -142,12 +144,26 @@ describe('Reel builder', () => {
     expect(render().disabled).toBe(true)
   })
 
-  it('enables Render once every clip is ready', async () => {
+  it('enables Render once every clip is ready, and renders plain by default', async () => {
     await open(detail([item(1000), item(9000)]))
     expect(render().disabled).toBe(false)
     render().click()
     flushSync()
-    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points')
+    // The numbered checkbox is unchecked out of the box: a numbered render
+    // re-encodes every clip, so the fast plain render must be the default,
+    // never something a reviewer opts out of after the fact.
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', false)
+  })
+
+  it('passes numbered:true once the checkbox is checked', async () => {
+    await open(detail([item(1000), item(9000)]))
+    const checkbox = host.querySelector('[data-numbered]') as HTMLInputElement
+    checkbox.checked = true
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    render().click()
+    flushSync()
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true)
   })
 
   it('cutting reports the four counts separately', async () => {
@@ -207,6 +223,34 @@ describe('Reel builder', () => {
     expect(mockApi.removeReelItem).toHaveBeenCalledWith('2026-08-18-points', {
       source_id: 'src1', start_ms: 1000, end_ms: 5000,
     })
+  })
+
+  it('saves an item note through the same mutate() funnel as every other action', async () => {
+    await open(detail([item(1000)]))
+    ;(host.querySelector('[data-note]') as HTMLElement).click()
+    flushSync()
+    const input = host.querySelector('[data-note-input]') as HTMLInputElement
+    input.value = 'deep lob'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    flushSync()
+    expect(mockApi.setReelItemNote).toHaveBeenCalledWith(
+      '2026-08-18-points', { source_id: 'src1', start_ms: 1000, end_ms: 5000 }, 'deep lob',
+    )
+  })
+
+  it('surfaces a failed note save', async () => {
+    await open(detail([item(1000)]))
+    mockApi.setReelItemNote.mockRejectedValue(new Error('500'))
+    ;(host.querySelector('[data-note]') as HTMLElement).click()
+    flushSync()
+    const input = host.querySelector('[data-note-input]') as HTMLInputElement
+    input.value = 'deep lob'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    flushSync()
+    await settle()
+    expect(host.textContent).toContain("Couldn't save that note")
   })
 
   it('surfaces a failed reorder instead of leaving a phantom order', async () => {

@@ -33,6 +33,12 @@
   let busy = $state(false)
   let editingName = $state(false)
   let nameBuffer = $state('')
+  // Off by default: a numbered render re-encodes every clip (~4-8x footage
+  // duration, see the reel job's numbered branch) to burn in the counter and
+  // notes, where a plain render is the fast -c copy path. Defaulting to the
+  // slow path would make every render pay that cost even when nobody asked
+  // for the overlay.
+  let numbered = $state(false)
   // Two-step, inline: the first press only reveals what pressing it again
   // destroys (deleteConfirmationText below, rendered where confirmingDelete
   // gates the markup), never a browser confirm() -- a native dialog cannot
@@ -217,12 +223,16 @@
     // locked check-and-insert already makes a second one harmless server
     // side.
     mutate(async () => {
-      const result = await api.renderReel(slug)
+      const result = await api.renderReel(slug, numbered)
       toaster.push(
         result.already_running ? 'Already rendering.' : 'Rendering — see the jobs badge.',
         'info',
       )
     }, "Couldn't render")
+  }
+
+  function setItemNote(item: ReelItem, note: string): void {
+    mutate(() => api.setReelItemNote(slug, spanRef(item), note), "Couldn't save that note")
   }
 
   function startRename(): void {
@@ -381,6 +391,22 @@
       onclick={render}
     >{busy ? 'Working…' : blocked ? `Render — ${blocked}` : 'Render'}</button>
 
+    <!-- Off by default -- plain render is the fast -c copy path, and
+         checking this trades that for a full re-encode of every clip
+         (~4-8x footage duration) so the counter and each item's note can be
+         burned into the frame. -->
+    <label
+      class="flex items-center gap-1.5 font-data text-data text-dim"
+      title="Burn in a clip counter and each clip's note. Re-encodes every clip -- 4-8x footage duration, instead of the fast plain render."
+    >
+      <input
+        data-numbered
+        type="checkbox"
+        bind:checked={numbered}
+      />
+      numbered
+    </label>
+
     {#if confirmingDelete}
       <!-- Inline, not a browser confirm(): the confirming press must name
            what it destroys, which a confirm() dialog cannot show with any
@@ -494,7 +520,7 @@
       end of its review queue.
     </p>
   {:else}
-    <ReelItemList {items} oncommit={commitOrder} onremove={remove} />
+    <ReelItemList {items} oncommit={commitOrder} onremove={remove} onnote={setItemNote} />
   {/if}
 {/if}
 

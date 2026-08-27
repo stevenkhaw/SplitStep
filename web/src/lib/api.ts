@@ -89,12 +89,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ order }),
     }),
+  setReelItemNote: (slug: string, span: SpanRef, note: string) =>
+    req<{ ok: boolean }>(`/api/reels/${slug}/items/note`, {
+      method: 'POST',
+      body: JSON.stringify({ ...span, note }),
+    }),
   // Not routed through post(): like exportClips, its return shape is the
   // four counts plan_reel_export reports, not post()'s ok/count/id union.
   exportReelClips: (slug: string) =>
     req<ExportResult>(`/api/reels/${slug}/export`, { method: 'POST' }),
-  renderReel: (slug: string) =>
-    req<RenderResult>(`/api/reels/${slug}/render`, { method: 'POST' }),
+  // `numbered` has no default here -- RenderBody.numbered defaults to false
+  // server-side, but leaving it implicit client-side would let a caller
+  // forget the flag and silently get the fast render when the numbered
+  // checkbox was actually checked. The one caller (Reel.svelte's render())
+  // always passes its `numbered` $state explicitly.
+  renderReel: (slug: string, numbered: boolean) =>
+    req<RenderResult>(`/api/reels/${slug}/render`, {
+      method: 'POST',
+      body: JSON.stringify({ numbered }),
+    }),
   createSessionReel: (sessionId: string, which: 'points' | 'starred') =>
     req<ReelMergeResult>(`/api/sessions/${sessionId}/reels`, {
       method: 'POST',

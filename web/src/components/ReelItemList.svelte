@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import { normalizedItemNote, spanKey } from '../lib/reels'
   import { dropIndex, moveItem } from '../lib/reorder'
   import { formatDuration } from '../lib/time'
   import type { ReelItem } from '../lib/types'
@@ -13,9 +14,12 @@
      * IS the preview. */
     oncommit: (items: ReelItem[]) => void
     onremove: (item: ReelItem) => void
+    /** Fired once, on an explicit Save or Enter, with the trimmed note --
+     * never on Escape, which discards the buffer instead. */
+    onnote: (item: ReelItem, note: string) => void
   }
 
-  let { items, oncommit, onremove }: Props = $props()
+  let { items, oncommit, onremove, onnote }: Props = $props()
 
   let list = $state<HTMLElement>()
   let dragging = $state<number | null>(null)
@@ -93,6 +97,44 @@
     endDrag()
   }
 
+  // Which row's note is open for editing, keyed by spanKey -- the item's own
+  // identity, same key the reel row uses to keep its span rather than a
+  // rally id (a threshold sweep can replace the rally under a row without
+  // touching the span). Null when nothing is open; only one row edits at a
+  // time.
+  let editingNote = $state<string | null>(null)
+  let noteBuffer = $state('')
+
+  function startNoteEdit(item: ReelItem): void {
+    noteBuffer = item.note
+    editingNote = spanKey(item)
+  }
+
+  // Closed immediately, before the round trip starts -- the exact shape
+  // saveName (Reel.svelte) uses for the rename field, and for the same
+  // reason: there is deliberately no `onblur` on the input below that could
+  // re-fire this. Enter and Escape already close the field themselves, and
+  // removing a focused element fires a trailing blur afterwards; a
+  // blur-commit would re-save whatever text was last typed even after
+  // Escape discarded it. See saveName's comment for the full failure mode.
+  function saveNote(item: ReelItem): void {
+    const note = normalizedItemNote(noteBuffer)
+    if (note === null) return
+    editingNote = null
+    onnote(item, note)
+  }
+
+  function onNoteKey(item: ReelItem, e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      saveNote(item)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      // Cancel, not commit: noteBuffer is simply dropped.
+      editingNote = null
+    }
+  }
+
   function onHandleKey(index: number, e: KeyboardEvent): void {
     // Alt+Arrow, not bare Arrow: the handle is a button inside a scrolling
     // list, and swallowing plain arrows would break scrolling for keyboard
@@ -157,6 +199,44 @@
           orphan
         </span>
       {/if}
+
+      <span class="min-w-0 flex-1">
+        {#if editingNote === spanKey(item)}
+          <span class="flex items-center gap-2">
+            <input
+              data-note-input
+              class="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1
+                     font-data text-data"
+              bind:value={noteBuffer}
+              onkeydown={(e) => onNoteKey(item, e)}
+              aria-label="Note for clip {i + 1}"
+            />
+            <!-- No onblur here at all -- see saveNote's comment. Save and
+                 Cancel are the only ways this field closes besides the keys
+                 onNoteKey already handles. -->
+            <button
+              data-note-save
+              class="rounded border border-line px-2 py-1 font-data text-data
+                     text-fg hover:bg-surface-2 disabled:cursor-not-allowed
+                     disabled:opacity-40 motion-safe:transition-colors"
+              disabled={normalizedItemNote(noteBuffer) === null}
+              onclick={() => saveNote(item)}
+            >Save</button>
+            <button
+              class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
+              onclick={() => (editingNote = null)}
+            >Cancel</button>
+          </span>
+        {:else}
+          <button
+            data-note
+            class="max-w-full truncate text-left font-data text-data
+                   {item.note ? 'text-dim' : 'text-faint'} hover:text-fg
+                   motion-safe:transition-colors"
+            onclick={() => startNoteEdit(item)}
+          >{item.note || '+ note'}</button>
+        {/if}
+      </span>
 
       <button
         data-remove

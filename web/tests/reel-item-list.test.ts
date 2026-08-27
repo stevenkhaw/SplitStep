@@ -32,6 +32,7 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
     position: 0,
     clip_ready: true,
     rally: null,
+    note: '',
     ...overrides,
   }
 }
@@ -84,7 +85,7 @@ describe('ReelItemList', () => {
   it('renders one row per item with its duration', () => {
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000), item(9000)], oncommit: vi.fn(), onremove: vi.fn() },
+      props: { items: [item(1000), item(9000)], oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     expect(rows()).toHaveLength(2)
@@ -96,7 +97,7 @@ describe('ReelItemList', () => {
       target: host,
       props: {
         items: [item(1000, { clip_ready: false })],
-        oncommit: vi.fn(), onremove: vi.fn(),
+        oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn(),
       },
     })
     flushSync()
@@ -108,7 +109,7 @@ describe('ReelItemList', () => {
     // playable and renderable, never silently dropped.
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000, { rally: null })], oncommit: vi.fn(), onremove: vi.fn() },
+      props: { items: [item(1000, { rally: null })], oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     expect(rows()).toHaveLength(1)
@@ -119,7 +120,7 @@ describe('ReelItemList', () => {
     const oncommit = vi.fn()
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000), item(9000), item(20000)], oncommit, onremove: vi.fn() },
+      props: { items: [item(1000), item(9000), item(20000)], oncommit, onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     stubRects()
@@ -146,7 +147,7 @@ describe('ReelItemList', () => {
     ]
     component = mount(ReelItemList, {
       target: host,
-      props: { items, oncommit, onremove: vi.fn() },
+      props: { items, oncommit, onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     stubRects()
@@ -179,7 +180,7 @@ describe('ReelItemList', () => {
     const oncommit = vi.fn()
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000), item(9000)], oncommit, onremove: vi.fn() },
+      props: { items: [item(1000), item(9000)], oncommit, onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     stubRects()
@@ -193,7 +194,7 @@ describe('ReelItemList', () => {
     const onremove = vi.fn()
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000), item(9000)], oncommit: vi.fn(), onremove },
+      props: { items: [item(1000), item(9000)], oncommit: vi.fn(), onremove, onnote: vi.fn() },
     })
     flushSync()
     ;(rows()[1].querySelector('[data-remove]') as HTMLElement).click()
@@ -208,7 +209,7 @@ describe('ReelItemList', () => {
     const oncommit = vi.fn()
     component = mount(ReelItemList, {
       target: host,
-      props: { items: [item(1000), item(9000)], oncommit, onremove: vi.fn() },
+      props: { items: [item(1000), item(9000)], oncommit, onremove: vi.fn(), onnote: vi.fn() },
     })
     flushSync()
     const handle = rows()[0].querySelector('[data-drag-handle]') as HTMLElement
@@ -217,5 +218,146 @@ describe('ReelItemList', () => {
     }))
     flushSync()
     expect(oncommit.mock.calls[0][0].map((i: ReelItem) => i.start_ms)).toEqual([9000, 1000])
+  })
+})
+
+const note = () => host.querySelector('[data-note]') as HTMLButtonElement | null
+const noteInput = () => host.querySelector('[data-note-input]') as HTMLInputElement | null
+const noteSave = () => host.querySelector('[data-note-save]') as HTMLButtonElement | null
+
+function typeInto(input: HTMLInputElement, value: string): void {
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+describe('ReelItemList notes', () => {
+  it('shows the note when present', () => {
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000, { note: 'deep lob' })],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn(),
+      },
+    })
+    flushSync()
+    expect(note()!.textContent).toBe('deep lob')
+  })
+
+  it('offers an affordance to add one when absent', () => {
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000)], oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn() },
+    })
+    flushSync()
+    expect(note()!.textContent).toBe('+ note')
+  })
+
+  it('opens pre-filled with the current note', () => {
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000, { note: 'deep lob' })],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn(),
+      },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    expect(noteInput()!.value).toBe('deep lob')
+  })
+
+  it('commits the trimmed note through onnote on Save', () => {
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000)], oncommit: vi.fn(), onremove: vi.fn(), onnote },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    typeInto(noteInput()!, '  deep lob  ')
+    flushSync()
+    noteSave()!.click()
+    flushSync()
+    expect(onnote).toHaveBeenCalledTimes(1)
+    expect(onnote.mock.calls[0][1]).toBe('deep lob')
+    expect(onnote.mock.calls[0][0].start_ms).toBe(1000)
+  })
+
+  it('commits on Enter', () => {
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000)], oncommit: vi.fn(), onremove: vi.fn(), onnote },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    const input = noteInput()!
+    typeInto(input, 'deep lob')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    flushSync()
+    expect(onnote).toHaveBeenCalledWith(expect.objectContaining({ start_ms: 1000 }), 'deep lob')
+  })
+
+  it('cancels on Escape without calling onnote', () => {
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000, { note: 'deep lob' })],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote,
+      },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    const input = noteInput()!
+    typeInto(input, 'discarded')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))
+    flushSync()
+
+    expect(onnote).not.toHaveBeenCalled()
+    // Escape closed the field: the input is gone, the original note shows.
+    expect(noteInput()).toBeNull()
+    expect(note()!.textContent).toBe('deep lob')
+  })
+
+  it('does not commit on a blur -- there is no handler wired to fire one', () => {
+    // The exact hazard saveName's comment (Reel.svelte) describes: removing
+    // a focused element fires a trailing blur after Enter/Escape has already
+    // closed the field. jsdom does not reproduce that trailing blur on its
+    // own, so this fires one explicitly at the last live reference to the
+    // (now-removed) input, proving no blur handler is listening at all
+    // rather than merely that jsdom didn't trigger one.
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000)], oncommit: vi.fn(), onremove: vi.fn(), onnote },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    const input = noteInput()!
+    typeInto(input, 'discarded')
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))
+    flushSync()
+
+    input.dispatchEvent(new Event('blur'))
+    flushSync()
+    expect(onnote).not.toHaveBeenCalled()
+  })
+
+  it('disables Save for a note over the cap', () => {
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000)], oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn() },
+    })
+    flushSync()
+    note()!.click()
+    flushSync()
+    typeInto(noteInput()!, 'x'.repeat(41))
+    flushSync()
+    expect(noteSave()!.disabled).toBe(true)
   })
 })
