@@ -383,6 +383,12 @@ Reels shipped: `reel_items` is keyed on `(source_id, start_ms, end_ms)` by
 migration 007, the `reel` handler concatenates with `-c copy`, and `/reels`
 plus `/reels/:slug` build and preview them. 4K clip export shipped —
 `splitstep clips export`, the `clip` handler, and `clips_dir` are live.
+Numbered renders shipped too: a reel can render with a burned-in "3/20"
+counter and a per-item note (migration 012), composited as a PIL-rendered
+PNG via ffmpeg's `overlay` — never `drawtext`, which this ffmpeg build
+lacks — into per-clip intermediates at the library's locked colour profile,
+which the existing guarded concat then joins; the plain render is untouched
+and stays the fast default.
 
 **Reclaim Space is rejected, not deferred.** The library sits on a 2TB external
 drive that holds ~110 hours of play keeping everything, so deleting originals

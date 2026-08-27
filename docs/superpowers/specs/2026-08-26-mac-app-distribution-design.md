@@ -175,6 +175,14 @@ Shell responsibilities:
 
 ## Phase 4 — numbered reels
 
+Status: shipped on `phase1-server-friend-readiness` 2026-08-26 (migration 012;
+one design change from below — the overlay is a PIL-rendered PNG composited
+via ffmpeg's `overlay` filter, not `drawtext`, because the measured ffmpeg
+9.0.1 build lacks freetype and a PNG overlay is robust on any build,
+including whatever Phase 3 bundles; no font file ships inside ffmpeg's
+dependency chain at all, and no TTF needs bundling for drawtext's sake —
+`resources.overlay_font()` resolves a face for PIL instead).
+
 Burned-in "3/20" counter with an optional one-line note beneath it, plus the
 same counter in the reel preview.
 
