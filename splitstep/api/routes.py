@@ -36,6 +36,7 @@ from splitstep.db.rallies import (
     split_rally,
 )
 from splitstep.db.reels import (
+    ITEM_NOTE_MAX_CHARS,
     add_items,
     create_reel,
     delete_reel,
@@ -45,6 +46,7 @@ from splitstep.db.reels import (
     list_reels,
     remove_item,
     rename_reel,
+    set_item_note,
     set_order,
 )
 from splitstep.db.sessions import (
@@ -249,6 +251,27 @@ class ReelItemsBody(BaseModel):
 
 class ReelOrderBody(BaseModel):
     order: list[SpanBody]
+
+
+class ItemNoteBody(BaseModel):
+    source_id: str
+    start_ms: int
+    end_ms: int
+    note: str
+
+    @field_validator("note")
+    @classmethod
+    def check_note(cls, v: str) -> str:
+        # Trim before measuring and store what was measured -- the same rule
+        # NoteBody applies to rally notes, for the same reviewer-facing reason.
+        v = v.strip()
+        if len(v) > ITEM_NOTE_MAX_CHARS:
+            raise ValueError(f"a note is at most {ITEM_NOTE_MAX_CHARS} characters")
+        return v
+
+
+class RenderBody(BaseModel):
+    numbered: bool = False
 
 
 class SessionReelBody(BaseModel):
@@ -1302,6 +1325,16 @@ def api_set_reel_order(slug: str, body: ReelOrderBody, request: Request):
     return {"ok": True}
 
 
+@router.post("/api/reels/{slug}/items/note")
+def api_set_item_note(slug: str, body: ItemNoteBody, request: Request):
+    conn = _conn(request)
+    reel = _reel_or_404(conn, slug)
+    if not set_item_note(conn, reel["id"], body.source_id,
+                         body.start_ms, body.end_ms, body.note):
+        raise HTTPException(status_code=404, detail="No such item in this reel")
+    return {"ok": True}
+
+
 @router.post("/api/reels/{slug}/export")
 def api_export_reel_clips(slug: str, request: Request):
     """Cut the clips this reel is missing. Never called by render."""
@@ -1320,12 +1353,15 @@ def api_export_reel_clips(slug: str, request: Request):
 
 
 @router.post("/api/reels/{slug}/render")
-def api_render_reel(slug: str, request: Request):
+def api_render_reel(slug: str, request: Request, body: RenderBody | None = None):
     """Enqueue the concat. Refuses while any clip is missing, naming the count.
 
     Deliberately does NOT cut the missing clips: a button labelled "render"
     must not start half an hour of encoding. Cutting stays the separate,
     explicitly-pressed action next to it.
+
+    `body` is optional so a plain render (no JSON body at all) keeps working
+    -- the existing callers that never asked about numbering.
     """
     conn = _conn(request)
     reel = _reel_or_404(conn, slug)
@@ -1345,7 +1381,9 @@ def api_render_reel(slug: str, request: Request):
     # under one write lock (see its docstring) -- this route must not inline
     # that SELECT itself, or it drifts back into the race the function exists
     # to close.
-    job_id, already_running = jobq.enqueue_reel_once(conn, reel["id"])
+    job_id, already_running = jobq.enqueue_reel_once(
+        conn, reel["id"], numbered=body.numbered if body else False
+    )
     return {"job_id": job_id, "already_running": already_running}
 
 

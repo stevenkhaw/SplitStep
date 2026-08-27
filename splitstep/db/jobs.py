@@ -112,7 +112,9 @@ def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
 
 
-def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool]:
+def enqueue_reel_once(
+    conn: sqlite3.Connection, reel_id: str, numbered: bool = False
+) -> tuple[str, bool]:
     """Return (job_id, already_running): the in-flight render for `reel_id`
     if one exists, else a freshly enqueued one.
 
@@ -127,6 +129,12 @@ def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool
     autocommit mode). The INSERT is written inline rather than via enqueue()
     so the whole check-and-insert commits exactly once, under the one lock,
     rather than enqueue() taking a second implicit transaction of its own.
+
+    The in-flight check (pending_reel_job) stays reel-id-only on purpose --
+    plain and numbered renders write the same output file, so a numbered
+    render racing a plain one is the same hazard as two of the same kind
+    racing each other, and must be refused (returned as already_running)
+    the same way.
     """
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -138,7 +146,7 @@ def enqueue_reel_once(conn: sqlite3.Connection, reel_id: str) -> tuple[str, bool
         conn.execute(
             "INSERT INTO jobs (id,type,payload,status,created_at)"
             " VALUES (?,?,?,'queued',?)",
-            (job_id, "reel", json.dumps({"reel_id": reel_id}), _now()),
+            (job_id, "reel", json.dumps({"reel_id": reel_id, "numbered": numbered}), _now()),
         )
         conn.commit()
     except BaseException:

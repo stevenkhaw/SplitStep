@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -100,6 +102,45 @@ def test_get_a_reel_resolves_its_items(client, conn, session, library):
 
 def test_get_an_unknown_reel_is_404(client):
     assert client.get("/api/reels/nope").status_code == 404
+
+
+def test_item_note_sets_and_survives_the_detail_fetch(client, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    slug = reel["slug"]
+    client.post(f"/api/reels/{slug}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    res = client.post(f"/api/reels/{slug}/items/note", json={
+        "source_id": session["source_id"], "start_ms": 1000, "end_ms": 5000,
+        "note": "match point",
+    })
+
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    detail = client.get(f"/api/reels/{slug}").json()
+    assert detail["items"][0]["note"] == "match point"
+
+
+def test_item_note_404s_a_span_not_in_the_reel(client, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+
+    res = client.post(f"/api/reels/{reel['slug']}/items/note", json={
+        "source_id": session["source_id"], "start_ms": 1, "end_ms": 2, "note": "x",
+    })
+
+    assert res.status_code == 404
+
+
+def test_item_note_refuses_an_over_long_note(client, session):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    slug = reel["slug"]
+    client.post(f"/api/reels/{slug}/items", json={"items": [_span(session, 1000, 5000)]})
+
+    res = client.post(f"/api/reels/{slug}/items/note", json={
+        "source_id": session["source_id"], "start_ms": 1000, "end_ms": 5000,
+        "note": "x" * 41,
+    })
+
+    assert res.status_code == 422
 
 
 def test_adding_items_is_additive(client, session):
@@ -251,6 +292,36 @@ def test_a_second_render_does_not_queue_twice(client, conn, session, library):
 
     assert first["job_id"] == second["job_id"]
     assert conn.execute("SELECT COUNT(*) c FROM jobs").fetchone()["c"] == 1
+
+
+def test_render_carries_the_numbered_flag_into_the_job(client, conn, session, library):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items",
+                json={"items": [_span(session, 1000, 5000)]})
+    clips = library.clips_dir(session["id"])
+    clip_path = clips / clip_relpath(session["idx"], 1000, 5000)
+    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path.write_bytes(b"fake")
+
+    client.post(f"/api/reels/{reel['slug']}/render", json={"numbered": True})
+
+    row = conn.execute("SELECT payload FROM jobs WHERE type='reel'").fetchone()
+    assert json.loads(row["payload"]) == {"reel_id": reel["id"], "numbered": True}
+
+
+def test_render_without_a_body_stays_plain(client, conn, session, library):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items",
+                json={"items": [_span(session, 1000, 5000)]})
+    clips = library.clips_dir(session["id"])
+    clip_path = clips / clip_relpath(session["idx"], 1000, 5000)
+    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path.write_bytes(b"fake")
+
+    client.post(f"/api/reels/{reel['slug']}/render")
+
+    row = conn.execute("SELECT payload FROM jobs WHERE type='reel'").fetchone()
+    assert json.loads(row["payload"])["numbered"] is False
 
 
 def test_session_reel_creates_from_the_point_set(client, session):

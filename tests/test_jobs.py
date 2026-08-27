@@ -251,7 +251,24 @@ def test_enqueue_reel_once_enqueues_when_nothing_pending(conn):
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     assert row["type"] == "reel"
     assert row["status"] == "queued"
-    assert json.loads(row["payload"]) == {"reel_id": "reel-1"}
+    # numbered defaults to False when the caller doesn't pass it.
+    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": False}
+
+
+def test_enqueue_reel_once_writes_the_numbered_flag(conn):
+    job_id, _ = enqueue_reel_once(conn, "reel-1", numbered=True)
+    row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": True}
+
+
+def test_enqueue_reel_once_in_flight_check_ignores_the_flag(conn):
+    # One render at a time regardless of kind: plain and numbered renders
+    # write the same output file, so a second call must return the first
+    # job even when it asks for the other kind.
+    first_id, _ = enqueue_reel_once(conn, "reel-1", numbered=False)
+    second_id, already_running = enqueue_reel_once(conn, "reel-1", numbered=True)
+    assert second_id == first_id
+    assert already_running is True
 
 
 def test_enqueue_reel_once_returns_the_existing_job_on_a_second_call(conn):
