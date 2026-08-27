@@ -24,7 +24,14 @@ WEB_DIST = REPO / "web" / "dist"
 
 # Flat at the bundle root, because resources.py's _bundled() looks for bare
 # names there. web_dist/ is the one nested entry, matching spa_dist().
-datas = collect_data_files("ultralytics") + [
+# splitstep's OWN data files, and this line is load-bearing. The migrations
+# are .sql files found at runtime via `Path(__file__).parent / "migrations"`,
+# and collect_submodules() gathers .py modules only -- so without this the
+# frozen app shipped with zero migrations, created a library.db with
+# user_version 0 and no tables in it, and 500ed on the first route that
+# touched the database. /api/config kept answering because it never does,
+# which is exactly what made the failure look like a working app.
+datas = collect_data_files("splitstep") + collect_data_files("ultralytics") + [
     (str(VENDOR / "yolo11n.pt"), "."),
     (str(VENDOR / "font.ttf"), "."),
     (str(WEB_DIST), "web_dist"),

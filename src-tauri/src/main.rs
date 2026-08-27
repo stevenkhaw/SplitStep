@@ -75,8 +75,20 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building SplitStep")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                lifecycle::shutdown(app);
+            // Both, not just ExitRequested. Quitting the installed .app left
+            // the sidecar running and the pidfile behind -- measured, not
+            // assumed -- because the quit path that actually fired reached
+            // Exit without ExitRequested ever being observed. shutdown() is
+            // idempotent (it take()s the sidecar out of the state), so
+            // handling both costs nothing and closes the gap.
+            //
+            // The reaper still exists for the paths no event can cover at
+            // all: SIGKILL and a crash.
+            match event {
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                    lifecycle::shutdown(app);
+                }
+                _ => {}
             }
         });
 }
