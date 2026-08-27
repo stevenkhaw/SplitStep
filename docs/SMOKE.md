@@ -1,68 +1,58 @@
-# Clean-account smoke checklist
+# Smoke checklist
 
-The `.dmg` was built and its internals verified by machine. What was **not**
-verified, and cannot be from this account, is the part a friend actually
-experiences: Gatekeeper, a first run with no config, and a real drive.
+Most of this is now done, on a genuinely clean second Mac. What remains is
+listed at the bottom.
 
-Do this in a **second macOS user account** — the poor man's clean machine.
-System Settings → Users & Groups → Add User. Log into it. Nothing in
-`~/Library/Application Support/splitstep` exists there, which is the point.
+## Verified on a second Mac, downloaded via Chrome (2026-08-27)
 
-## Already verified on Steven's own account (2026-08-27)
+This is the real friend path, not a simulation of it. Do not redo:
 
-Done, do not redo:
+- [x] **Gatekeeper.** Downloaded in Chrome (so a real quarantine flag),
+      dragged to Applications, opened → *"can't verify it's free of
+      malware"* → System Settings → Privacy & Security → Open Anyway → runs.
+      That matches `docs/INSTALL.md` as now written.
+- [x] Install to /Applications from the dmg.
+- [x] First run with no config: the chooser appeared and the folder picker
+      worked.
+- [x] Selected the external drive; it found the SanDisk library and opened it.
 
-- [x] **Gatekeeper — verified 2026-08-27, after two wrong answers.** A
-      quarantined copy of the ad-hoc signed build shows "can't verify it's
-      free of malware" — the bypassable unidentified-developer dialog, not
-      "damaged". History, because it is easy to get wrong: The quarantine flag moving from `0081` to `0181`
-      only proves something was approved, not that the app launched. It did
-      not: a quarantined copy reported **"damaged"**, because Tauri shipped
-      only the signature the LINKER applies to the arm64 executable, which
-      seals no bundle resources (`Sealed Resources=none`). Unquarantined
-      macOS is lenient, which is why it ran locally and looked fine.
+Two wrong answers preceded this, both worth remembering:
 
-      "Damaged" is strictly worse than "unidentified developer": the
-      right-click → Open workaround this document describes does not clear
-      it. `bundle.macOS.signingIdentity` is now `"-"` so the bundler ad-hoc
-      signs the whole tree; a hand-signed copy verified clean
-      (`--verify --deep --strict` exit 0, 3380 files sealed). Whether that
-      is *enough* on current macOS is the open question — re-test with the
-      quarantine trick below and record the exact dialog wording.
-- [x] Installed to /Applications, replacing a previous copy.
-- [x] Opened the real library on the SanDisk drive: chooser appeared, Choose
-      folder worked, the button read **Open** (not Create), and the app came
-      up on 304 rallies.
+1. The first build was **not** signed — only the signature the linker applies
+   to the arm64 executable, sealing no bundle resources
+   (`Sealed Resources=none`). Unquarantined macOS is lenient, so it ran
+   locally and looked finished; quarantined it reported **"damaged"**, which
+   has no Open button and no way through.
+   `bundle.macOS.signingIdentity: "-"` fixed it.
+2. A quarantine flag moving from `0081` to `0181` was read as proof the app
+   had launched. It only proves *something* was approved. Check the app
+   actually starts.
+
+## Verified on Steven's own account
+
+- [x] Opening the real library: the button read **Open** (not Create), and the
+      app came up on 304 rallies.
 - [x] `mode` stayed `dev` after opening — friend mode is only written when a
-      library is created, which is the intended behaviour.
+      library is *created*.
 - [x] Quit left no sidecar, no pidfile and nothing listening.
 
-To re-test Gatekeeper without a second account, write the download flag onto
-a copy and open that:
+To re-test Gatekeeper without a second machine, write the download flag onto a
+copy and open that:
 
 ```bash
 cp ~/Desktop/SplitStep_0.1.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.quarantine "0081;00000000;Safari;" ~/Desktop/q.dmg
 ```
 
-Still open below.
-
-## Install
-
-- [ ] Copy `SplitStep.dmg` across (AirDrop to yourself, or a USB stick)
-- [ ] Double-click it; drag SplitStep to Applications
-- [ ] **Right-click → Open.** Confirm the Gatekeeper dialog appears and that
-      `docs/INSTALL.md` describes what you actually see — the wording of that
-      dialog changes between macOS versions, and the doc is written from
-      memory, not from this machine
-- [ ] If Open Anyway was needed instead, note it and correct INSTALL.md
+## Still open
 
 ## First run
 
-- [ ] The chooser appears, not the app
-- [ ] It reads "Where should your videos live?" and explains the drive reasoning
+- [x] The chooser appears, not the app
+- [x] **Choose folder…** opens a real macOS picker
 - [ ] The suggested path is `~/Movies/SplitStep` and free space is shown
-- [ ] **Choose folder…** opens a real macOS picker
-- [ ] Pick a folder on the external drive; Create
+- [ ] Pick a *brand new* folder and press **Create** — every run so far has
+      opened an existing library, so the create path has only been proven by
+      invoking the bundled server directly, never through this button
 - [ ] Window becomes the app within ~20 seconds
 - [ ] Settings shows friend mode ON (Advanced unticked) — the shell writes
       `mode: friend` on a created library
