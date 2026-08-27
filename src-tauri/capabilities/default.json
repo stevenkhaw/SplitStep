@@ -15,6 +15,14 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "allow-home",
+    "allow-known",
+    "allow-configured",
+    "allow-pick-folder",
+    "allow-free-space",
+    "allow-has-library",
+    "allow-open-library",
+    "allow-back-to-chooser"
   ]
 }

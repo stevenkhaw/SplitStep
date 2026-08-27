@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configured"
+description = "Enables the configured command without any pre-configured scope."
+commands.allow = ["configured"]
+
+[[permission]]
+identifier = "deny-configured"
+description = "Denies the configured command without any pre-configured scope."
+commands.deny = ["configured"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-known"
+description = "Enables the known command without any pre-configured scope."
+commands.allow = ["known"]
+
+[[permission]]
+identifier = "deny-known"
+description = "Denies the known command without any pre-configured scope."
+commands.deny = ["known"]
