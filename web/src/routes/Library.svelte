@@ -10,11 +10,24 @@
   import { startPolling } from '../lib/polling'
   import { navigate } from '../lib/router.svelte'
   import { formatBytes } from '../lib/reels'
+  import { changeLibrary, inShell } from '../lib/shell'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
   let settingsOpen = $state(false)
+  let switchError = $state<string | null>(null)
+
+  async function switchLibrary() {
+    switchError = null
+    try {
+      await changeLibrary()
+      // No success branch: the shell navigates the window away to the
+      // chooser, so reaching the next line means it did not.
+    } catch (e) {
+      switchError = e instanceof Error ? e.message : String(e)
+    }
+  }
   // Stale-while-revalidate: the store keeps the last figure across route
   // remounts, so the header doesn't blank and the server doesn't re-walk
   // the drive on every navigation back to this page.
@@ -154,6 +167,24 @@
               </span>
             </span>
           </label>
+          {#if inShell()}
+            <!-- Shell-only: a browser tab has nothing to ask. Separated by a
+                 rule because it is a different kind of thing from the toggle
+                 above -- that changes what this library shows, this leaves
+                 the library entirely. -->
+            <div class="mt-3 border-t border-line pt-3">
+              <button class="text-body text-accent" onclick={switchLibrary}>
+                Change library…
+              </button>
+              <span class="mt-1 block text-caption text-faint">
+                Nothing is moved. This library stays where it is, and you can
+                come back to it.
+              </span>
+              {#if switchError}
+                <span class="mt-1 block text-caption text-danger">{switchError}</span>
+              {/if}
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
