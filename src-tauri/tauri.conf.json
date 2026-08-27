@@ -28,7 +28,8 @@
       "../packaging/dist/splitstep-server": "splitstep-server"
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
     }
   }
 }

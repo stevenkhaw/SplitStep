@@ -12,10 +12,21 @@ System Settings → Users & Groups → Add User. Log into it. Nothing in
 
 Done, do not redo:
 
-- [x] Gatekeeper. Tested by writing a quarantine flag onto a copy of the dmg
-      rather than needing a second account — the flag moved from `0081`
-      (downloaded) to `0181` (user-approved), so the dialog appeared and was
-      cleared through the documented path.
+- [ ] **Gatekeeper — NOT verified. An earlier version of this file claimed it
+      was; that was wrong.** The quarantine flag moving from `0081` to `0181`
+      only proves something was approved, not that the app launched. It did
+      not: a quarantined copy reported **"damaged"**, because Tauri shipped
+      only the signature the LINKER applies to the arm64 executable, which
+      seals no bundle resources (`Sealed Resources=none`). Unquarantined
+      macOS is lenient, which is why it ran locally and looked fine.
+
+      "Damaged" is strictly worse than "unidentified developer": the
+      right-click → Open workaround this document describes does not clear
+      it. `bundle.macOS.signingIdentity` is now `"-"` so the bundler ad-hoc
+      signs the whole tree; a hand-signed copy verified clean
+      (`--verify --deep --strict` exit 0, 3380 files sealed). Whether that
+      is *enough* on current macOS is the open question — re-test with the
+      quarantine trick below and record the exact dialog wording.
 - [x] Installed to /Applications, replacing a previous copy.
 - [x] Opened the real library on the SanDisk drive: chooser appeared, Choose
       folder worked, the button read **Open** (not Create), and the app came
@@ -23,6 +34,13 @@ Done, do not redo:
 - [x] `mode` stayed `dev` after opening — friend mode is only written when a
       library is created, which is the intended behaviour.
 - [x] Quit left no sidecar, no pidfile and nothing listening.
+
+To re-test Gatekeeper without a second account, write the download flag onto
+a copy and open that:
+
+```bash
+cp ~/Desktop/SplitStep_0.1.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.quarantine "0081;00000000;Safari;" ~/Desktop/q.dmg
+```
 
 Still open below.
 
