@@ -104,3 +104,64 @@ def test_save_config_leaves_no_temp_file_behind(isolated_config):
     save_config({"mode": "dev"})
     names = [p.name for p in appconfig.config_path().parent.iterdir()]
     assert names == ["config.json"]
+
+
+def test_known_libraries_is_empty_when_unset():
+    assert appconfig.known_libraries() == []
+
+
+def test_remember_library_puts_newest_first():
+    appconfig.remember_library("/a")
+    appconfig.remember_library("/b")
+    assert appconfig.known_libraries() == ["/b", "/a"]
+
+
+def test_remember_library_dedupes_and_promotes():
+    appconfig.remember_library("/a")
+    appconfig.remember_library("/b")
+    appconfig.remember_library("/a")
+    assert appconfig.known_libraries() == ["/a", "/b"]
+
+
+def test_remember_library_stores_absolute_paths():
+    appconfig.remember_library("~/Movies/SplitStep")
+    assert appconfig.known_libraries() == [str(Path("~/Movies/SplitStep").expanduser())]
+
+
+def test_known_libraries_tolerates_a_corrupt_config():
+    # Same contract get_mode() already has: a config too broken to parse must
+    # not strand the chooser, because the chooser is the one screen that can
+    # fix it.
+    appconfig.config_path().write_text("{not json")
+    assert appconfig.known_libraries() == []
+
+
+def test_known_libraries_tolerates_a_non_list_value():
+    save_config({"libraries": "nonsense"})
+    assert appconfig.known_libraries() == []
+
+
+def test_remember_library_leaves_other_keys_alone():
+    appconfig.set_mode("friend")
+    appconfig.remember_library("/a")
+    assert appconfig.get_mode() == "friend"
+
+
+def test_remember_library_survives_a_corrupt_config():
+    # remember_library is called from `config set-library`, which a user may
+    # well be running precisely because the config is broken.
+    appconfig.config_path().write_text("{not json")
+    appconfig.remember_library("/a")
+    assert appconfig.known_libraries() == ["/a"]
+
+
+def test_set_library_from_the_cli_joins_the_known_list(tmp_path):
+    # The chooser and the CLI both set the current library, so they must both
+    # add to the same list -- otherwise a library reached from the terminal is
+    # invisible in the app.
+    from splitstep.cli import main
+
+    target = tmp_path / "some-library"
+    target.mkdir()
+    assert main(["config", "set-library", str(target)]) == 0
+    assert str(target) in appconfig.known_libraries()

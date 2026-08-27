@@ -105,3 +105,45 @@ def resolve_library(flag: str | None) -> Path:
         "`splitstep config set-library <path>` once "
         f"(config file: {config_path()})."
     )
+
+
+def known_libraries() -> list[str]:
+    """Libraries opened before, most recent first.
+
+    Tolerant of a corrupt or absent key for the same reason get_mode() is:
+    the front layer is the one screen that can repair a bad config, so it has
+    to be able to render against one. A non-list value collapses to empty
+    rather than raising -- a hand-edited typo should cost the list, not the
+    app.
+    """
+    try:
+        value = load_config().get("libraries", [])
+    except LibraryUnconfigured:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, str)]
+
+
+def remember_library(path: str | Path) -> None:
+    """Record a library as opened, newest first, deduped.
+
+    Paths are stored expanded and absolute: the list is shown to a human
+    picking between drives, and `~/Movies/SplitStep` sitting beside
+    `/Users/x/Movies/SplitStep` would read as two libraries when it is one.
+
+    Unreachable entries are deliberately NOT pruned. An unplugged drive is
+    the single most common reason to be looking at this list, and forgetting
+    it is the one thing the list must not do -- reachability is decided at
+    render time instead.
+    """
+    resolved = str(Path(path).expanduser())
+    try:
+        cfg = load_config()
+    except LibraryUnconfigured:
+        # `config set-library` is a plausible thing to run *because* the
+        # config is broken, so a corrupt file is replaced rather than fatal.
+        cfg = {}
+    existing = [entry for entry in known_libraries() if entry != resolved]
+    cfg["libraries"] = [resolved, *existing]
+    save_config(cfg)

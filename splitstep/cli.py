@@ -137,6 +137,10 @@ def cmd_config_set_library(args) -> int:
     cfg = appconfig.load_config()
     cfg["library"] = str(path)
     appconfig.save_config(cfg)
+    # The app's library chooser reads this same list, so a library reached
+    # from the terminal has to join it -- otherwise `libraries` quietly means
+    # "opened from the app" while claiming to mean "opened".
+    appconfig.remember_library(path)
     print(f"library set to {path}")
     return 0
 

@@ -38,3 +38,8 @@ yolo11n.pt
 # Claude Code session state: agent worktrees live under .claude/worktrees/,
 # and launch.json hardcodes this machine's library path.
 .claude/
+
+# PyInstaller output -- 2 GB of derived bytes
+packaging/build/
+packaging/dist/
+packaging/vendor/
