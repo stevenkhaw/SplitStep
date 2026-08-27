@@ -4,11 +4,13 @@
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
+  import { appmode } from '../lib/appmode.svelte'
   import { navigate } from '../lib/router.svelte'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
+  let settingsOpen = $state(false)
   let error = $state<unknown>(null)
   // Session.svelte already has a "Loading…" state for its in-flight fetch;
   // this didn't, so the empty-library copy ("Nothing yet...") was what a
@@ -94,6 +96,31 @@
   <div class="flex items-center gap-4">
     <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/reels')}>Reels</button>
+    <div class="relative">
+      <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
+              aria-expanded={settingsOpen}
+              onclick={() => (settingsOpen = !settingsOpen)}>Settings</button>
+      {#if settingsOpen}
+        <div class="absolute right-0 z-10 mt-2 w-72 rounded-lg border border-line bg-surface p-4
+                    text-left shadow-2xl">
+          <label class="flex items-start gap-2 text-body">
+            <input
+              type="checkbox"
+              class="mt-1 accent-accent"
+              checked={appmode.current === 'dev'}
+              onchange={(e) => appmode.set(e.currentTarget.checked ? 'dev' : 'friend')}
+            />
+            <span>
+              Advanced tools — label mode and re-segment
+              <span class="mt-1 block text-caption text-faint">
+                Hidden in friend mode so a stray keypress can't write to the
+                training corpus or rebuild a reviewed session.
+              </span>
+            </span>
+          </label>
+        </div>
+      {/if}
+    </div>
     <JobsBadge />
   </div>
 </header>

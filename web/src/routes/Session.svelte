@@ -347,8 +347,13 @@
     Only render ResegmentPanel for sources that have features cached (ready
     sources). Passing needs_setup sources would attempt to call api.scores()
     on a source with no features file, a guaranteed failure.
+
+    And only in dev mode: re-segmenting destroys manual edits and hand-made
+    rallies, which makes it a tuning tool, not a review tool -- friend mode
+    keeps it behind the Advanced toggle (spec 2026-08-26, "friend mode hides
+    tuning tools").
   -->
-  {#if readySources.length > 0}
+  {#if appmode.current === 'dev' && readySources.length > 0}
     <ResegmentPanel
       sources={readySources}
       rallies={detail.rallies}
