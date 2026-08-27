@@ -106,6 +106,23 @@
   let noteBuffer = $state('')
 
   function startNoteEdit(item: ReelItem): void {
+    // Commit the note already being edited before opening this one. The
+    // natural gesture for captioning a whole reel is type, click the next
+    // row's note, type again -- and before this guard, every click down the
+    // list silently discarded the text above it (a real reviewer lost a full
+    // pass of notes this way, 2026-08-26). This is NOT the blur-commit the
+    // comment on saveNote forbids: it fires only on an explicit click on
+    // another note control, so Escape and Cancel still discard, and there is
+    // no trailing-blur path that could re-save discarded text. The open
+    // item is looked up by key rather than captured -- `items` is the
+    // live prop, and the row being left may have re-rendered since.
+    if (editingNote !== null) {
+      const open = items.find((i) => spanKey(i) === editingNote)
+      const note = open ? normalizedItemNote(noteBuffer) : null
+      if (open && note !== null && note !== open.note) {
+        onnote(open, note)
+      }
+    }
     noteBuffer = item.note
     editingNote = spanKey(item)
   }

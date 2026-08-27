@@ -266,6 +266,47 @@ describe('ReelItemList notes', () => {
     expect(noteInput()!.value).toBe('deep lob')
   })
 
+  it('commits an open edit when the next note field is clicked', () => {
+    // The gesture that lost a full pass of notes (2026-08-26): type a note,
+    // click the next row's note, type, click on -- each click used to
+    // silently discard the text above it. Switching rows must commit first.
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: { items: [item(1000), item(9000)], oncommit: vi.fn(), onremove: vi.fn(), onnote },
+    })
+    flushSync()
+    const notes = host.querySelectorAll('[data-note]')
+    ;(notes[0] as HTMLButtonElement).click()
+    flushSync()
+    typeInto(noteInput()!, 'match point')
+    flushSync()
+    ;(host.querySelectorAll('[data-note]')[0] as HTMLButtonElement).click() // second row's button (first is now an input)
+    flushSync()
+    expect(onnote).toHaveBeenCalledTimes(1)
+    expect(onnote.mock.calls[0][0].start_ms).toBe(1000)
+    expect(onnote.mock.calls[0][1]).toBe('match point')
+    // And the second row's editor is open, pre-filled empty.
+    expect(noteInput()!.value).toBe('')
+  })
+
+  it('does not re-commit an unchanged note on switch', () => {
+    const onnote = vi.fn()
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000, { note: 'deep lob' }), item(9000)],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote,
+      },
+    })
+    flushSync()
+    ;(host.querySelectorAll('[data-note]')[0] as HTMLButtonElement).click()
+    flushSync()
+    ;(host.querySelectorAll('[data-note]')[0] as HTMLButtonElement).click()
+    flushSync()
+    expect(onnote).not.toHaveBeenCalled()
+  })
+
   it('commits the trimmed note through onnote on Save', () => {
     const onnote = vi.fn()
     component = mount(ReelItemList, {
