@@ -37,5 +37,22 @@ echo "    $SQL_COUNT migrations present"
 echo "==> app"
 (cd src-tauri && "$CARGO/cargo" tauri build --target aarch64-apple-darwin)
 
+# A dmg built from a stale binary is indistinguishable from a good one by
+# eye, and it cost two rounds of "the fix isn't working" -- the fix was in the
+# source and not in the artifact. Cargo's own freshness tracking missed it
+# because tauri's build script output is not always invalidated by an edit to
+# build.rs or capabilities/.
+echo "==> verifying the app is newer than the sources that built it"
+APP_BIN="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/SplitStep.app/Contents/MacOS/splitstep-app"
+[ -f "$APP_BIN" ] || APP_BIN="src-tauri/target/aarch64-apple-darwin/release/splitstep-app"
+for src in src-tauri/build.rs src-tauri/tauri.conf.json src-tauri/src/*.rs src-tauri/capabilities/*.json; do
+  if [ "$src" -nt "$APP_BIN" ]; then
+    echo "FATAL: $src is newer than the built app -- the bundle would ship stale code." >&2
+    echo "       Run: touch src-tauri/build.rs && cargo tauri build" >&2
+    exit 1
+  fi
+done
+echo "    app is current"
+
 echo "==> done"
 ls -lh src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
