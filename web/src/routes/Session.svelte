@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ClipsPanel from '../components/ClipsPanel.svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import LabelMode from '../components/LabelMode.svelte'
@@ -9,7 +10,7 @@
   import { api } from '../lib/api'
   import { navigate } from '../lib/router.svelte'
   import { resolveSelectedTab, scopeToSource, sourceTabs } from '../lib/sources'
-  import type { Rally, SessionDetail, Source } from '../lib/types'
+  import type { ExportResult, Rally, SessionDetail, Source } from '../lib/types'
 
   interface Props {
     id: string
@@ -34,6 +35,17 @@
   // itself when null (its own default), so this only needs to be set, never
   // explicitly cleared.
   let timelineRallies = $state<Rally[] | null>(null)
+
+  // The most recent successful export kickoff, threaded down to ClipsPanel
+  // so it can open itself and poll for the clips landing (see QueueMode's
+  // `onexport` prop and ClipsPanel's `exportResult` prop). A fresh object
+  // every call -- ClipsPanel reacts to it by identity, not value, since two
+  // exports can legitimately report an identical `{queued:0,...}` shape and
+  // each is still its own event. Deliberately NOT reset on a session/tab
+  // switch: it names something that already happened, not something scoped
+  // to the currently selected source, and ClipsPanel's own sessionId-swap
+  // effect already clears the poll target that would otherwise read it.
+  let lastExport = $state<ExportResult | null>(null)
 
   // Bumped only when the rally *set* actually needs QueueMode/TimelineMode
   // to remount: the initial load (or a navigation to a different session
@@ -288,6 +300,7 @@
         onopen_timeline={openTimeline}
         onopen_label={openLabel}
         startAtRallyId={focusedRallyId}
+        onexport={(result) => (lastExport = result)}
       />
     {:else if mode === 'label'}
       <LabelMode
@@ -340,4 +353,16 @@
         })}
     />
   {/if}
+
+  <!--
+    Not gated on readySources/tabs the way QuadEditor/ResegmentPanel are --
+    clips already cut are a fact about the session's clips/ folder, not
+    about any one source's detection state, so this stays visible even for
+    a needs_setup-only session (which can still hold clips from before a
+    re-ingest, however unlikely). Outside `{#key rallyRevision}` for the
+    same reason as the two panels above: it owns its own long-lived state
+    (which video's watch is expanded, an in-progress export poll) that a
+    re-segment or a tab switch must not reset by remounting it.
+  -->
+  <ClipsPanel sessionId={id} exportResult={lastExport} />
 {/if}

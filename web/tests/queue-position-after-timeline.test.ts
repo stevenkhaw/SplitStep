@@ -30,6 +30,8 @@ const mockApi = {
   getSource: vi.fn(),
   setup: vi.fn(),
   previewUrl: () => 'about:blank',
+  getSessionClips: vi.fn().mockResolvedValue([]),
+  revealClip: vi.fn().mockResolvedValue({ ok: true }),
 }
 
 vi.mock('../src/lib/api', () => ({ api: mockApi }))

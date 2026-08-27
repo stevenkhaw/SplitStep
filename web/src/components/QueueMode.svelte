@@ -13,7 +13,7 @@
   import { formatDuration, formatTs } from '../lib/time'
   import type { VerdictFlash } from '../lib/flash'
   import type { QueueAction } from '../lib/queue'
-  import type { Rally, SessionDetail, Source } from '../lib/types'
+  import type { ExportResult, Rally, SessionDetail, Source } from '../lib/types'
   import KeyHints from './KeyHints.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
@@ -42,9 +42,16 @@
      * timeline from -- see the constructor call below for why a remount
      * would otherwise lose their place. */
     startAtRallyId?: string | null
+    /** Fired after a point/starred export successfully kicks off (not on
+     * failure, and not for buildReel below -- creating a reel cuts nothing).
+     * Session wires this to ClipsPanel so it can open itself and poll for
+     * the new clips landing, without QueueMode needing to know that panel
+     * exists. Optional so a bare mount (there are none today, but nothing
+     * requires one) does not have to pass a no-op. */
+    onexport?: (result: ExportResult) => void
   }
 
-  let { detail, onopen_timeline, onopen_label, startAtRallyId = null }: Props = $props()
+  let { detail, onopen_timeline, onopen_label, startAtRallyId = null, onexport }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
@@ -234,6 +241,7 @@
       // feedback for the export feature, and rendering it red would read as
       // the request having failed when it did exactly what was asked.
       toaster.push(describeExportResult(which, result), 'info')
+      onexport?.(result)
     } catch (e) {
       toaster.push(`Couldn't export ${exportSetLabel(which)} -- ${String(e)}`)
     }

@@ -98,6 +98,31 @@ export interface ExportResult {
   total: number
 }
 
+/**
+ * One cut clip on disk, as `GET /api/sessions/{id}/clips` reports it --
+ * read straight off the filesystem, not a database row (see
+ * `api_list_clips` in splitstep/api/routes.py). `relpath` is relative to
+ * the session's `clips/` directory (e.g. `"01/1000-9000.mp4"`), NOT to the
+ * library root -- `sessionClipsRelpath`/`clipRevealRelpath` in lib/clips.ts
+ * are what build the library-relative path `POST /api/clips/reveal` wants.
+ */
+export interface Clip {
+  source_idx: number
+  start_ms: number
+  end_ms: number
+  relpath: string
+  size_bytes: number
+}
+
+/** `POST /api/clips/reveal`'s response. `reason` is present only when
+ *  `ok` is false -- today that is exclusively "not on macOS" (see
+ *  `api_reveal_clip`), but the shape leaves room for another reason without
+ *  a breaking change. */
+export interface RevealResult {
+  ok: boolean
+  reason?: string
+}
+
 export interface LabelRecord {
   source_id: string
   span_start_ms: number

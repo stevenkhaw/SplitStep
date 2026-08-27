@@ -1,5 +1,6 @@
 import { ApiError } from './errors'
 import type {
+  Clip,
   ExportResult,
   Job,
   LabelRecord,
@@ -9,6 +10,7 @@ import type {
   ReelDetail,
   ReelMergeResult,
   RenderResult,
+  RevealResult,
   ScoreSeries,
   Session,
   SessionDetail,
@@ -112,6 +114,22 @@ export const api = {
     req<ReelMergeResult>(`/api/sessions/${sessionId}/reels`, {
       method: 'POST',
       body: JSON.stringify({ which }),
+    }),
+
+  // Unwrapped to a plain array here, not left as the server's
+  // `{"clips": [...]}` envelope -- every other list route on this object
+  // (listReels, listPresets, sourceLabels) already hands the caller a bare
+  // array, and ClipsPanel/lib/clips.ts want the same shape to stay
+  // consistent with them.
+  getSessionClips: (sessionId: string) =>
+    req<{ clips: Clip[] }>(`/api/sessions/${sessionId}/clips`).then((r) => r.clips),
+  // `relpath` is library-relative (see RevealBody's docstring in
+  // splitstep/api/routes.py) -- lib/clips.ts's sessionClipsRelpath/
+  // clipRevealRelpath build it, this just posts it.
+  revealClip: (relpath: string) =>
+    req<RevealResult>('/api/clips/reveal', {
+      method: 'POST',
+      body: JSON.stringify({ relpath }),
     }),
 
   star: (id: string, starred: boolean) => post(`/api/rallies/${id}/star`, { starred }),

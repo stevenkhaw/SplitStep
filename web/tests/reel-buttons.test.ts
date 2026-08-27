@@ -23,6 +23,8 @@ const mockApi = {
   getSource: vi.fn(),
   setup: vi.fn(),
   previewUrl: () => 'about:blank',
+  getSessionClips: vi.fn().mockResolvedValue([]),
+  revealClip: vi.fn().mockResolvedValue({ ok: true }),
   exportClips: vi.fn().mockResolvedValue({
     queued: 2, already_cut: 0, in_flight: 0, unavailable: 0, total: 2,
   }),
