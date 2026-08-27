@@ -36,32 +36,43 @@ its 32 clips are swept into per-source folders, and a numbered points reel
 has rendered and been verified frame-by-frame. Backup from before the
 migrations: `library.db.bak-2026-08-26-pre-012` beside the live db.
 
-## Loose ends to pick up first
+## 2026-08-27 overnight update (all three loose ends closed)
 
-1. **The wrapped-note burn has not been eyeballed yet.** I (Steven) still
-   need to: restart `ss serve` (my alias; the running server may predate the
-   wrap/pill/`i / total` burn code), hard-refresh, and hit the green Render
-   on `tiebreaker-full` — its 18 coaching notes are seeded and waiting. When
-   that render lands, extract a frame from a noted clip and *look at it*:
-   this is the first render through the line-wrap path
-   (`splitstep/media/numbered.py` — `_NOTE_SIZE`, `textwrap.wrap(width=48)`
-   are the knobs if a long note looks wrong).
-2. `tiebreaker-starred` got zero seeded notes (its spans' rallies carry
-   none) — expected, but confirm I agree.
-3. Deferred small follow-ups from the Phase-1 reviews are listed at the
-   bottom of `.superpowers/sdd/progress-phase1-friend-readiness.md` — fold
-   them into the next phase's plan rather than doing them loose.
+1. **Wrapped-note burn: verified.** Steven restarted serve (00:58, after the
+   wrap commit) and rendered `tiebreaker-full` numbered (01:09); the
+   overnight session then extracted frames at 2.0 s / 180.9 s / 73.0 s and
+   eyeballed them — counter pill correct on noted and unnoted clips, the
+   112-char note wraps to three per-line pills, no clipping. Nothing to fix.
+2. `tiebreaker-starred` was deleted outright (only `tiebreaker-full`
+   remains) — the zero-seeded-notes question is moot.
+3. The Phase-1 deferred follow-ups are folded into the Phase 2 plan as its
+   Task 9 (`docs/superpowers/plans/2026-08-27-friend-mode-ui.md`).
+
+Also overnight: **Gate 0 first-pass recorded** in
+`docs/superpowers/plans/2026-08-27-gate0-fence-mount-first-look.md` — read
+it before touching detection. Short version: `analyze_view` validated in
+both directions (fence mount 0.128 → `pair`, high confidence; the 08-26
+evening clip 0.0499 → `subject`, a knife-edge one part in five hundred
+below the boundary), but the fence footage is same-side drills, not
+cross-net play, and on a busy venue `both_present` saturates at 99.5%
+(strangers inside the quad's top band) while the audio term measures the
+venue again — every confidence sits in a 0.56–0.686 band. No tuning was
+done. What moves it: a label-mode pass on 2026-08-25 source 01 (72
+candidates, zero labels), and the quad-top-at-far-baseline re-detect
+experiment the doc describes.
 
 ## The roadmap (per the distribution spec)
 
-- **Gate 0, still pending:** a fence-mounted clip sits in the real library's
-  `_inbox`. Run it through the wizard, see what `pair` mode produces — the
-  first real two-player footage the detector has ever seen. Record the
-  verdict in `docs/superpowers/plans/`. Do NOT tune anything without reading
+- **Gate 0: first-pass done (see above); human half remains.** Steven's
+  items: label-mode pass on 2026-08-25 source 01, decide whether same-side
+  drills count as "play", optionally run the quad-redraw experiment. Do NOT
+  tune anything without reading
   `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` first.
-- **Phase 2:** friend-mode UI (hide label mode + re-segment behind a
-  setting; `mode: friend|dev` in the appconfig file), first-run flow,
-  failed-job retry UI. Write its plan fresh against landed code.
+- **Phase 2: plan written, awaiting Steven's review** —
+  `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` (9 tasks: mode flag
+  end to end, dev-only shortcut tags, Advanced toggle, failed-job
+  retry/dismiss + truthful empty-queue copy, first-run flow, wizard copy,
+  library size, Phase-1 debt). Execute only after review.
 - **Phase 3:** Tauri v2 shell + PyInstaller bundle + `.dmg`. The spec's
   Architecture section carries the contract (`resources.py` already resolves
   bundle-first; `--create` is first-run-only in the shell; the 503 no-UI
@@ -94,5 +105,5 @@ migrations: `library.db.bak-2026-08-26-pre-012` beside the live db.
   are `text-accent`, never gray.
 
 Start by reading `CLAUDE.md` and the distribution spec, check `git log
---oneline -15`, then ask me what I want to tackle — likely the render
-verification (loose end 1) or Gate 0.
+--oneline -15`, then ask me what I want to tackle — likely reviewing the
+Phase 2 plan (then executing it), or the Gate 0 human items above.
