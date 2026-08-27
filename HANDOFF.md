@@ -170,6 +170,55 @@ svelte-check 0. The evermeet ffmpeg is **9.0.1** — the same version the concat
 measured misbehaviour was characterised against, so the media layer's guards
 still describe the ffmpeg that ships.
 
+## What the real installs found (2026-08-27, later)
+
+The `.dmg` was tested for real — on Steven's own Mac against the live SanDisk
+library, and then on a **second Mac via a Chrome download**, which is the
+friend path rather than a simulation of it. It works: Gatekeeper → System
+Settings → Open Anyway → runs → finds the drive.
+
+Getting there cost three bugs that every automated check had passed, and they
+share one shape — each survived because the checks stayed on the path the
+build was designed around:
+
+1. **The bundle was unsigned.** Tauri shipped only the signature the linker
+   applies to the arm64 executable, sealing no bundle resources. Unquarantined
+   macOS is lenient, so it ran locally and looked finished; a real download
+   reported **"damaged"**, which has no Open button at all. Fixed with
+   `bundle.macOS.signingIdentity: "-"`.
+2. **The freeze carried no migrations.** `.sql` files are data, and nothing
+   collected them, so the app created a `library.db` with `user_version 0` and
+   no tables. It passed every check because the health check
+   (`/api/config`) never opens the database. `build_app.sh` now counts the
+   migrations in the freeze against the source tree and refuses to build if
+   they differ.
+3. **`back_to_chooser` was denied by Tauri's ACL.** Commands are gated by
+   origin: the launcher is `tauri://localhost` and works, but once a library
+   opens the window is on `http://127.0.0.1:<port>`, a remote origin denied by
+   default. Every test that stayed on the launcher passed. Fixed by
+   `src-tauri/capabilities/default.json`.
+
+**`docs/INSTALL.md` was also wrong** and would have stranded a friend: it led
+with right-click → Open, which Apple removed in macOS 15. The System Settings
+→ Privacy & Security → Open Anyway route is the only one that works now.
+
+The lesson worth carrying: a health endpoint that never touches the database
+cannot tell you the database works, and a test that never crosses an origin
+cannot tell you the origin is allowed.
+
+## Still unproven in the app
+
+- **Creating a new library through the Create button.** Every run so far
+  opened an existing one. The create path is verified only by invoking the
+  bundled server directly — and bug 2 above lived exactly there.
+- **Settings → Change library** since the ACL fix.
+- **The detect-finished notification**, which has never fired on real footage.
+- **A numbered reel rendered from inside the app.** Note the font split: the
+  app burns Roboto Condensed Bold (bundled), the terminal burns Arial Bold
+  (system fallback), so the 2026-08-26 frame-by-frame verification describes
+  the terminal path only. Undecided whether to point dev at the same file or
+  drop the bundled font.
+
 ## The roadmap (per the distribution spec)
 
 - **Gate 0: first-pass done (see above); human half remains.** Steven's
