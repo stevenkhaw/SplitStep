@@ -1,7 +1,9 @@
 import subprocess
+from functools import lru_cache
 
 import pytest
 
+from splitstep import resources
 from splitstep.config import NotEnoughSpace
 from splitstep.db.rallies import replace_rallies
 from splitstep.db.reels import add_items, create_reel, get_reel
@@ -10,6 +12,30 @@ from splitstep.detect.segment import Interval
 from splitstep.jobs.handlers import HANDLERS, handle_reel
 from splitstep.media.clips import clip_relpath
 from splitstep.media.probe import probe
+from splitstep.media.transcode import TranscodeError
+
+
+@lru_cache(maxsize=1)
+def _has_drawtext() -> bool:
+    """Whether the resolved ffmpeg was actually built with the drawtext filter.
+
+    Homebrew's default `ffmpeg` formula (unlike `ffmpeg-full`) ships without
+    libfreetype/libfontconfig, so `drawtext` is simply absent from `-filters`
+    output -- not a missing font, a missing filter, and no font path fixes
+    it. `drawtext_filters` itself is pure and fully covered without ffmpeg in
+    tests/test_numbered.py; these two tests additionally prove the real
+    encode runs end to end, which needs a build that has the filter at all.
+    """
+    out = subprocess.run(
+        [resources.ffmpeg_exe(), "-filters"], capture_output=True, text=True, check=False
+    )
+    return "drawtext" in out.stdout
+
+
+_NO_DRAWTEXT_REASON = (
+    "this machine's ffmpeg lacks the drawtext filter (built without "
+    "libfreetype/libfontconfig) -- install ffmpeg-full to exercise this end to end"
+)
 
 
 def _real_clip(path, seconds=1.0):
@@ -132,6 +158,82 @@ def test_handle_reel_checks_free_space_first(library, conn, reel_of_two, monkeyp
     with pytest.raises(NotEnoughSpace):
         handle_reel(library, {"reel_id": reel_of_two["reel"]["id"]})
     assert not (library.reels_dir / "2026-08-18-points.mp4").exists()
+
+
+@pytest.mark.skipif(not _has_drawtext(), reason=_NO_DRAWTEXT_REASON)
+def test_handle_reel_numbered_burns_a_counter_and_note_and_cleans_up(
+    library, conn, reel_of_two
+):
+    fx = reel_of_two
+    # One item gets a note, the other is left blank -- the empty-notes case
+    # is covered separately below, but this exercises both branches of
+    # drawtext_filters in the same render.
+    conn.execute(
+        "UPDATE reel_items SET note = ? WHERE source_id = ? AND start_ms = ? AND end_ms = ?",
+        ("match point", fx["source_id"], 1000, 5000),
+    )
+    conn.commit()
+    parts = _cut_all(library, fx)
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    dst = library.reels_dir / "2026-08-18-points.mp4"
+    assert dst.exists()
+    total = sum(probe(p).duration_ms for p in parts)
+    assert abs(probe(dst).duration_ms - total) <= 500
+
+    # The dot-prefixed intermediate dir is cleaned up regardless of outcome --
+    # a stray one would sit forever in reels/ and confuse a plain listing.
+    leftovers = [p for p in library.reels_dir.iterdir() if ".numbered." in p.name]
+    assert leftovers == []
+
+    row = get_reel(conn, fx["reel"]["id"])
+    assert row["rendered_path"] == "reels/2026-08-18-points.mp4"
+    assert row["dirty"] == 0
+
+
+@pytest.mark.skipif(not _has_drawtext(), reason=_NO_DRAWTEXT_REASON)
+def test_handle_reel_numbered_with_no_notes_still_renders(library, conn, reel_of_two):
+    # Every item's note is "" by default (see add_items) -- drawtext_filters
+    # falls back to counter-only, and the render must still succeed.
+    fx = reel_of_two
+    parts = _cut_all(library, fx)
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    dst = library.reels_dir / "2026-08-18-points.mp4"
+    assert dst.exists()
+    total = sum(probe(p).duration_ms for p in parts)
+    assert abs(probe(dst).duration_ms - total) <= 500
+
+
+def test_handle_reel_numbered_cleans_up_the_temp_dir_on_a_failed_encode(
+    library, conn, reel_of_two, monkeypatch
+):
+    """The cleanup must run even when an intermediate's own encode raises --
+    `shutil.rmtree(tmp_dir, ignore_errors=True)` sits in a `finally`
+    specifically so a real drawtext/font failure never leaves a stray
+    `.<slug>.numbered.<hex>/` directory behind in reels/, and so that the
+    encode's own exception is what propagates rather than something from
+    cleanup. Forced via monkeypatch rather than relying on this machine's
+    ffmpeg lacking drawtext, so it holds regardless of the local build.
+    """
+    import splitstep.jobs.handlers as handlers_mod
+
+    fx = reel_of_two
+    _cut_all(library, fx)
+
+    def _boom(*_a, **_k):
+        raise TranscodeError("synthetic failure for the cleanup test")
+
+    monkeypatch.setattr(handlers_mod, "make_numbered_intermediate", _boom)
+
+    with pytest.raises(TranscodeError, match="synthetic failure"):
+        handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    assert not (library.reels_dir / "2026-08-18-points.mp4").exists()
+    assert list(library.reels_dir.iterdir()) == []
+    assert get_reel(conn, fx["reel"]["id"])["dirty"] == 1
 
 
 def test_a_reencode_fallback_still_marks_the_reel_rendered(

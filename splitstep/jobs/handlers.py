@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from splitstep import resources
 from splitstep.config import Library
 from splitstep.db import jobs as jobq
 from splitstep.db.rallies import replace_rallies, set_clip_path
@@ -31,6 +32,7 @@ from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
 from splitstep.media.concat import concat_clips
 from splitstep.media.files import find_original
+from splitstep.media.numbered import make_numbered_intermediate
 from splitstep.media.probe import display_size, probe
 from splitstep.media.transcode import (
     HLG_PROFILE,
@@ -483,17 +485,53 @@ def handle_reel(library: Library, payload: dict,
     inputs = clip_paths(library, items)
     dst = library.reels_dir / f"{reel['slug']}.mp4"
 
-    # A -c copy remux is about the sum of its inputs. The re-encode fallback
-    # can land either side of that, so double it -- and refusing early beats
-    # dying at 90% of a twenty-minute reel, which is the whole point of the
-    # check.
-    library.require_free(sum(p.stat().st_size for p in inputs) * 2)
+    if payload.get("numbered"):
+        # Space: every input re-encoded (~input size again) plus the concat
+        # of the copies -- triple the plain render's bound, and the same
+        # refuse-early rationale.
+        library.require_free(sum(p.stat().st_size for p in inputs) * 3)
+        # Clips exist (the missing check above), so the profile was locked
+        # when they were exported -- or they predate migration 011, which is
+        # exactly what HLG_PROFILE is the legacy answer for.
+        profile = get_color_profile(conn) or HLG_PROFILE
+        font = resources.drawtext_font()
+        tmp_dir = library.reels_dir / f".{reel['slug']}.numbered.{uuid.uuid4().hex[:8]}"
+        tmp_dir.mkdir(parents=True)
+        try:
+            intermediates: list[Path] = []
+            total = len(items)
+            for i, (item, src) in enumerate(zip(items, inputs), start=1):
+                dst_i = tmp_dir / f"{i:03d}.mp4"
+                make_numbered_intermediate(
+                    src, dst_i,
+                    counter=f"{i}/{total}",
+                    note=item.note,
+                    color_profile=profile,
+                    font=font,
+                )
+                intermediates.append(dst_i)
+                # One coarse tick per finished clip: the per-clip encode is
+                # the unit a human waits through, and threading ffmpeg's own
+                # progress through N sequential encodes would need offset
+                # bookkeeping this job does not otherwise carry.
+                progress(i / (total + 1))
+            mode = concat_clips(intermediates, dst, on_progress=progress)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    else:
+        # A -c copy remux is about the sum of its inputs. The re-encode
+        # fallback can land either side of that, so double it -- and
+        # refusing early beats dying at 90% of a twenty-minute reel, which is
+        # the whole point of the check.
+        library.require_free(sum(p.stat().st_size for p in inputs) * 2)
 
-    # progress is threaded through to the re-encode fallback only -- the
-    # copy is effectively instantaneous, and `activeJobsLabel` suppresses the
-    # percentage entirely until a job reports one, so a copy simply shows the
-    # job count. The fallback is minutes on a real reel and is worth a bar.
-    mode = concat_clips(inputs, dst, on_progress=progress)
+        # progress is threaded through to the re-encode fallback only -- the
+        # copy is effectively instantaneous, and `activeJobsLabel` suppresses
+        # the percentage entirely until a job reports one, so a copy simply
+        # shows the job count. The fallback is minutes on a real reel and is
+        # worth a bar.
+        mode = concat_clips(inputs, dst, on_progress=progress)
+
     if mode == "reencode":
         # concat_clips already logged the mismatch that caused this; this
         # line is what ties it to a reel by name in the same log.

@@ -9,6 +9,7 @@ tree for the SPA. That keeps the dev loop byte-identical while making a
 frozen app self-contained.
 """
 
+import os
 import platform
 import shutil
 import sys
@@ -69,3 +70,28 @@ def spa_dist() -> Path:
     if bundled is not None and (bundled / "web_dist" / "index.html").is_file():
         return bundled / "web_dist"
     return Path(__file__).parent.parent / "web" / "dist"
+
+
+# macOS system faces drawtext can use directly, most specific first. .ttf
+# only -- .ttc collections are inconsistently handled by fontfile=. The
+# bundled font (Phase 3 ships an OFL face) wins when present; the env var
+# is the escape hatch for a Mac without these paths.
+_SYSTEM_FONTS = (
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
+
+
+def drawtext_font() -> str:
+    bundled = _bundled("font.ttf")
+    if bundled is not None:
+        return str(bundled)
+    env = os.environ.get("SPLITSTEP_FONT")
+    if env and Path(env).is_file():
+        return env
+    for candidate in _SYSTEM_FONTS:
+        if Path(candidate).is_file():
+            return candidate
+    raise RuntimeError(
+        "No font for the numbered overlay. Set SPLITSTEP_FONT to a .ttf path."
+    )
