@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { appmode } from '../lib/appmode.svelte'
+  import { emptyQueueCopy } from '../lib/status'
   import { describeExportResult, exportSetLabel } from '../lib/export'
   import { flashFor } from '../lib/flash'
   import { isEditableTarget } from '../lib/keyboard'
@@ -19,6 +21,10 @@
 
   interface Props {
     detail: SessionDetail
+    /** Status of the source this queue is scoped to (the session's own
+     * status when no tab is selected) -- what the empty state's copy keys
+     * on, so a failed source reads as failed instead of "wait". */
+    sourceStatus: string
     /** `liveRallies` is this session's live-merged snapshot (see
      * QueueController.liveSnapshot) -- passed along so TimelineMode's
      * OverviewBand can color a rally starred/rejected earlier in this queue
@@ -51,7 +57,14 @@
     onexport?: (result: ExportResult) => void
   }
 
-  let { detail, onopen_timeline, onopen_label, startAtRallyId = null, onexport }: Props = $props()
+  let {
+    detail,
+    sourceStatus,
+    onopen_timeline,
+    onopen_label,
+    startAtRallyId = null,
+    onexport,
+  }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
   // machine is constructed once per mounted QueueMode and owns its own
@@ -459,14 +472,16 @@
 {#if stats.total === 0}
   <!-- Finding 5: zero rallies and "finished reviewing" are otherwise
        indistinguishable (`new QueueController([]).current` is undefined
-       either way). Naming the actual cause here -- nothing detected yet, or
-       the threshold produced none -- points at what to do next instead of
-       misreporting a session that was never reviewed as reviewed. -->
+       either way). Naming the actual cause here -- failed, still running,
+       or genuinely zero -- points at what to do next instead of
+       misreporting a session that was never reviewed as reviewed. The
+       sentence itself lives in lib/status.ts (emptyQueueCopy) because it
+       branches on source status and app mode, and copy with branches is
+       logic. -->
   <section class="rounded-lg border border-line p-8 text-center">
     <h2 class="text-title font-semibold">No rallies to review</h2>
     <p class="mt-2 font-data text-body text-dim">
-      Nothing has been detected for this session yet, or the current threshold produced zero
-      rallies. Re-segment at a lower threshold below, or wait for detection to finish.
+      {emptyQueueCopy(sourceStatus, appmode.current)}
     </p>
   </section>
 {:else if !current}

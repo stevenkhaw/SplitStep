@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reelStatus, sessionStatus } from '../src/lib/status'
+import { emptyQueueCopy, reelStatus, sessionStatus } from '../src/lib/status'
 import type { Reel, Session } from '../src/lib/types'
 
 function session(over: Partial<Session> = {}): Session {
@@ -101,5 +101,27 @@ describe('reelStatus', () => {
   // stale to replace, it has simply never been built.
   it('does not call an unrendered reel stale', () => {
     expect(reelStatus(reel({ dirty: 1 })).label).toBe('Not rendered')
+  })
+})
+
+describe('emptyQueueCopy', () => {
+  // A failed source must not promise progress ("wait for detection to
+  // finish" when nothing is coming), and friend mode must not point at a
+  // re-segment panel it cannot see.
+  it('names the failure and where to retry it', () => {
+    expect(emptyQueueCopy('failed', 'dev')).toMatch(/failed/i)
+    expect(emptyQueueCopy('failed', 'dev')).toMatch(/retry/i)
+    expect(emptyQueueCopy('failed', 'friend')).not.toMatch(/re-segment/i)
+  })
+
+  it('says detection is still running for anything short of ready', () => {
+    for (const s of ['ingesting', 'building', 'detecting', 'needs_setup']) {
+      expect(emptyQueueCopy(s, 'dev')).toMatch(/still running|on its way/i)
+    }
+  })
+
+  it('points dev at the re-segment panel and friend at nothing it cannot see', () => {
+    expect(emptyQueueCopy('ready', 'dev')).toMatch(/re-segment/i)
+    expect(emptyQueueCopy('ready', 'friend')).not.toMatch(/re-segment|threshold/i)
   })
 })

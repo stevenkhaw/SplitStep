@@ -88,6 +88,9 @@ export interface Job {
   status: string
   progress: number
   error: string | null
+  /** The traceback behind the one-sentence `error` (Phase 1's split). Only
+   *  ever shown behind a disclosure -- the sentence is the message. */
+  error_detail: string | null
   /** The two timestamps /api/jobs has always sent and the client used to
    *  drop on the floor. `created_at` is when the work was asked for, which
    *  is the only start the schema records -- claim() flips status without

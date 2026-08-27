@@ -173,6 +173,7 @@ export const api = {
     post(`/api/sources/${sourceId}/preset`, { preset_id }),
 
   jobs: () => req<Job[]>('/api/jobs'),
+  retryJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
 
   config: () => req<AppConfig>('/api/config'),
   setMode: (mode: AppMode) =>

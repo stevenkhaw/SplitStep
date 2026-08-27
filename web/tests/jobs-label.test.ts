@@ -12,6 +12,7 @@ function job(over: Partial<Job> = {}): Job {
     status: 'running',
     progress: 0,
     error: null,
+    error_detail: null,
     created_at: at(0),
     finished_at: null,
     ...over,
@@ -135,6 +136,30 @@ describe('activeJobsLabel', () => {
       job({ status: 'queued' }),
     ]
     expect(activeJobsLabel(jobs, T0)).toBe('Cutting clips · 0s · +2 queued')
+  })
+})
+
+describe('failed-job rows', () => {
+  it('dismissed failed jobs leave the panel; active jobs cannot be dismissed away', () => {
+    const jobs = [
+      job({ id: 'a', status: 'failed', created_at: at(0) }),
+      job({ id: 'b', status: 'running', created_at: at(1) }),
+    ]
+    // 'b' is in the dismissed set but running -- dismissal only ever hides
+    // failures, so a job that got requeued and is running again reappears.
+    expect(jobRows(jobs, T0 + 5000, new Set(['a', 'b'])).map((r) => r.id)).toEqual(['b'])
+  })
+
+  it('failed rows carry retryability and the expandable detail', () => {
+    const [row] = jobRows(
+      [job({ status: 'failed', error: 'boom', error_detail: 'Traceback ...' })],
+      T0,
+    )
+    expect(row.canRetry).toBe(true)
+    expect(row.detail).toBe('Traceback ...')
+    const [run] = jobRows([job({ status: 'running' })], T0)
+    expect(run.canRetry).toBe(false)
+    expect(run.detail).toBeNull()
   })
 })
 

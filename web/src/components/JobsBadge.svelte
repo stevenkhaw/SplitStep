@@ -30,9 +30,28 @@
     }
   })
 
+  // In-memory on purpose: a dismissal means "stop showing me this corpse",
+  // and a restart re-listing old failures is honest, not a bug. Reassigned
+  // (not mutated) so the $derived below sees it.
+  let dismissed = $state<ReadonlySet<string>>(new Set())
+  let retrying = $state<string | null>(null)
+
+  async function retry(id: string) {
+    retrying = id
+    try {
+      await api.retryJob(id)
+      jobs = await api.jobs()
+    } catch {
+      // A 409 means the job is no longer failed -- the next poll shows its
+      // real state either way; nothing useful to add here.
+    } finally {
+      retrying = null
+    }
+  }
+
   const label = $derived(activeJobsLabel(jobs, nowMs))
-  const rows = $derived(jobRows(jobs, nowMs))
-  const failed = $derived(jobs.filter((j) => j.status === 'failed'))
+  const rows = $derived(jobRows(jobs, nowMs, dismissed))
+  const failed = $derived(jobs.filter((j) => j.status === 'failed' && !dismissed.has(j.id)))
 
   // Closes itself once the queue drains and nothing failed: the badge is the
   // only control that dismisses the panel, and it stops rendering at the
@@ -128,6 +147,32 @@
             {#if r.error}
               <li class="border-b border-line px-3 pb-2 font-data text-caption text-danger">
                 {r.error}
+              </li>
+            {/if}
+            {#if r.canRetry}
+              <li class="flex items-center gap-4 border-b border-line px-3 pb-2 font-data text-caption">
+                <button
+                  type="button"
+                  class="text-accent hover:underline disabled:opacity-50"
+                  disabled={retrying === r.id}
+                  onclick={() => retry(r.id)}
+                >
+                  {retrying === r.id ? 'Retrying…' : 'Retry'}
+                </button>
+                <button
+                  type="button"
+                  class="text-accent hover:underline"
+                  onclick={() => (dismissed = new Set([...dismissed, r.id]))}
+                >
+                  Dismiss
+                </button>
+                {#if r.detail}
+                  <details class="min-w-0 flex-1">
+                    <summary class="cursor-pointer text-faint select-none">detail</summary>
+                    <pre class="mt-1 max-h-40 overflow-x-auto overflow-y-auto text-caption
+                                whitespace-pre text-dim">{r.detail}</pre>
+                  </details>
+                {/if}
               </li>
             {/if}
           {/each}

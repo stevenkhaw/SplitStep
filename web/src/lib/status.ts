@@ -1,4 +1,4 @@
-import type { Reel, Session } from './types'
+import type { AppMode, Reel, Session } from './types'
 
 /**
  * How a list card should present a status.
@@ -49,6 +49,27 @@ export function sessionStatus(s: Session): StatusBadge {
  * watchable, it is merely out of date, and collapsing "never rendered" and
  * "stale" would hide that there is something to watch right now.
  */
+/**
+ * The empty-queue sentence, by why the queue is empty.
+ *
+ * The hardcoded copy this replaces promised "wait for detection to finish"
+ * unconditionally -- a lie for a failed source, where nothing is coming --
+ * and pointed at the re-segment panel, which friend mode cannot see. The
+ * status decides whether progress is actually pending; the app mode decides
+ * whether the re-segment pointer names something on screen.
+ */
+export function emptyQueueCopy(sourceStatus: string, appMode: AppMode): string {
+  if (sourceStatus === 'failed') {
+    return 'Detection failed for this video — open the jobs badge above to retry it.'
+  }
+  if (sourceStatus !== 'ready' && sourceStatus !== 'reviewed') {
+    return 'No rallies yet — detection is still running.'
+  }
+  return appMode === 'dev'
+    ? 'The current threshold produced zero rallies. Re-segment at a lower threshold below.'
+    : 'No rallies were found in this video.'
+}
+
 export function reelStatus(r: Reel): StatusBadge {
   if (r.item_count === 0) return { label: 'Empty', tone: 'quiet' }
   // `dirty` is set whenever the item list changes, so a rendered reel whose

@@ -104,6 +104,12 @@ export interface JobRow {
   elapsed: string | null
   progress: number
   error: string | null
+  /** The traceback, rendered only behind a disclosure. */
+  detail: string | null
+  /** Mirrors the server's rule (POST /api/jobs/{id}/retry is 409 for
+   *  anything not failed), so the panel never offers a button the server
+   *  would refuse. */
+  canRetry: boolean
 }
 
 /**
@@ -115,11 +121,20 @@ export interface JobRow {
  * are the one thing here the reviewer may have to act on, and the error text
  * is what says which.
  */
-export function jobRows(jobs: Job[], nowMs: number): JobRow[] {
+export function jobRows(
+  jobs: Job[],
+  nowMs: number,
+  dismissed: ReadonlySet<string> = new Set(),
+): JobRow[] {
   const byAge = (a: Job, b: Job) => startedMs(a) - startedMs(b)
   const running = jobs.filter((j) => j.status === 'running').sort(byAge)
   const queued = jobs.filter((j) => j.status === 'queued').sort(byAge)
-  const failed = jobs.filter((j) => j.status === 'failed').sort(byAge)
+  // Dismissal filters failures only: it means "stop showing me this
+  // corpse", and a dismissed job that got retried and is running again is
+  // new information the panel must show.
+  const failed = jobs
+    .filter((j) => j.status === 'failed' && !dismissed.has(j.id))
+    .sort(byAge)
 
   const since = Math.min(...[...running, ...queued].map(startedMs))
 
@@ -130,5 +145,7 @@ export function jobRows(jobs: Job[], nowMs: number): JobRow[] {
     elapsed: j.status === 'running' ? formatElapsed(nowMs - since) : null,
     progress: j.progress || 0,
     error: j.error,
+    detail: j.error_detail ?? null,
+    canRetry: j.status === 'failed',
   }))
 }

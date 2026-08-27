@@ -303,6 +303,10 @@
     {#if mode === 'queue'}
       <QueueMode
         detail={scopeToSource(detail, selectedSourceId)}
+        sourceStatus={selectedSourceId
+          ? (detail.sources.find((s) => s.id === selectedSourceId)?.status ??
+            detail.session.status)
+          : detail.session.status}
         onopen_timeline={openTimeline}
         onopen_label={openLabel}
         startAtRallyId={focusedRallyId}
