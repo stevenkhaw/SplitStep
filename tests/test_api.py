@@ -714,6 +714,21 @@ def test_jobs_route_carries_error_detail(client, conn, seeded):
     assert failed["error_detail"] == "Traceback..."
 
 
+def test_import_cleans_its_temp_file_when_the_replace_fails(client, library, monkeypatch):
+    # The finally-block's unlink was verified by inspection during Phase 1;
+    # this is the regression test that inspection promised. os.replace is the
+    # last step of the stream, so failing it exercises the full cleanup path.
+    import splitstep.api.routes as routes_mod
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(routes_mod.os, "replace", boom)
+    with pytest.raises(OSError):
+        client.post("/api/import", files={"file": ("IMG_1.MOV", b"fake video bytes")})
+    assert [p.name for p in library.inbox.iterdir()] == []
+
+
 def test_library_stats_sums_the_tree(client, library):
     (library.root / "sessions").mkdir(exist_ok=True)
     (library.root / "sessions" / "blob.bin").write_bytes(b"x" * 2048)

@@ -4,7 +4,7 @@ import time
 import pytest
 
 from splitstep.db.schema import connect, migrate
-from splitstep.watcher import is_stable, scan_inbox
+from splitstep.watcher import is_ingestible_name, is_stable, scan_inbox
 
 
 @pytest.fixture
@@ -73,3 +73,20 @@ def test_non_video_files_are_logged_once_not_every_scan(library, conn, caplog):
         scan_inbox(library, conn, settle_s=0.01, reported=reported)
     mentions = [r for r in caplog.records if "match.webm" in r.getMessage()]
     assert len(mentions) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "ingestible"),
+    [
+        ("IMG_0001.MOV", True),
+        ("match.mp4", True),
+        (".hidden.mp4", False),   # dot-prefixed: the watcher skips dotfiles on purpose
+        ("notes.txt", False),
+        ("mp4", False),           # a bare suffix has no suffix of its own
+    ],
+)
+def test_is_ingestible_name_is_the_single_rule(name, ingestible):
+    # The watcher, /api/import's 415, and /api/inbox's unsupported listing
+    # all answer "would the watcher pick this up?" -- three hand-rolled
+    # copies of the rule is how ".hidden.mp4" got stuck invisible in Phase 1.
+    assert is_ingestible_name(name) is ingestible

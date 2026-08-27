@@ -78,7 +78,7 @@ from splitstep.reels import (
     resolve_items,
 )
 from splitstep.setup import queue_setup
-from splitstep.watcher import VIDEO_SUFFIXES
+from splitstep.watcher import VIDEO_SUFFIXES, is_ingestible_name
 
 from .media import range_response
 
@@ -963,7 +963,7 @@ def api_import(request: Request, file: UploadFile):
     # forever, while this route still returned 200. ".mp4" alone still has
     # no suffix once stripped ("mp4"), so it correctly falls through to 415.
     name = name.lstrip(".")
-    if not name or Path(name).suffix.lower() not in VIDEO_SUFFIXES:
+    if not name or not is_ingestible_name(name):
         raise HTTPException(
             status_code=415,
             detail="Not a video file. Supported: "
@@ -997,7 +997,7 @@ def api_inbox(request: Request):
     unsupported = sorted(
         p.name for p in library.inbox.iterdir()
         if p.is_file() and not p.name.startswith(".")
-        and p.suffix.lower() not in VIDEO_SUFFIXES
+        and not is_ingestible_name(p.name)
     )
     failed = []
     failed_dir = library.inbox / "failed"

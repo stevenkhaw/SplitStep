@@ -5,8 +5,9 @@ import pytest
 from splitstep.config import Library, NotEnoughSpace
 from splitstep.db.jobs import enqueue, has_pending_clip
 from splitstep.db.rallies import replace_rallies
+from splitstep.db.settings import get_color_profile
 from splitstep.detect.segment import Interval
-from splitstep.jobs.handlers import handle_clip
+from splitstep.jobs.handlers import handle_clip, handle_ingest
 from splitstep.media.clips import clip_relpath
 from splitstep.media.probe import probe
 from splitstep.media.transcode import CLIP_HEIGHT, CLIP_WIDTH
@@ -159,3 +160,41 @@ def test_handle_clip_without_a_rally_id_still_cuts(library, conn, a_rally):
     payload = {k: v for k, v in a_rally["payload"].items() if k != "rally_id"}
     handle_clip(library, payload)
     assert _clip_path(library, a_rally["source"], 200, 1200).exists()
+
+
+def test_first_export_locks_a_non_hlg_profile_end_to_end(library, conn, tmp_path):
+    """A bt709 source in a fresh library locks bt709 and encodes bt709 output.
+
+    The per-library colour profile shipped with only default-profile (HLG)
+    coverage of the encode path; this is the end-to-end test at the *other*
+    profile the Phase-1 review asked for before Phase 3 leans on it. bt709
+    throughout is what a phone with HDR off records -- the exact friend
+    scenario the per-library lock exists for.
+
+    setparams as a filter, not -color_* output flags, for the same measured
+    reason as the hlg_setparams fixture: with a lavfi input the flags
+    silently drop primaries and transfer.
+    """
+    sdr_params = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
+    sample = tmp_path / "sdr.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-vf", sdr_params,
+         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(sample)],
+        check=True, capture_output=True,
+    )
+    dropped = library.inbox / "IMG_8000.MOV"
+    dropped.write_bytes(sample.read_bytes())
+    handle_ingest(library, {"path": str(dropped)})
+    row = conn.execute("SELECT * FROM sources").fetchone()
+    replace_rallies(conn, row["session_id"], row["id"], [Interval(200, 1200, 0.8)])
+
+    handle_clip(library, {"source_id": row["id"], "start_ms": 200, "end_ms": 1200})
+
+    sdr = ("tv", "bt709", "bt709", "bt709")
+    assert get_color_profile(conn) == sdr
+    dst = library.clips_dir(row["session_id"]) / clip_relpath(row["idx"], 200, 1200)
+    info = probe(dst)
+    assert (info.color_range, info.color_space, info.color_transfer,
+            info.color_primaries) == sdr

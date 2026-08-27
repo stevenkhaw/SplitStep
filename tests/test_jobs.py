@@ -597,3 +597,15 @@ def test_retry_requeues_a_failed_job_and_clears_its_error(conn):
 def test_retry_refuses_a_job_that_did_not_fail(conn):
     job_id = jobq.enqueue(conn, "detect", {"source_id": "s"})
     assert jobq.retry(conn, job_id) is False
+
+
+def test_error_summary_edge_paths():
+    # The contract the jobs badge leans on: always one line, never empty,
+    # never a payload dump. Documented here rather than redesigned -- the
+    # cap is a plain slice, no ellipsis.
+    from splitstep.jobs.worker import _error_summary
+
+    assert _error_summary(RuntimeError()) == "RuntimeError"
+    assert _error_summary(ValueError("first line\nsecond line")) == "first line"
+    assert _error_summary(RuntimeError("x" * 500)) == "x" * 300
+    assert _error_summary(ValueError("  \n\npadded\n")) == "padded"

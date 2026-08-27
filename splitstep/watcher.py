@@ -15,6 +15,16 @@ VIDEO_SUFFIXES = frozenset({".mov", ".mp4", ".m4v", ".avi", ".mkv"})
 SCAN_INTERVAL_S = 5.0
 
 
+def is_ingestible_name(name: str) -> bool:
+    """The one definition of "the watcher will pick this up": not
+    dot-prefixed, and carrying a video suffix. `/api/import`'s 415 check and
+    `/api/inbox`'s unsupported listing both mirror the watcher's rule --
+    three hand-rolled copies drifting apart is how ".hidden.mp4" got stuck
+    invisible during Phase 1.
+    """
+    return not name.startswith(".") and Path(name).suffix.lower() in VIDEO_SUFFIXES
+
+
 def is_stable(path: Path, settle_s: float = 3.0, poll_s: float = 0.5) -> bool:
     """True once the file size has not changed for settle_s.
 
@@ -59,7 +69,10 @@ def scan_inbox(
     for path in sorted(library.inbox.iterdir()):
         if not path.is_file() or path.name.startswith("."):
             continue
-        if path.suffix.lower() not in VIDEO_SUFFIXES:
+        if not is_ingestible_name(path.name):
+            # Only a wrong suffix reaches here -- dotfiles were skipped
+            # silently above, so this branch is exactly "a real file the
+            # user probably meant to ingest".
             # Once per file, not once per 5-second scan: the set is the
             # watcher's memory. Before this, a .webm dropped in the inbox
             # vanished silently, forever -- no log line, no UI signal.
