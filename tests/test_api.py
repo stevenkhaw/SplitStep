@@ -653,6 +653,25 @@ def test_missing_spa_serves_an_explanation_not_a_blank_page(library, tmp_path):
     assert "npm run build" in r.text
 
 
+def test_spa_index_must_revalidate_but_hashed_assets_need_not(library, tmp_path):
+    # A cached index.html keeps naming the PREVIOUS build's hashed bundle,
+    # so an open browser runs the old app through restarts and plain
+    # refreshes -- measured live before _SpaStaticFiles existed. no-cache
+    # forces revalidation (the 304 path stays); the hashed assets are
+    # immutable by construction, a new build names new files.
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<script src='/assets/index-abc.js'></script>")
+    (dist / "assets" / "index-abc.js").write_text("//js")
+    with TestClient(create_app(library, spa_dist=dist)) as c:
+        index = c.get("/")
+        asset = c.get("/assets/index-abc.js")
+    assert index.status_code == 200
+    assert index.headers["cache-control"] == "no-cache"
+    assert asset.status_code == 200
+    assert "cache-control" not in asset.headers
+
+
 def test_detect_route_queues_a_full_detect(client, conn, seeded):
     conn.execute("UPDATE sources SET status='ready' WHERE id=?", (seeded["source_id"],))
     conn.commit()
