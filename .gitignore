@@ -44,3 +44,6 @@ packaging/build/
 packaging/dist/
 packaging/vendor/
 web/dist-launcher/
+
+src-tauri/target/
+src-tauri/gen/
