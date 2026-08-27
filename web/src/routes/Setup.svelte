@@ -251,4 +251,15 @@
   >
     {busy ? 'working…' : 'start detection'}
   </button>
+  <!-- The why and the cost, stated at the moment of commitment (spec §Phase
+       2): the quad's purpose was previously explained only inside
+       QuadEditor's session-page copy, and the twenty-minute encode+detect
+       surprised anyone who expected an upload-style progress bar. -->
+  <p class="mt-3 text-caption text-dim">
+    Outlining your court keeps players on the next court out of your rallies.
+  </p>
+  <p class="mt-1 text-caption text-faint">
+    Detection takes roughly 20 minutes for an hour of 4K footage; you can keep
+    using the app while it runs.
+  </p>
 {/if}
