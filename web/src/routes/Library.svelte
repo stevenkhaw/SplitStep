@@ -8,11 +8,22 @@
   import { appmode } from '../lib/appmode.svelte'
   import { startPolling } from '../lib/polling'
   import { navigate } from '../lib/router.svelte'
+  import { formatBytes } from '../lib/size'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
   let settingsOpen = $state(false)
+  // null until it loads; the header renders nothing rather than a
+  // placeholder that would churn. Fetched once per visit -- the number
+  // moves at ingest/export pace, not poll pace.
+  let libraryBytes = $state<number | null>(null)
+  $effect(() => {
+    api
+      .libraryStats()
+      .then((s) => (libraryBytes = s.bytes))
+      .catch(() => {})
+  })
   let error = $state<unknown>(null)
   // Session.svelte already has a "Loading…" state for its in-flight fetch;
   // this didn't, so the empty-library copy ("Nothing yet...") was what a
@@ -112,6 +123,11 @@
 <header class="mb-6 flex items-baseline justify-between">
   <h1 class="text-display font-semibold">Sessions</h1>
   <div class="flex items-center gap-4">
+    {#if libraryBytes !== null}
+      <!-- The keep-everything policy's one disk affordance: informational,
+           no action attached (spec 2026-08-26). -->
+      <span class="font-data text-data text-faint">{formatBytes(libraryBytes)}</span>
+    {/if}
     <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
             onclick={() => navigate('/reels')}>Reels</button>
     <div class="relative">

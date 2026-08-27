@@ -10,6 +10,9 @@ const mockApi = {
   // what these assertions were actually catching.
   frameUrl: () => 'about:blank',
   jobs: vi.fn().mockResolvedValue([]),
+  // The header now renders the library size; an unmocked call would reject
+  // the whole mount the same way a missing frameUrl did above.
+  libraryStats: vi.fn().mockResolvedValue({ bytes: 0 }),
 }
 
 vi.mock('../src/lib/router.svelte', () => ({
@@ -412,13 +415,12 @@ describe('Library', () => {
     flushSync()
 
     await vi.waitFor(() => {
-      expect(target.querySelector('span.font-data')).not.toBeNull()
+      expect(target.querySelector('li span.font-data')).not.toBeNull()
     })
 
-    // The header's Reels link is also .font-mono, so scope to the span the
-    // session row renders its summary into -- the header control is a
-    // button, not a span.
-    const summary = target.querySelector('span.font-data')
+    // Scoped to the list row: the header also renders font-data spans now
+    // (the library size), so the bare selector would grab the wrong one.
+    const summary = target.querySelector('li span.font-data')
     // `●` and `★` rather than `P` and `★`: the card now uses the same two
     // markers the queue's own tally does, so the same glyph means the same
     // thing on both screens.

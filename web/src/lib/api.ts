@@ -188,6 +188,8 @@ export const api = {
     return req<{ name: string }>('/api/import', { method: 'POST', body })
   },
 
+  libraryStats: () => req<{ bytes: number }>('/api/library/stats'),
+
   config: () => req<AppConfig>('/api/config'),
   setMode: (mode: AppMode) =>
     req<AppConfig>('/api/config/mode', { method: 'POST', body: JSON.stringify({ mode }) }),

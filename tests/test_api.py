@@ -714,6 +714,13 @@ def test_jobs_route_carries_error_detail(client, conn, seeded):
     assert failed["error_detail"] == "Traceback..."
 
 
+def test_library_stats_sums_the_tree(client, library):
+    (library.root / "sessions").mkdir(exist_ok=True)
+    (library.root / "sessions" / "blob.bin").write_bytes(b"x" * 2048)
+    total = client.get("/api/library/stats").json()["bytes"]
+    assert total >= 2048  # >=: library.db and friends also live in the tree
+
+
 def test_config_roundtrip(client, tmp_path, monkeypatch):
     # Point the config file into tmp: this route writes the developer's real
     # per-user config otherwise, and a test that mutates ~/Library is a test

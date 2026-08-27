@@ -880,6 +880,27 @@ def api_setup(source_id: str, body: SetupBody, request: Request):
     return {"job_id": job_id}
 
 
+@router.get("/api/library/stats")
+def api_library_stats(request: Request):
+    """Total bytes under the library root.
+
+    Keep-everything is policy (Reclaim Space is rejected, see CLAUDE.md), so
+    this number is the app's single disk affordance -- informational, with no
+    action attached. A walk is file-count-bound, not byte-bound: a library is
+    a few files per source, so a few hundred stats per call. Only the Library
+    page calls it, once per visit, never from a poll.
+    """
+    library = _library(request)
+    total = 0
+    for root, _dirs, files in os.walk(library.root):
+        for name in files:
+            try:
+                total += os.stat(os.path.join(root, name)).st_size
+            except OSError:
+                continue  # a file deleted mid-walk is not an error
+    return {"bytes": total}
+
+
 class ModeBody(BaseModel):
     # Validated by pydantic rather than in the handler so an unknown mode is
     # a 422 like every other malformed body in this file, not a bespoke 400.
