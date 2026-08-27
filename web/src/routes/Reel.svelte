@@ -274,6 +274,21 @@
     }
   }
 
+  // "Where is the file" for the render itself, mirroring the session page's
+  // clips panel: rendered_path was dead text here while the answer sat one
+  // POST away. Not routed through `mutate` -- revealing changes no server
+  // state and must work even while a mutation is in flight.
+  function revealRendered(): void {
+    const relpath = detail?.reel.rendered_path
+    if (!relpath) return
+    api
+      .revealClip(relpath)
+      .then((r) => {
+        if (!r.ok) toaster.push(r.reason ?? "Couldn't reveal the file.")
+      })
+      .catch((e) => toaster.push(`Couldn't reveal the file -- ${String(e)}`))
+  }
+
   function confirmDelete(): void {
     confirmingDelete = false
     // Routed through `mutate` like every other action on this page, so a
@@ -444,10 +459,19 @@
       >Delete reel</button>
     {/if}
 
-    <span class="ml-auto font-data text-data text-faint">
+    <span class="ml-auto flex items-center gap-2 font-data text-data text-faint">
       {items.length} clips{detail.reel.rendered_path && !detail.reel.dirty
         ? ` · ${detail.reel.rendered_path}`
         : ''}
+      <!-- Visible whenever a rendered file exists, dirty or not -- a stale
+           render is still a real file someone may want to grab. -->
+      {#if detail.reel.rendered_path}
+        <button
+          data-reveal-rendered
+          class="text-dim hover:text-fg motion-safe:transition-colors"
+          onclick={revealRendered}
+        >reveal file</button>
+      {/if}
     </span>
   </div>
 
