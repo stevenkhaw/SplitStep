@@ -290,3 +290,25 @@ def test_set_item_note_round_trips(conn, seeded):
 def test_set_item_note_on_a_missing_item_is_false(conn, seeded):
     reel = create_reel(conn, "r")
     assert set_item_note(conn, reel["id"], seeded["source_id"], 1, 2, "x") is False
+
+
+def test_set_item_note_marks_the_reel_dirty(conn, seeded):
+    # A numbered render burns the note into the file, so a note edit after a
+    # render means the file no longer shows what the reel says -- the same
+    # staleness signal a membership change raises.
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 2000)])
+    mark_rendered(conn, reel["id"], "reels/r.mp4",
+                  {(seeded["source_id"], 1000, 2000)})
+    assert get_reel(conn, reel["id"])["dirty"] == 0
+    set_item_note(conn, reel["id"], seeded["source_id"], 1000, 2000, "match point")
+    assert get_reel(conn, reel["id"])["dirty"] == 1
+
+
+def test_a_missed_note_write_does_not_mark_dirty(conn, seeded):
+    reel = create_reel(conn, "r")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 2000)])
+    mark_rendered(conn, reel["id"], "reels/r.mp4",
+                  {(seeded["source_id"], 1000, 2000)})
+    set_item_note(conn, reel["id"], seeded["source_id"], 1, 2, "x")
+    assert get_reel(conn, reel["id"])["dirty"] == 0

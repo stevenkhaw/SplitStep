@@ -12,6 +12,9 @@ dependencies = [
     "watchdog>=5.0",
     "platformdirs>=4.0",
     "python-multipart>=0.0.9",
+    # Load-bearing directly (media/numbered.py renders the overlay PNG), not
+    # just transitively via ultralytics -- the server fails to import without it.
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]

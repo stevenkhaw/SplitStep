@@ -179,12 +179,23 @@ def set_item_note(
 ) -> bool:
     """Set one item's note, keyed by the span like every reel-item write.
     False when the reel has no such item -- the caller turns that into a 404
-    rather than this function guessing."""
+    rather than this function guessing.
+
+    Marks the reel dirty like the membership writes do: a numbered render
+    burns the note into the file, so a changed note means the last render no
+    longer shows what the reel now says. For a plain render the flag is
+    slightly over-eager -- nothing burned changes -- but dirty means "a
+    re-render would differ from the file on disk", and whether it would
+    differ depends on the render kind nothing here records. Over-warning
+    costs one re-render; under-warning ships a reel whose caption lies.
+    """
     cur = conn.execute(
         "UPDATE reel_items SET note = ? WHERE reel_id = ? AND source_id = ?"
         " AND start_ms = ? AND end_ms = ?",
         (note, reel_id, source_id, start_ms, end_ms),
     )
+    if cur.rowcount == 1:
+        _mark_dirty(conn, reel_id)
     conn.commit()
     return cur.rowcount == 1
 
