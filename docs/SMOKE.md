@@ -91,7 +91,12 @@ Still open below.
 - [ ] Eject the drive, relaunch: "Your library is not connected", naming the
       path, with the picker available
 - [ ] Plug the drive back in, pick it, and land back in your sessions
-- [ ] Settings → Change library → the chooser lists both libraries
+- [ ] Settings → Change library → the chooser lists both libraries.
+      This FAILED on a real second Mac with "Command back_to_chooser not
+      allowed by ACL": Tauri denies app commands from the sidecar's
+      http://127.0.0.1 origin unless a capability grants it, and every test
+      that stayed on the launcher passed because the launcher is a local
+      origin. Fixed by src-tauri/capabilities/default.json — re-verify.
 - [ ] Switch to the other one and back; nothing was moved or lost
 
 ## Known-unknown
