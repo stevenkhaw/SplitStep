@@ -61,6 +61,45 @@ done. What moves it: a label-mode pass on 2026-08-25 source 01 (72
 candidates, zero labels), and the quad-top-at-far-baseline re-detect
 experiment the doc describes.
 
+## Phase 2 is done — built, reviewed, fixed, merged (2026-08-27, overnight)
+
+The friend-mode UI shipped as 12 commits on `worktree-phase2-friend-mode`,
+fast-forwarded onto master and pushed. **837 Python + 628 web tests green,
+ruff clean, svelte-check 0 errors, vite build clean** — all five run after
+the last edit, in the worktree, before the merge.
+
+All nine planned tasks landed: the mode flag end to end (`GET`/`POST
+/api/config/mode` over `~/Library/Application Support/splitstep/config.json`,
+mirrored client-side by `lib/appmode.svelte.ts`), dev-only shortcut tags,
+the Advanced toggle hiding the tuning tools, failed-job retry/dismiss,
+truthful empty-queue copy, a first-run flow replacing the inbox-path empty
+state, wizard copy explaining why the quad matters, library size on the
+sessions page, and the Phase-1 debt fold-in.
+
+It was then code-reviewed across ten angles and the findings applied as one
+commit, `fix: apply the overnight review's findings`. The two worth knowing:
+the sessions page had **two** effects fetching sessions, the second reading
+`sessions.length` while its own callback reassigned it — a self-retriggering
+loop hammering `/api/sessions`; and a dropped file that missed FirstRun's
+target navigated the whole tab away to the video. Both fixed, along with
+atomic config writes, a 503 (not a 500) from `/api/library/stats` on an
+ejected drive, module-scope stores for job dismissals and the library size
+(both were per-instance and reset on every navigation), and QuadEditor
+offering a **"Run detection now"** button instead of telling a friend to go
+type `splitstep detect` in a terminal.
+
+Findings deliberately **not** taken, so nobody re-files them: the
+MODES/Literal/TS-union triplication (the guard is defense in depth), `retry()`
+swallowing network errors (the next poll shows the truth), JobsBadge's
+always-on 1 s clock (pre-existing pattern), and QuadEditor staying visible in
+friend mode (court assignment is core flow, and the detect button makes it a
+complete path rather than a dead end). One real gap was logged rather than
+fixed: **the Session page does not poll while a source is `detecting`** — it
+is pre-existing, and belongs in the Phase 3 plan.
+
+Nothing here has been driven by hand in the browser beyond the reviewer's own
+checks — that is the first morning item below.
+
 ## The roadmap (per the distribution spec)
 
 - **Gate 0: first-pass done (see above); human half remains.** Steven's
@@ -68,11 +107,9 @@ experiment the doc describes.
   drills count as "play", optionally run the quad-redraw experiment. Do NOT
   tune anything without reading
   `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` first.
-- **Phase 2: plan written, awaiting Steven's review** —
-  `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` (9 tasks: mode flag
-  end to end, dev-only shortcut tags, Advanced toggle, failed-job
-  retry/dismiss + truthful empty-queue copy, first-run flow, wizard copy,
-  library size, Phase-1 debt). Execute only after review.
+- **Phase 2: shipped and merged** (see the section above) —
+  `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` for what each of the
+  9 tasks was meant to do. Unreviewed in the running UI.
 - **Phase 3:** Tauri v2 shell + PyInstaller bundle + `.dmg`. The spec's
   Architecture section carries the contract (`resources.py` already resolves
   bundle-first; `--create` is first-run-only in the shell; the 503 no-UI
@@ -105,5 +142,20 @@ experiment the doc describes.
   are `text-accent`, never gray.
 
 Start by reading `CLAUDE.md` and the distribution spec, check `git log
---oneline -15`, then ask me what I want to tackle — likely reviewing the
-Phase 2 plan (then executing it), or the Gate 0 human items above.
+--oneline -15`, then ask me which of these three I want:
+
+1. **Look at Phase 2 in the UI.** `npm run build` then `splitstep serve`, and
+   flip friend/dev with the Settings popover on the sessions page. Worth
+   pushing on: the first-run flow with a real drop, a failed job's retry and
+   dismiss, and QuadEditor's new "Run detection now" button (it confirms
+   first — it costs manual edits and a full detect).
+2. **The Gate 0 human items** in
+   `docs/superpowers/plans/2026-08-27-gate0-fence-mount-first-look.md`: a
+   label-mode pass on 2026-08-25 source 01 (72 candidates, zero labels),
+   the decision on whether same-side drills count as "play", and the
+   quad-top-at-far-baseline redraw experiment. Read
+   `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before
+   tuning anything.
+3. **Phase 3: Tauri v2 shell + PyInstaller bundle + `.dmg`** — the next build
+   phase, and the one that makes the app downloadable. Needs a plan written
+   first; fold in the Session-page detect-polling gap noted above.
