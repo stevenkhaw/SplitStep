@@ -50,6 +50,21 @@ UI iteration wants two terminals — `splitstep serve` for API/media, `npm run d
 for Vite on :5173 (it proxies `/api` and `/media` to :8420). Anything else:
 `npm run build` once, then `serve` alone.
 
+The Mac app (`cargo` lives at `~/.cargo/bin`, not on the default PATH):
+
+```bash
+./packaging/build_app.sh          # assets -> web -> icon -> freeze -> .dmg (~12 min, ~10 GB)
+cd src-tauri && ~/.cargo/bin/cargo test        # the shell's own tests
+cd src-tauri && ~/.cargo/bin/cargo tauri dev   # shell + launcher, no freeze needed
+```
+
+`build_app.sh` is the only supported path to a `.dmg`. It carries three
+guards, each standing where a silent failure already shipped once: the freeze
+must contain as many `.sql` migrations as the source tree, it must contain the
+overlay font, and every Rust source must be older than the built executable.
+Bundling needs ~2.5 GB of headroom beyond the output or `bundle_dmg.sh` fails
+with an unhelpful error.
+
 `pytest` runs with `filterwarnings = ["error"]`; a new warning fails the suite.
 ruff line-length is 100. ffmpeg must be on PATH. YOLO is never run in tests —
 detector output is fixtured or mocked everywhere.
@@ -202,6 +217,54 @@ Preview seeks the **proxy** to each item's span in order, reusing `VideoDeck`
 across sources. It shows 1080p and cannot reveal a `-c copy` artifact (that
 is the duration/parameter checks' job); what it shows exactly is timing.
 
+### The desktop app (Tauri shell + frozen sidecar)
+
+`src-tauri/` is a thin Tauri v2 shell; `packaging/` freezes `splitstep serve`
+with PyInstaller. The window loads `http://127.0.0.1:<port>` — the UI stays
+served by Python, not by Tauri's asset protocol, so `/media` range requests
+and the browser tier behave identically.
+
+**The front layer.** The library chooser is rendered by Tauri from its own
+bundle *before* any Python exists, because `Library.open()` refuses without a
+`library.db` — there is no server to serve a page asking which library the
+server should open. It is a second Vite entry (`web/launcher.html` →
+`web/dist-launcher/`, built by `npm run build:launcher`) sharing `app.css`, so
+`web/dist` stays exactly what the sidecar ships. It is skipped on a normal
+launch: `commands::autoboot` spawns straight into a configured, reachable
+library on a hidden window, and the chooser is only shown for a first run, a
+missing drive, or Settings → Change library.
+
+**Ports.** The shell binds `127.0.0.1:0`, takes the port, drops the listener
+and passes `--port`, retrying on a fresh port if the health check
+(`GET /api/config`) does not answer. A fixed port would collide with a dev
+`splitstep serve` on 8420 — the one machine guaranteed to run both.
+
+**The sidecar dies with the shell, by watching.** Neither
+`RunEvent::ExitRequested` nor `Exit` reaches the handler reliably on macOS, so
+quitting used to leave a gigabyte of Python holding `library.db`. The frozen
+entry point (`packaging/entry.py`) polls `getppid()` and SIGTERMs itself when
+reparented to launchd, which also covers SIGKILL. A pid file reaped on next
+launch is the third line. `entry.py` also reorders argv: `--library` is a
+top-level flag, so it must precede the `serve` subcommand it injects.
+
+**The ACL trap, and it is a trap.** Tauri v2 gates commands by origin.
+`tauri://localhost` (the launcher) is local and permissive; the page the
+sidecar serves is *remote* and denied by default. Two things must agree or a
+command works in the launcher and fails only in the app, only at runtime:
+`generate_handler!` in `main.rs`, and the `COMMANDS` list in `build.rs` that
+generates the `allow-<command>` permissions
+`capabilities/default.json` grants against `http://127.0.0.1:*`. A capability
+cannot grant a permission that does not exist — without the `build.rs` list the
+generated permission set is empty and every capability is powerless.
+
+**Unsigned, ad-hoc signed.** `bundle.macOS.signingIdentity: "-"`. Without it
+Tauri ships only the linker's automatic arm64 signature, which seals no bundle
+resources; unquarantined macOS is lenient, so it runs locally and looks
+finished, while a real download reports **"damaged"** — which, unlike
+"unidentified developer", has no way through. arm64 only. `docs/INSTALL.md`
+is written for the friend: macOS 15 removed the right-click → Open bypass, so
+System Settings → Privacy & Security → Open Anyway is the only route.
+
 ### API
 
 Every route is `def`, not `async def`, so Starlette runs it on a worker thread.
@@ -291,6 +354,27 @@ four had to be retargeted during the migration and would again.
   the `-color_*` output flags silently drop primaries and transfer.
 - **Migrations** are numbered `.sql` files in `splitstep/db/migrations/`, applied
   by `PRAGMA user_version`. Add a file; never edit an applied one.
+- **Anything read at runtime by path must be declared as package data.** The
+  migrations and `splitstep/assets/font.ttf` are both in
+  `[tool.setuptools.package-data]` and both are collected into the freeze by
+  `collect_data_files("splitstep")`. This is not theoretical: the first frozen
+  build shipped with **zero** migrations, created a `library.db` with
+  `user_version 0` and no tables, and passed every check because the health
+  endpoint (`/api/config`) never opens the database. A plain `pip install .`
+  had the same hole. Both now fail the build instead.
+- **The overlay font is committed, not fetched.** `splitstep/assets/font.ttf`
+  is Roboto Condensed instanced to `wght=700` (OFL 1.1). Committed because it
+  is the only way the app and the CLI burn a numbered reel in the same
+  typeface — `overlay_font()` used to find a bundled face inside the frozen
+  app and fall through to macOS Arial Bold everywhere else. Instanced rather
+  than variable because `media/numbered.py` selects no variation and would
+  silently render Regular; assert on `usWeightClass` and the absence of
+  `fvar`, not on the name records, which fontTools does not rewrite.
+- **Verify the artifact, not the source.** Four bugs reached a real install
+  during Phase 3 while every automated check passed, and they share one shape:
+  what was checked was what had been changed, not what would run. A dmg was
+  once built from a binary older than the fix in it. When a build claims to
+  carry a change, confirm it inside the mounted `.dmg`.
 - **`replace_rallies`** runs as one transaction and carries starred/rejected
   across by >50% overlap. Manual boundary edits are intentionally lost — the
   caller confirms first. `det_start_ms`/`det_end_ms` are immutable and record
@@ -374,6 +458,20 @@ four had to be retargeted during the migration and would again.
   pipeline shape or status vocabulary.
 - Video files and `yolo11n.pt` are gitignored; `tests/fixtures/**/*.jsonl` is
   explicitly re-included — golden feature fixtures are source.
+
+## Distribution status
+
+All four phases of the Mac-app plan are merged: server friend-readiness,
+friend-mode UI, the Tauri shell and `.dmg`, and numbered reels. The `.dmg` has
+been installed and run from a Chrome download on a second Mac. What is *not*
+settled is **Gate 0** — detection quality on real footage — which is human
+work, not code; see `docs/superpowers/plans/2026-08-27-gate0-fence-mount-first-look.md`
+and read the 2026-08-20 validation plan before touching any tuning constant.
+
+`docs/SMOKE.md` records what has actually been exercised in the app versus
+what only has tests behind it. Creating a library through the chooser's
+**Create** button and the detect-finished notification are both still
+unexercised by a human.
 
 ## Deferred (not missing by accident)
 

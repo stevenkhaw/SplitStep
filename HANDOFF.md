@@ -15,225 +15,55 @@ the frontend lib/-only-logic rule). The end goal is a downloadable Mac app a
 non-technical friend can use — full spec and phasing in
 `docs/superpowers/specs/2026-08-26-mac-app-distribution-design.md`.
 
-## Where things stand (2026-08-26, end of a long build day)
+## Where things stand (2026-08-27, end of the distribution work)
 
-All merged to master and pushed to origin; 819 Python + 610 web tests green.
-Landed today, in order: Phase 1 "server friend-readiness" (optional
-`--library` via flag → `SPLITSTEP_LIBRARY` → config file; `serve --create`
-requiring an explicit `--library`; bundle-first resource paths; routes for
-import/detect/retry/inbox; job errors as sentence + `error_detail`;
-per-library clip colour profile — migrations 010/011), clips grouped by
-source on disk (`clips/NN/START-END.mp4`, one-time reconcile sweep),
-numbered reels (migration 012; burned counter + note via a **PIL-rendered
-PNG composited with ffmpeg `overlay` — NEVER `drawtext`, my ffmpeg build
-lacks freetype**), per-video tabs on the session page, a Clips panel
-(watch cut clips in full quality in-app, Reveal in Finder), `index.html`
-served `no-cache` (a stale cached SPA cost us an evening — don't undo it),
-and reel notes that inherit from rally notes.
+**SplitStep is a Mac app and it has been installed from a download on a
+second machine.** All four phases of the distribution plan are merged and
+pushed: server friend-readiness, friend-mode UI, the Tauri shell + `.dmg`, and
+numbered reels. `CLAUDE.md` now documents the desktop tier — read its
+"The desktop app" section before touching `src-tauri/` or `packaging/`.
 
-The real library (`/Volumes/SanDisk_2TB/SplitStep`) is migrated through 012,
-its 32 clips are swept into per-source folders, and a numbered points reel
-has rendered and been verified frame-by-frame. Backup from before the
-migrations: `library.db.bak-2026-08-26-pre-012` beside the live db.
+Build a `.dmg` with `./packaging/build_app.sh` (~12 min, ~10 GB free needed).
+Install instructions for a non-technical user are `docs/INSTALL.md`; what has
+actually been exercised by a human is `docs/SMOKE.md`.
 
-## 2026-08-27 overnight update (all three loose ends closed)
+**Nothing in the app is known-broken.** What remains is judgement work:
 
-1. **Wrapped-note burn: verified.** Steven restarted serve (00:58, after the
-   wrap commit) and rendered `tiebreaker-full` numbered (01:09); the
-   overnight session then extracted frames at 2.0 s / 180.9 s / 73.0 s and
-   eyeballed them — counter pill correct on noted and unnoted clips, the
-   112-char note wraps to three per-line pills, no clipping. Nothing to fix.
-2. `tiebreaker-starred` was deleted outright (only `tiebreaker-full`
-   remains) — the zero-seeded-notes question is moot.
-3. The Phase-1 deferred follow-ups are folded into the Phase 2 plan as its
-   Task 9 (`docs/superpowers/plans/2026-08-27-friend-mode-ui.md`).
+1. **Gate 0 — the real open question.** 2026-08-25 source 01 still has 72
+   candidate rallies and **zero labels**. Until that pass exists,
+   `splitstep labels score` cannot measure whether detection is good; Steven's
+   read is that it works well in practice, and the corpus can neither confirm
+   nor contradict that yet. Also open: whether same-side drills count as
+   "play", and the quad-redraw experiment. Read
+   `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before
+   touching a tuning constant.
+2. **Two paths a human has never exercised**: creating a library through the
+   chooser's **Create** button (the migrations bug lived exactly there), and
+   the detect-finished notification, which has never fired on real footage.
+3. **Numbered renders changed typeface.** Both the app and the CLI now burn
+   Roboto Condensed Bold from `splitstep/assets/font.ttf`. Previously the CLI
+   used macOS Arial Bold and only the frozen app used a bundled face, so the
+   2026-08-26 frame-by-frame verification described one path and not the
+   other. Worth one render to eyeball; narrower at the same size.
 
-Also overnight: **Gate 0 first-pass recorded** in
-`docs/superpowers/plans/2026-08-27-gate0-fence-mount-first-look.md` — read
-it before touching detection. Short version: `analyze_view` validated in
-both directions (fence mount 0.128 → `pair`, high confidence; the 08-26
-evening clip 0.0499 → `subject`, a knife-edge one part in five hundred
-below the boundary), but the fence footage is same-side drills, not
-cross-net play, and on a busy venue `both_present` saturates at 99.5%
-(strangers inside the quad's top band) while the audio term measures the
-venue again — every confidence sits in a 0.56–0.686 band. No tuning was
-done. What moves it: a label-mode pass on 2026-08-25 source 01 (72
-candidates, zero labels), and the quad-top-at-far-baseline re-detect
-experiment the doc describes.
+## What Phase 3 cost, and why it is worth reading
 
-## Phase 2 is done — built, reviewed, fixed, merged (2026-08-27, overnight)
+Four bugs reached a real install while every automated check passed. They
+share one shape — **what was checked was what had been changed, not what would
+run**:
 
-The friend-mode UI shipped as 12 commits on `worktree-phase2-friend-mode`,
-fast-forwarded onto master and pushed. **837 Python + 628 web tests green,
-ruff clean, svelte-check 0 errors, vite build clean** — all five run after
-the last edit, in the worktree, before the merge.
+| bug | why every check missed it |
+|---|---|
+| bundle unsigned (linker signature only, no sealed resources) | unquarantined macOS is lenient, so it ran locally and looked finished; a real download said "damaged", which has no way through |
+| freeze carried zero migrations | the health check `/api/config` never opens the database |
+| `back_to_chooser` denied by Tauri's ACL | every test stayed on the launcher, which is a local origin |
+| a `.dmg` built from a binary older than the fix in it | the source was verified instead of the artifact |
 
-All nine planned tasks landed: the mode flag end to end (`GET`/`POST
-/api/config/mode` over `~/Library/Application Support/splitstep/config.json`,
-mirrored client-side by `lib/appmode.svelte.ts`), dev-only shortcut tags,
-the Advanced toggle hiding the tuning tools, failed-job retry/dismiss,
-truthful empty-queue copy, a first-run flow replacing the inbox-path empty
-state, wizard copy explaining why the quad matters, library size on the
-sessions page, and the Phase-1 debt fold-in.
-
-It was then code-reviewed across ten angles and the findings applied as one
-commit, `fix: apply the overnight review's findings`. The two worth knowing:
-the sessions page had **two** effects fetching sessions, the second reading
-`sessions.length` while its own callback reassigned it — a self-retriggering
-loop hammering `/api/sessions`; and a dropped file that missed FirstRun's
-target navigated the whole tab away to the video. Both fixed, along with
-atomic config writes, a 503 (not a 500) from `/api/library/stats` on an
-ejected drive, module-scope stores for job dismissals and the library size
-(both were per-instance and reset on every navigation), and QuadEditor
-offering a **"Run detection now"** button instead of telling a friend to go
-type `splitstep detect` in a terminal.
-
-Findings deliberately **not** taken, so nobody re-files them: the
-MODES/Literal/TS-union triplication (the guard is defense in depth), `retry()`
-swallowing network errors (the next poll shows the truth), JobsBadge's
-always-on 1 s clock (pre-existing pattern), and QuadEditor staying visible in
-friend mode (court assignment is core flow, and the detect button makes it a
-complete path rather than a dead end). One real gap was logged rather than
-fixed: **the Session page does not poll while a source is `detecting`** — it
-is pre-existing, and belongs in the Phase 3 plan.
-
-Nothing here has been driven by hand in the browser beyond the reviewer's own
-checks — that is the first morning item below.
-
-## Phase 3 shipped: there is a `.dmg` (2026-08-27, overnight)
-
-**SplitStep is a Mac app now.** Tauri v2 shell, PyInstaller sidecar, unsigned
-arm64 `.dmg`. Design in
-`docs/superpowers/specs/2026-08-27-phase3-tauri-shell-design.md`, plan in
-`docs/superpowers/plans/2026-08-27-phase3-tauri-shell.md`, install
-instructions for your friend in `docs/INSTALL.md`.
-
-Decided with you in four rounds of questions, so the reasoning is not lost:
-arm64 only, unsigned with the Gatekeeper dance documented, ffmpeg from
-evermeet.cx, icon generated from the design tokens, and the `.dmg` handed
-over as a file rather than hosted.
-
-**The shape that changed:** the library chooser is not a native dialog, it is
-a **front layer** — a real screen, rendered by Tauri from its own bundle,
-before any Python exists. It has to be: `Library.open()` refuses without a
-`library.db`, so there is no server to serve a page asking which library the
-server should open. It is skipped entirely on a normal launch; you see it on
-a first run, when the drive is missing, or when you ask for it from
-Settings → Change library. Switching re-points and never moves anything.
-
-**A Rust port was raised and rejected**, and the reasoning is written into the
-spec so it does not get relitigated: Tauri *is* a webview, so porting means
-abandoning Tauri too, discarding ~20k lines of tested frontend including
-VideoDeck's cross-source seeking, and keeping Python regardless.
-
-Five findings from building it, all fixed, and the first is the one worth
-reading:
-
-1. **The frozen app shipped with no migrations, and it looked like it
-   worked.** `collect_submodules` gathers `.py` files; the migrations are
-   `.sql`, found at runtime via `Path(__file__).parent`. Nothing collected
-   them, so the app created a `library.db` with `user_version 0` and *no
-   tables*, then 500ed on the first route touching the database. Every check
-   I had run passed, because `/api/config` — the health check — never opens
-   the database. Caught only by asking `/api/sessions` from an installed
-   `.app`. Fixed, and `build_app.sh` now counts `.sql` files in the freeze
-   against the source tree and refuses to build if they disagree.
-2. **Quitting leaked the server.** Neither `ExitRequested` nor `Exit` reaches
-   the handler reliably on macOS — verified with `lsof`, the process was
-   sleeping and still LISTENing. Waiting to be told the parent died was the
-   wrong shape; the frozen entry point now watches `getppid()` and SIGTERMs
-   itself when reparented to launchd. That also covers SIGKILL, which no
-   event can. Verified: clean quit under 5 s, and a `kill -9` of the shell
-   also under 5 s.
-3. **Tauri rewrites `../` in bundle resources to an `_up_` segment**, so the
-   server landed at `Resources/_up_/packaging/dist/...` and `server_exe`
-   would have missed it — an app that builds, installs, passes Gatekeeper,
-   opens a window and never starts. Fixed with the map form of `resources`.
-4. **`--library` is a top-level flag, not a `serve` flag**, so the frozen
-   entry point has to reorder argv before injecting the subcommand.
-5. **The bundled font had to be instanced to Bold.** Google Fonts ships
-   Roboto Condensed only as a variable font now, and `media/numbered.py`
-   selects no variation — a variable file would silently render Regular and
-   lighten a burn you verified frame-by-frame at Bold.
-
-There is also a pid-file reaper for anything that still slips past the
-watchdog: the single-instance plugin guards the app, not the server, so a
-stray sidecar would let the next launch put a second worker on one database.
-
-Verified against the shipped artifact, not the dev tree: the `.dmg`
-(**430 MB**) was mounted, the `.app` copied out as an install would, and it
-created a fresh library reaching `user_version 12` with 9 tables, answered
-`/api/sessions`, `/api/jobs`, `/api/library/stats`, `/api/reels` and the SPA
-all 200, spawned its sidecar from inside the bundle on an OS-assigned port,
-and quit clean. Suites: 846 pytest, 650 vitest, 9 cargo tests, ruff clean,
-svelte-check 0. The evermeet ffmpeg is **9.0.1** — the same version the concat demuxer's
-measured misbehaviour was characterised against, so the media layer's guards
-still describe the ffmpeg that ships.
-
-## What the real installs found (2026-08-27, later)
-
-The `.dmg` was tested for real — on Steven's own Mac against the live SanDisk
-library, and then on a **second Mac via a Chrome download**, which is the
-friend path rather than a simulation of it. It works: Gatekeeper → System
-Settings → Open Anyway → runs → finds the drive.
-
-Getting there cost three bugs that every automated check had passed, and they
-share one shape — each survived because the checks stayed on the path the
-build was designed around:
-
-1. **The bundle was unsigned.** Tauri shipped only the signature the linker
-   applies to the arm64 executable, sealing no bundle resources. Unquarantined
-   macOS is lenient, so it ran locally and looked finished; a real download
-   reported **"damaged"**, which has no Open button at all. Fixed with
-   `bundle.macOS.signingIdentity: "-"`.
-2. **The freeze carried no migrations.** `.sql` files are data, and nothing
-   collected them, so the app created a `library.db` with `user_version 0` and
-   no tables. It passed every check because the health check
-   (`/api/config`) never opens the database. `build_app.sh` now counts the
-   migrations in the freeze against the source tree and refuses to build if
-   they differ.
-3. **`back_to_chooser` was denied by Tauri's ACL.** Commands are gated by
-   origin: the launcher is `tauri://localhost` and works, but once a library
-   opens the window is on `http://127.0.0.1:<port>`, a remote origin denied by
-   default. Every test that stayed on the launcher passed. Fixed by
-   `src-tauri/capabilities/default.json`.
-
-**`docs/INSTALL.md` was also wrong** and would have stranded a friend: it led
-with right-click → Open, which Apple removed in macOS 15. The System Settings
-→ Privacy & Security → Open Anyway route is the only one that works now.
-
-The lesson worth carrying: a health endpoint that never touches the database
-cannot tell you the database works, and a test that never crosses an origin
-cannot tell you the origin is allowed.
-
-## Still unproven in the app
-
-- **Creating a new library through the Create button.** Every run so far
-  opened an existing one. The create path is verified only by invoking the
-  bundled server directly — and bug 2 above lived exactly there.
-- **Settings → Change library** since the ACL fix.
-- **The detect-finished notification**, which has never fired on real footage.
-- **A numbered reel rendered from inside the app.** Note the font split: the
-  app burns Roboto Condensed Bold (bundled), the terminal burns Arial Bold
-  (system fallback), so the 2026-08-26 frame-by-frame verification describes
-  the terminal path only. Undecided whether to point dev at the same file or
-  drop the bundled font.
-
-## The roadmap (per the distribution spec)
-
-- **Gate 0: first-pass done (see above); human half remains.** Steven's
-  items: label-mode pass on 2026-08-25 source 01, decide whether same-side
-  drills count as "play", optionally run the quad-redraw experiment. Do NOT
-  tune anything without reading
-  `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` first.
-- **Phase 2: shipped and merged** (see the section above) —
-  `docs/superpowers/plans/2026-08-27-friend-mode-ui.md` for what each of the
-  9 tasks was meant to do. Unreviewed in the running UI.
-- **Phase 3: built and the `.dmg` verified end to end.** See above. What
-  remains is yours: `docs/SMOKE.md`, the clean-account checklist. A second
-  macOS user account is the only honest test of Gatekeeper and a true first
-  run, and the notification-on-detect-finish has never fired against real
-  footage.
+Three now fail the build (`build_app.sh` guards: migration count, overlay font
+present, app newer than its sources), the fourth is a comment in
+`src-tauri/build.rs` tying `COMMANDS` to `generate_handler!`. `docs/INSTALL.md`
+was also wrong in a way that would have stranded the friend: macOS 15 removed
+the right-click → Open bypass.
 
 ## How this project is worked on (hard-won, don't relearn)
 
@@ -243,6 +73,10 @@ cannot tell you the origin is allowed.
   poll. Web: `cd web && npx vitest run` — read the full summary line, a
   truncated tail once hid a failure; `npm run check`; `npm run build`
   (worktrees need `npm install` first).
+- The Mac app: `./packaging/build_app.sh` is the only supported path to a
+  `.dmg`, `cargo` is at `~/.cargo/bin` (not on PATH), and bundling wants
+  ~2.5 GB free beyond the output or `bundle_dmg.sh` fails obscurely. Verify a
+  change landed by mounting the `.dmg`, not by reading the source.
 - Live library changes: sqlite `.backup` first, restart serve, verify
   counts. Never two serve processes on one `library.db`.
 - The colour profile, the span-derived clip paths, and `rally_labels` are
@@ -260,21 +94,7 @@ cannot tell you the origin is allowed.
   Primary action per page = one filled accent button; inline text actions
   are `text-accent`, never gray.
 
-Start by reading `CLAUDE.md` and the distribution spec, check `git log
---oneline -15`, then ask me which of these three I want:
-
-1. **Look at Phase 2 in the UI.** `npm run build` then `splitstep serve`, and
-   flip friend/dev with the Settings popover on the sessions page. Worth
-   pushing on: the first-run flow with a real drop, a failed job's retry and
-   dismiss, and QuadEditor's new "Run detection now" button (it confirms
-   first — it costs manual edits and a full detect).
-2. **The Gate 0 human items** in
-   `docs/superpowers/plans/2026-08-27-gate0-fence-mount-first-look.md`: a
-   label-mode pass on 2026-08-25 source 01 (72 candidates, zero labels),
-   the decision on whether same-side drills count as "play", and the
-   quad-top-at-far-baseline redraw experiment. Read
-   `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before
-   tuning anything.
-3. **Phase 3: Tauri v2 shell + PyInstaller bundle + `.dmg`** — the next build
-   phase, and the one that makes the app downloadable. Needs a plan written
-   first; fold in the Session-page detect-polling gap noted above.
+Start by reading `CLAUDE.md` — it now covers the desktop tier too — then
+`git log --oneline -15`, then ask me what I want. The build phases are done;
+what is left is Gate 0 (the label pass on 2026-08-25 source 01) and whatever
+using the app for real turns up.
