@@ -37,6 +37,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["splitstep*"]
 
+# The migrations and the overlay font are read at runtime by path, so they
+# have to travel with the package, not just with the source tree.
+[tool.setuptools.package-data]
+splitstep = ["db/migrations/*.sql", "assets/*.ttf"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = [

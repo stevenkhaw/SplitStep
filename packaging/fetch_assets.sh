@@ -23,26 +23,10 @@ done
 # for `font.ttf` in the bundle first and falls back to macOS system faces --
 # the fallback works today, but a bundled face is what makes the render
 # identical on a machine whose Supplemental fonts were never installed.
-# Google Fonts ships Roboto Condensed only as a variable font now, and
-# media/numbered.py calls ImageFont.truetype with no variation selected --
-# which would silently take the Regular instance and lighten a burn that was
-# verified frame-by-frame on 2026-08-26 at Bold. Instancing to wght=700 here
-# means the shipped file IS Bold, so numbered.py needs no change and the
-# render is identical on a Mac that has no Arial installed.
-if [ ! -f font.ttf ]; then
-  echo "fetching font"
-  curl -fL "https://github.com/google/fonts/raw/main/ofl/robotocondensed/RobotoCondensed%5Bwght%5D.ttf" -o font-variable.ttf
-  "$PYTHON_BIN" - <<'PYEOF'
-from fontTools import ttLib
-from fontTools.varLib import instancer
-
-font = ttLib.TTFont("font-variable.ttf")
-instancer.instantiateVariableFont(font, {"wght": 700}, inplace=True)
-font.save("font.ttf")
-print("instanced Roboto Condensed at wght=700")
-PYEOF
-  rm -f font-variable.ttf
-fi
+# The overlay font is NOT fetched here: it lives in splitstep/assets/font.ttf
+# as package data, so a dev checkout and the frozen app burn the same face.
+# It was instanced to wght=700 once and committed -- see that directory's
+# README for why it is not the variable file.
 
 # The detector weights, from the dev checkout (gitignored at the repo root).
 if [ ! -f yolo11n.pt ]; then

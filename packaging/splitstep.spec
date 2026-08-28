@@ -24,7 +24,9 @@ WEB_DIST = REPO / "web" / "dist"
 
 # Flat at the bundle root, because resources.py's _bundled() looks for bare
 # names there. web_dist/ is the one nested entry, matching spa_dist().
-# splitstep's OWN data files, and this line is load-bearing. The migrations
+# splitstep's OWN data files, and this line is load-bearing. It carries
+# both the migrations and assets/font.ttf, which is why neither is listed
+# explicitly below. The migrations
 # are .sql files found at runtime via `Path(__file__).parent / "migrations"`,
 # and collect_submodules() gathers .py modules only -- so without this the
 # frozen app shipped with zero migrations, created a library.db with
@@ -33,7 +35,6 @@ WEB_DIST = REPO / "web" / "dist"
 # which is exactly what made the failure look like a working app.
 datas = collect_data_files("splitstep") + collect_data_files("ultralytics") + [
     (str(VENDOR / "yolo11n.pt"), "."),
-    (str(VENDOR / "font.ttf"), "."),
     (str(WEB_DIST), "web_dist"),
 ]
 hiddenimports = (

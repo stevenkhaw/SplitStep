@@ -49,24 +49,52 @@ def test_unfrozen_spa_is_the_source_tree():
     assert resources.spa_dist().parts[-2:] == ("web", "dist")
 
 
-def test_bundled_font_wins(frozen):
+def test_the_packaged_font_is_what_ships(monkeypatch):
+    # The point of committing it: a dev checkout and the frozen app resolve
+    # the SAME file, so one reel cannot burn in two typefaces depending on
+    # which one rendered it.
+    monkeypatch.delenv("SPLITSTEP_FONT", raising=False)
+    found = Path(resources.overlay_font())
+    assert found.is_file()
+    assert found.parts[-2:] == ("assets", "font.ttf")
+
+
+def test_the_packaged_font_beats_a_bundle_root_copy(frozen, monkeypatch):
+    # An older bundle put font.ttf at the bundle root. Package data wins, so
+    # a stale root copy cannot reintroduce the split.
+    monkeypatch.delenv("SPLITSTEP_FONT", raising=False)
     (frozen / "font.ttf").write_bytes(b"")
+    assert Path(resources.overlay_font()).parts[-2:] == ("assets", "font.ttf")
+
+
+def test_a_bundle_root_font_still_resolves_without_package_data(
+    frozen, monkeypatch
+):
+    # Belt and braces for an install whose package data went missing.
+    monkeypatch.delenv("SPLITSTEP_FONT", raising=False)
+    (frozen / "font.ttf").write_bytes(b"")
+    monkeypatch.setattr(
+        resources, "__file__", str(frozen / "nowhere" / "resources.py")
+    )
     assert resources.overlay_font() == str(frozen / "font.ttf")
 
 
-def test_env_font_is_the_escape_hatch_for_a_mac_without_the_system_paths(
-    monkeypatch, tmp_path
-):
+def test_env_font_overrides_even_the_packaged_one(monkeypatch, tmp_path):
     font = tmp_path / "custom.ttf"
     font.write_bytes(b"")
     monkeypatch.setenv("SPLITSTEP_FONT", str(font))
     assert resources.overlay_font() == str(font)
 
 
-def test_system_font_resolves_on_this_mac(monkeypatch):
-    # No bundle, no env override -- this Mac's own Arial Bold/Arial/
-    # Helvetica.ttc must still resolve, since that fallback is the whole
-    # point of the list.
+def test_the_packaged_font_is_a_static_bold(monkeypatch):
+    # media/numbered.py calls ImageFont.truetype without selecting a
+    # variation, so a variable file would render its default instance --
+    # Regular -- and silently lighten a burn that was checked frame by frame.
+    # The weight class and the absence of fvar are what govern that; the name
+    # records do not, which is why this asserts on the former.
+    from fontTools.ttLib import TTFont
+
     monkeypatch.delenv("SPLITSTEP_FONT", raising=False)
-    found = resources.overlay_font()
-    assert Path(found).is_file()
+    face = TTFont(resources.overlay_font())
+    assert face["OS/2"].usWeightClass == 700
+    assert "fvar" not in face, "still variable: would render Regular"

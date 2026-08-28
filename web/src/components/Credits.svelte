@@ -10,6 +10,6 @@
   <span class="text-caption text-dim">Open source</span>
   <span class="mt-1 block text-caption text-faint">
     Detection by Ultralytics YOLO11 (AGPL-3.0). Video by FFmpeg (GPL).
-    Source at github.com/stevenkhaw/SplitStep.
+    Roboto Condensed (SIL OFL 1.1). Source at github.com/stevenkhaw/SplitStep.
   </span>
 </div>

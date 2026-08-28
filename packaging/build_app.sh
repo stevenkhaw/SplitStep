@@ -34,6 +34,15 @@ if [ "$SQL_COUNT" != "$SRC_COUNT" ]; then
 fi
 echo "    $SQL_COUNT migrations present"
 
+# Same class of failure as the migrations: read at runtime by path, invisible
+# until a numbered render is attempted, and it would silently fall back to a
+# different typeface rather than erroring.
+if ! find packaging/dist/splitstep-server -name "font.ttf" | grep -q .; then
+  echo "FATAL: the freeze carries no overlay font" >&2
+  exit 1
+fi
+echo "    overlay font present"
+
 echo "==> app"
 (cd src-tauri && "$CARGO/cargo" tauri build --target aarch64-apple-darwin)
 
