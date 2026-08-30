@@ -1,7 +1,15 @@
 #!/bin/bash
 # Fetch the third-party binaries the bundle ships. Not committed to git --
-# they are large, and their licences are satisfied by the in-app credits note
-# plus the public repo, not by vendoring.
+# they are large, and vendoring them is not what their licences ask for.
+#
+# What the licences DO ask for is not fully satisfied yet, so do not read the
+# absence of these files as the question being closed. ffmpeg here is a
+# GPL-3.0 build (--enable-gpl --enable-version3) and the .dmg redistributes
+# it, which obliges whoever hands over that .dmg to also offer the
+# corresponding source. This comment used to say the obligation was covered by
+# "the in-app credits note plus the public repo": the credits note is real, but
+# the repo is private, so that half was never true. See the FFmpeg section of
+# LICENSE-THIRD-PARTY.md.
 set -euo pipefail
 cd "$(dirname "$0")"
 PYTHON_BIN="${PYTHON_BIN:-$HOME/miniconda3/envs/splitstep/bin/python}"

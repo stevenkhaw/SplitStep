@@ -62,6 +62,24 @@ widely than hand-to-hand, mirror the corresponding FFmpeg source (or a durable
 written offer for it) alongside the `.dmg` rather than relying on a third
 party's site staying up.
 
+## Open: this repository is private
+
+Copyleft obligations attach to *distribution*, and handing someone the `.dmg`
+is distribution. AGPL-3.0 entitles that person to SplitStep's own source, and
+GPL-3.0 entitles them to FFmpeg's — but `github.com/stevenkhaw/SplitStep` is
+private, so the obvious route to the first one does not exist for them. Two
+ways to close it, and they are a choice rather than a bug to fix silently:
+
+1. **Make the repository public.** The `.dmg`, `LICENSE` and this file then all
+   point at something a recipient can actually reach.
+2. **Keep it private and hand the source over directly** to whoever gets a
+   build, along with a written offer for the FFmpeg source.
+
+Doing neither is the only option that is not compliant. Note also that the
+`.dmg` does not currently embed `LICENSE` or this file — `packaging/` was
+written before either existed — so a bundle passed on by itself, without the
+release page around it, carries no licence text at all.
+
 ## AGPL §13 and the loopback server
 
 The AGPL's network clause covers users who interact with the program
