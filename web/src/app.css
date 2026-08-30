@@ -131,6 +131,22 @@
   }
 }
 
+/* The rally counter, when the queue advances. It travels a few pixels rather
+   than cross-fading, so a run of fast presses reads as a series of discrete
+   advances instead of one continuous blur -- the same reasoning the verdict
+   flash is built on, and the same 200ms ceiling, because both fire on a key
+   the reviewer presses hundreds of times a session. */
+@keyframes counter-roll {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* The mark's loading state: the two ball halves step apart and back.
    Declared here for the same reason as `verdict` above -- Tailwind's
    arbitrary-animation syntax can name a keyframe but not define one --
