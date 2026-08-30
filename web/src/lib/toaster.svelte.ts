@@ -60,7 +60,8 @@ export function createToaster(durationMs: number = DEFAULT_DURATION_MS) {
  * badge, the queue/label progress bars, the primary buttons).
  *
  * Solid pills set an explicit dark label. Both tokens are light enough that
- * white-on-fill measures about 2:1, while bg-on-fill clears 6.4:1.
+ * white-on-fill fails -- 3.1:1 on danger, 2.7:1 on accent -- while
+ * bg-on-fill clears 6.3:1 (6.4 on danger, 7.3 on accent).
  */
 export function toastToneClasses(tone: ToastTone, surface: 'solid' | 'muted' = 'solid'): string {
   if (surface === 'muted') {
