@@ -176,7 +176,8 @@ routes. Full-bleed, `bg` at 72% with a backdrop blur, one `line` bottom border.
 - Left: `Mark` at 19px, then the wordmark.
 - Then `Sessions` / `Reels` as tabs. Active is `surface-2` fill plus a `line`
   border and `fg` text; inactive is `dim` text on nothing.
-- Right: the drive chip (name + free space) and Settings.
+- Right: the drive chip (bytes the library occupies, not free space on the
+  drive) and Settings.
 
 Detail routes put the breadcrumb in the page heading (`Sessions › 2026-08-18`),
 replacing the current bare `← library`. Reels stops being reachable from one

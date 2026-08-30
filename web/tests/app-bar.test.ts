@@ -59,4 +59,17 @@ describe('AppBar', () => {
     const el = render()
     expect(el.querySelector('svg circle')).not.toBeNull()
   })
+
+  // The chip's number is /api/library/stats's total bytes under the library
+  // root -- what the library occupies, not what the drive has left. This
+  // branch once shipped it labelled "free", the exact opposite of what it
+  // means; regression guard for that specific word, not just its presence.
+  it('labels the disk figure as used space, never free space', () => {
+    const el = render()
+    const chip = [...el.querySelectorAll('span')].find((n) =>
+      n.textContent?.includes('GB'),
+    )
+    expect(chip?.textContent?.trim()).toBe('33 GB used')
+    expect(chip?.textContent).not.toMatch(/free/i)
+  })
 })

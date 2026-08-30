@@ -106,13 +106,19 @@
   </nav>
 
   <div class="ml-auto flex items-center gap-3">
-    <!-- The keep-everything policy's one disk affordance: informational,
-         no action attached (spec 2026-08-26). It sits with Settings rather
+    <!-- The keep-everything policy's one disk affordance: informational, no
+         action attached (spec 2026-08-26; Reclaim Space is rejected, not
+         deferred -- see CLAUDE.md). The number is `/api/library/stats`'s
+         total bytes under the library root: what the library itself takes
+         up, not what the drive has left. Label it "used", never "free" --
+         this chip once read "33 GB free" on a 2TB drive where 33 GB was the
+         library's own footprint, the exact opposite of free space, and
+         nobody caught it before a user did. It sits with Settings rather
          than beside the nav, because it is status and not a destination --
          which is exactly what it looked like before. -->
     {#if librarySize.bytes !== null}
       <span class="rounded-full border border-line px-2.5 py-1 font-data text-caption text-faint">
-        {formatBytes(librarySize.bytes)} free
+        {formatBytes(librarySize.bytes)} used
       </span>
     {/if}
     <div class="relative">
