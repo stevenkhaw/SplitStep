@@ -316,35 +316,40 @@ court/ball colours, the motion tokens
 (`--transition-duration-quick/calm/slow`, `--ease-out-soft`), `--shadow-card`
 and `--breakpoint-ultra`. Building this repo's own `app.css` with `static`
 swapped for a plain `@theme` (Tailwind 4.3.3) shows nothing here actually
-breaks: the court colours and the motion tokens survive either way, because
-Tailwind keeps a theme variable once its name shows up anywhere in scanned
-source — a raw `var(--color-court)` inside `CourtGround.svelte`'s and
-`Mark.svelte`'s SVG `fill`/`stroke` attributes counts, and so does a raw
+breaks: every utility that depends on one of these tokens still compiles
+correctly either way, `.shadow-card` and the `ultra:` variant included. The
+court colours and the motion tokens survive as raw declarations regardless,
+because Tailwind keeps a theme variable once its name shows up anywhere in
+scanned source — a raw `var(--color-court)` inside `CourtGround.svelte`'s
+and `Mark.svelte`'s SVG `fill`/`stroke` attributes counts, and so does a raw
 `var(--ease-out-soft)` sitting inside an `animate-[…]` arbitrary value,
 neither of which is a utility class Tailwind is supposed to be scanning for.
-`--breakpoint-ultra` survives on its own account too. Only `--shadow-card`'s
-raw declaration actually disappears without `static`, and even then the
-`.shadow-card` utility keeps compiling correctly, because Tailwind bakes its
-box-shadow value straight into the utility rather than deferring to the
-custom property at use time.
+Whether `--shadow-card`'s and `--breakpoint-ultra`'s own raw declarations
+survive turned out to depend on the build path: two independent, careful
+measurements of this exact repository — one through the Vite plugin, one
+through the standalone CLI and then redone through Vite — disagreed with
+each other about which of the two, if either, actually drops.
 
-It stays anyway, on a narrower argument than "necessary": "referenced
-somewhere Tailwind scans" is the compiler's own heuristic, not a documented
-contract, and the one way it could fail — a token quietly stops being
-emitted and the court or the ball renders with empty fills — is invisible to
-every test in this repo. `web/tests/court-ground.test.ts` and
-`web/tests/mark.test.ts` check path counts, ARIA attributes and inline
-opacity; none of them reads a resolved SVG `fill`, and jsdom does not paint
-real CSS regardless. (The belief that `static` was necessary came from
-watching `--color-court` go missing earlier in this branch — but at that
-moment nothing yet referenced it, because `CourtGround.svelte` didn't exist
-yet. A token absent from the compiled CSS proves it's unreferenced, not that
-it needs `static`; check what reads it before reaching for the block.)
-`--shadow-card` and `--breakpoint-ultra` ride in the same block for a
-plainer reason: commit `58e5292` promoted them here, beside the tokens that
-already lived here, when it lifted them out of arbitrary values duplicated
-at their call sites — not because either one depends on `static` to
-survive.
+It stays anyway, on a narrower argument than "necessary" — and that
+disagreement is the argument, not a footnote to it. "Referenced somewhere
+Tailwind scans" is the compiler's own heuristic, not a documented contract,
+and two careful measurements of the same compiler landing on different
+answers is the clearest evidence available that nothing here should lean on
+it. The one way it could fail — a token quietly stops being emitted and the
+court or the ball renders with empty fills — is invisible to every test in
+this repo. `web/tests/court-ground.test.ts` and `web/tests/mark.test.ts`
+check path counts, ARIA attributes and inline opacity; none of them reads a
+resolved SVG `fill`, and jsdom does not resolve `var()` inside one
+regardless. (The belief that `static` was necessary in the first place came
+from watching `--color-court` go missing earlier in this branch — but at
+that moment nothing yet referenced it, because `CourtGround.svelte` didn't
+exist yet. A token absent from the compiled CSS proves it's unreferenced,
+not that it needs `static`; check what reads it before reaching for the
+block.) `--shadow-card` and `--breakpoint-ultra` ride in the same block for
+a plainer, uncontested reason: commit `58e5292` promoted them here, beside
+the tokens that already lived here, when it lifted them out of arbitrary
+values duplicated at their call sites — not because either one is known to
+need `static` to survive.
 
 **There is no accent, deliberately.** A blue button, a blue tab and a blue
 focus ring on every screen state "look here" about chrome that is never the
