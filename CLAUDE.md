@@ -296,26 +296,103 @@ new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
 ### Design tokens
 
-`web/src/app.css` holds the `@theme` block, and it is the only place a colour
-or a type size is chosen. A component reaching for a raw Tailwind palette step
-(`bg-neutral-800`, `text-blue-300`) or an arbitrary size (`text-[11px]`) has
-escaped the system — bring the value back to `app.css` instead.
+`web/src/app.css` holds the `@theme` blocks, and together they are the only
+place a colour or a type size is chosen. A component reaching for a raw
+Tailwind palette step (`bg-neutral-800`, `text-blue-300`) or an arbitrary size
+(`text-[11px]`) has escaped the system — bring the value back to `app.css`
+instead.
 
 Colour: `bg` / `surface` / `surface-2` / `line`, text `fg` / `dim` / `faint`,
-and four semantic tokens — `star`, `point`, `accent`, `danger`. The base ramp
-is violet-shifted rather than neutral grey so the chrome sits with night-court
-footage. All three text tokens clear 4.5:1 on both `bg` and `surface`, which is
-what lets `faint` carry real functional text like the keyboard legend. Filled
-`accent` and `danger` buttons need an explicit `text-bg`: both tokens are light
-enough that a white label measures about 2:1.
+three semantic tokens — `star`, `point`, `danger` — and four court tokens:
+`court`, `court-run`, `court-line`, `ball`. The base ramp is a night hard
+court in navy, because the app's ground is now a doubles court rendered in
+perspective (`lib/court.ts` → `CourtGround.svelte`) and the chrome has to
+sit in the same world as it.
 
-**Reject has no colour, deliberately.** Detection is recall-biased, so
-rejecting is the most frequent action in the app; red would state "error" about
-the routine case. Reject is `text-faint` plus a strikethrough — it recedes.
-That keeps `danger` meaning an actual failure (a failed job, a missing clip, a
-render refusing), which is how the re-segment warning and the `missing` clip
-badge are now coloured. `star` and `point` are different axes, not two grades
-of one, so they are warm and cool rather than one hue twice.
+**Two `@theme` blocks, not one — though only one of them turns out to be
+load-bearing.** The main block above holds every token a Tailwind utility is
+pointed at; a second `@theme static` block sits beside it holding the four
+court/ball colours, the motion tokens
+(`--transition-duration-quick/calm/slow`, `--ease-out-soft`), `--shadow-card`
+and `--breakpoint-ultra`. Building this repo's own `app.css` with `static`
+swapped for a plain `@theme` (Tailwind 4.3.3) shows nothing here actually
+breaks: the court colours and the motion tokens survive either way, because
+Tailwind keeps a theme variable once its name shows up anywhere in scanned
+source — a raw `var(--color-court)` inside `CourtGround.svelte`'s and
+`Mark.svelte`'s SVG `fill`/`stroke` attributes counts, and so does a raw
+`var(--ease-out-soft)` sitting inside an `animate-[…]` arbitrary value,
+neither of which is a utility class Tailwind is supposed to be scanning for.
+`--breakpoint-ultra` survives on its own account too. Only `--shadow-card`'s
+raw declaration actually disappears without `static`, and even then the
+`.shadow-card` utility keeps compiling correctly, because Tailwind bakes its
+box-shadow value straight into the utility rather than deferring to the
+custom property at use time.
+
+It stays anyway, on a narrower argument than "necessary": "referenced
+somewhere Tailwind scans" is the compiler's own heuristic, not a documented
+contract, and the one way it could fail — a token quietly stops being
+emitted and the court or the ball renders with empty fills — is invisible to
+every test in this repo. `web/tests/court-ground.test.ts` and
+`web/tests/mark.test.ts` check path counts, ARIA attributes and inline
+opacity; none of them reads a resolved SVG `fill`, and jsdom does not paint
+real CSS regardless. (The belief that `static` was necessary came from
+watching `--color-court` go missing earlier in this branch — but at that
+moment nothing yet referenced it, because `CourtGround.svelte` didn't exist
+yet. A token absent from the compiled CSS proves it's unreferenced, not that
+it needs `static`; check what reads it before reaching for the block.)
+`--shadow-card` and `--breakpoint-ultra` ride in the same block for a
+plainer reason: commit `58e5292` promoted them here, beside the tokens that
+already lived here, when it lifted them out of arbitrary values duplicated
+at their call sites — not because either one depends on `static` to
+survive.
+
+**There is no accent, deliberately.** A blue button, a blue tab and a blue
+focus ring on every screen state "look here" about chrome that is never the
+point — the footage is the colour. State is fill, outline and weight instead:
+a filled button is `bg-fg` with an explicit `text-bg`, a selected control is
+`border-fg`, a focus ring is `outline-fg` (14.84:1 on surface, far past the
+3:1 an indicator needs). A filled `danger` button needs that same explicit
+`text-bg`, for the reason a filled accent once did too: the token is light
+enough that a white label would clear only 3:1, short of what text needs,
+while `text-bg` clears 6.3:1 — `toaster.svelte.ts`'s solid error pill is the
+one callsite that does this today. The attempt to keep an accent and shift
+it to cyan died on measurement, not taste: against `point` it sat at a 1.14
+ratio, two cyans a reviewer would have to tell apart in a status row. Removing
+it reached sixty-one callsites across nineteen files. The removal commit's
+own message claims sixty-two across eighteen, and both halves of that are
+off: its survey grep was scoped to `*.svelte` and missed
+`lib/toaster.svelte.ts`, a `.ts` file that turns out to carry three callsites
+of its own — but that alone only explains three of the missing files' worth;
+the other eighteen hold fifty-eight, not the sixty-two claimed for them,
+independently of the file the grep missed. `web/tests/tokens.test.ts`'s
+file-content guard walks both extensions, which is what caught the missing
+file; nothing has re-checked the other number until this correction.
+
+**Reject still has no colour**, for the reason it never did: detection is
+recall-biased, rejecting is the most frequent action in the app, and red would
+state "error" about the routine case. `star` and `point` are different axes,
+not two grades of one, so they stay warm against cool rather than one hue
+twice.
+
+**Contrast is a test, not a comment.** `web/tests/tokens.test.ts` parses
+`app.css`'s theme blocks and enforces 4.5:1 for the three text tokens against
+all three grounds and 3:1 for the semantic ones. This exists because `faint`
+has now silently fallen under the line twice — `#74747F` in the 2026-08-23
+pass, `#7186a0` in this one — both times while carrying the keyboard legend.
+
+**The court imposes a layout rule.** Over bare `court`, `dim` measures
+2.41:1 and `faint` 2.09:1. Secondary text therefore never sits on exposed
+ground: it sits on a `surface` card, or `CourtGround`'s scrim brings the
+ground back down beneath it. Only `fg` (5.27:1) may cross bare court.
+
+**Two tiers.** Browse routes render the court at full strength; the session
+route freezes it, drops it to 55% and raises the scrim, because atmosphere
+behind footage you are judging competes with the footage.
+
+**The mark is one drawing in two languages.** `lib/mark.ts` holds the
+geometry, `Mark.svelte` renders it for the app (and is the loading state),
+and `packaging/make_icon.py` mirrors both the constants and the tokens for
+the `.icns`. `tests/test_icon.py` fails if the two stop agreeing.
 
 Type: five roles — `display` / `title` / `body` / `data` / `caption` — not a
 size ramp. Naming sizes by magnitude is what let the whole app collapse into
@@ -323,7 +400,7 @@ size ramp. Naming sizes by magnitude is what let the whole app collapse into
 `tabular-nums`; every timecode, duration, count, threshold and confidence
 belongs in it, or the status line jitters sideways as the playhead ticks.
 
-Video letterboxes stay literal `bg-black` — `bg` is `#0b0b0e` and shows as a
+Video letterboxes stay literal `bg-black` — `bg` is `#080e16` and shows as a
 seam around the frame.
 
 Tests that assert on a class name are asserting on a token, not a palette step;

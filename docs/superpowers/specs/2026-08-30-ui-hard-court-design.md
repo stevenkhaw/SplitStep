@@ -1,6 +1,6 @@
 # Hard court — ground, chrome, mark and icon
 
-Status: design agreed 2026-08-30, not implemented.
+Status: implemented 2026-08-30.
 
 The 2026-08-23 audit fixed what was *wrong* with the frontend: no tokens, a
 collapsed type scale, an unreadable status row, a wall of a keyboard legend,
@@ -48,7 +48,7 @@ and it can say so.
 
 **The chrome carries no hue.** No accent on a button, a tab, a badge, a border
 or a hover. State is fill, outline and weight. `accent` is **deleted as a
-token**, not recoloured — 62 usages across 18 files. Colour survives in exactly
+token**, not recoloured — 61 usages across 19 files. Colour survives in exactly
 three places, all of them data rather than decoration: `star` and `point`,
 which are a rally's verdict and are read at a glance hundreds of times a
 session, and `danger`, which means something has actually failed.
@@ -257,9 +257,11 @@ far baseline is above the near one, the apron encloses the court at every
 aspect ratio tested), and the mark-geometry drift guard described above.
 
 By hand, because jsdom has no `<video>`: the queue at 1440 and at 3440, the
-review tier's court actually quieting, the loader mark during a real detect job,
-and the focus ring being visible on every interactive element with the mouse
-untouched.
+review tier's court actually quieting, the split-ball mark appearing on a
+page's own data load rather than for a running detect job (that indicator
+lives in the jobs badge, a different component the mark does not drive and
+is not driven by), and the focus ring being visible on every interactive
+element with the mouse untouched.
 
 **And the artifact, not the source.** The icon is not real until
 `./packaging/build_app.sh` produces a `.dmg`, it is mounted, and the icon inside
@@ -268,7 +270,7 @@ verifying what changed rather than what runs.
 
 ## 8. Risks
 
-- **`accent` removal is 62 edits across 18 files**, four of which are canvas
+- **`accent` removal is 61 edits across 19 files**, four of which are canvas
   draws reading the variable at runtime (ZoomBand's playhead, ScoreCurve's line,
   QuadCanvas's handles, OverviewBand). Those become `fg`, which is also more
   legible over the score curve than periwinkle was. A missed callsite fails at
