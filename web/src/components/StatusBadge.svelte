@@ -6,7 +6,9 @@
   // `quiet` is bare text rather than a pill: a settled state is the common
   // case, and giving every row a chip makes the two that actually want
   // attention indistinguishable from the rest -- the same failure the raw
-  // status string had.
+  // status string had. `active` is an outline rather than a fill because
+  // the chrome carries no hue: contrast and a border do the work a coloured
+  // background used to.
   const TONE = {
     quiet: 'text-faint',
     active: 'rounded-full border border-fg/50 px-2 py-0.5 text-fg',
