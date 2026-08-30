@@ -9,6 +9,7 @@
   import type { BoundaryFlag, LabelAction, Verdict } from '../lib/labels'
   import type { LabelRecord, SessionDetail, Source } from '../lib/types'
   import KeyHints from './KeyHints.svelte'
+  import Mark from './Mark.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
@@ -246,7 +247,9 @@
 {#if loadError}
   <p class="rounded bg-danger/10 p-3 text-body text-danger">{loadError}</p>
 {:else if !controller}
-  <p class="text-body text-dim">Loading labels…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" label="Loading labels…" />
+  </div>
 {:else if !current}
   <section class="rounded-lg border border-line p-8 text-center">
     <h2 class="text-title font-semibold">Nothing to label</h2>

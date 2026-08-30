@@ -1,5 +1,6 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
+  import Mark from '../components/Mark.svelte'
   import QuadCanvas from '../components/QuadCanvas.svelte'
   import { api } from '../lib/api'
   import { previewTimestamps } from '../lib/preview'
@@ -140,7 +141,9 @@
 {/if}
 
 {#if !source}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else}
   <header class="mb-4">
     <h1 class="text-display font-semibold">Set up source {source.idx}</h1>

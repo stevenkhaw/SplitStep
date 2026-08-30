@@ -3,6 +3,7 @@
   import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
   import LabelMode from '../components/LabelMode.svelte'
+  import Mark from '../components/Mark.svelte'
   import QueueMode from '../components/QueueMode.svelte'
   import QuadEditor from '../components/QuadEditor.svelte'
   import ResegmentPanel from '../components/ResegmentPanel.svelte'
@@ -239,7 +240,9 @@
 {#if error}
   <ErrorNote {error} subject="session" />
 {:else if !detail}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else}
   {#if needsSetupSources.length > 0}
     <div class="mb-4 space-y-2 rounded-lg border border-line bg-surface p-4">

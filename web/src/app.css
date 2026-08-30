@@ -131,6 +131,35 @@
   }
 }
 
+/* The mark's loading state: the two ball halves step apart and back.
+   Declared here for the same reason as `verdict` above -- Tailwind's
+   arbitrary-animation syntax can name a keyframe but not define one --
+   and also because no component in this app has ever carried a Svelte
+   `<style>` block, and this toolchain's component-style preprocessing
+   (`vitePreprocess()` in svelte.config.js, standalone-`resolveConfig`
+   against Vite 6's Environment API) throws under Vitest for *any* such
+   block, content notwithstanding. Filed as a real gap, not routed around
+   silently: `Mark.svelte`'s halves carry `--mk-gap`/`--mk-step` as an
+   inline style computed straight from `lib/mark.ts`'s MARK, and every
+   number below is a multiplier on those two custom properties -- never a
+   pixel value -- so the geometry still has exactly one source. */
+@keyframes mark-step-left {
+  from {
+    transform: translate(calc(var(--mk-gap) * -1), calc(var(--mk-step) * -1));
+  }
+  to {
+    transform: translate(calc(var(--mk-gap) * -2.7), calc(var(--mk-step) * -2.7));
+  }
+}
+@keyframes mark-step-right {
+  from {
+    transform: translate(var(--mk-gap), var(--mk-step));
+  }
+  to {
+    transform: translate(calc(var(--mk-gap) * 2.7), calc(var(--mk-step) * 2.7));
+  }
+}
+
 /* Numbers must not reflow as they tick. The queue's status line updates its
    timecode several times a second and the timeline's rows are read as
    columns, so proportional figures made the layout jitter sideways and

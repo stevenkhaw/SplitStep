@@ -3,6 +3,7 @@
   import ErrorNote from '../components/ErrorNote.svelte'
   import AddRalliesPicker from '../components/AddRalliesPicker.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
+  import Mark from '../components/Mark.svelte'
   import ReelItemList from '../components/ReelItemList.svelte'
   import ReelPreview from '../components/ReelPreview.svelte'
   import { api } from '../lib/api'
@@ -353,7 +354,9 @@
 {#if error}
   <ErrorNote {error} subject="reel" />
 {:else if loading && !detail}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else if detail}
   <div class="mb-4 flex flex-wrap items-center gap-3">
     <button

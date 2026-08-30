@@ -1,6 +1,7 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
   import JobsBadge from '../components/JobsBadge.svelte'
+  import Mark from '../components/Mark.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
@@ -78,7 +79,9 @@
 {#if error}
   <ErrorNote {error} subject="reel" />
 {:else if loading}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else if reels.length === 0}
   <p class="text-body text-dim">
     No reels yet. Finish reviewing a session and compile its points, or name one above.
