@@ -170,7 +170,15 @@
   </header>
 
   <section>
-    <div class="flex items-center gap-3">
+    <!-- rounded border bg-surface, not a bare flex row: the rotation-degree
+         readout between the two buttons is `dim` text with no surface
+         under it otherwise -- this section has no heading and sits right
+         on the court, so a scroll can carry it through browse's 0.18 scrim
+         band the same way the Reel.svelte action bar was carried through
+         it (see that fix's comment). Wrapping the whole row, not just the
+         label, matches that fix and reads better than a lone chip floating
+         between two bordered buttons. -->
+    <div class="flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
       <button
         class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => rotate(-1)}
