@@ -10,9 +10,6 @@ const mockApi = {
   // what these assertions were actually catching.
   frameUrl: () => 'about:blank',
   jobs: vi.fn().mockResolvedValue([]),
-  // The header now renders the library size; an unmocked call would reject
-  // the whole mount the same way a missing frameUrl did above.
-  libraryStats: vi.fn().mockResolvedValue({ bytes: 0 }),
 }
 
 vi.mock('../src/lib/router.svelte', () => ({

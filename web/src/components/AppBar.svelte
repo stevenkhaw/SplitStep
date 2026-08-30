@@ -55,9 +55,34 @@
 />
 
 <header
-  class="sticky top-0 z-30 flex h-13 items-center gap-4 border-b border-line
-         bg-bg/70 px-5 backdrop-blur-lg"
+  class="sticky top-0 z-30 flex h-13 items-center gap-4 border-b border-line px-5"
 >
+  <!-- The translucent blur lives on this layer, not on the header itself.
+       An element with `backdrop-filter` becomes the containing block for
+       its `position: fixed` descendants (CSS Filter Effects Module) -- and
+       the Settings popover's click-catching backdrop further down is one
+       of those. With the filter on `header`, that backdrop was clipped to
+       the bar's own 52px row instead of covering the viewport, so clicking
+       anywhere on the actual page stopped closing the popover.
+
+       No `relative` added to `header` for this: it is already `position:
+       sticky`, which the spec already recognises as positioned and
+       therefore already a valid containing block for this `absolute`
+       child -- adding `relative` on top would fight the very `sticky` this
+       header depends on to stay pinned while the page scrolls.
+
+       `-z-10` looks like it should sink this behind CourtGround's own
+       `fixed inset-0 -z-10` wallpaper, but it does not: `header` already
+       has an explicit `z-30` (plus its `sticky` position), which makes it
+       a stacking context of its own. A negative z-index only reorders a
+       stacking context's *own* children against each other -- it cannot
+       let a descendant escape into a sibling stacking context outside its
+       ancestor. So this layer paints behind the bar's brand/nav/utility
+       content (all default z-index:auto within this same context), while
+       the header as a whole still paints at z=30 above CourtGround and
+       `<main>`, exactly as before. -->
+  <div class="pointer-events-none absolute inset-0 -z-10 bg-bg/70 backdrop-blur-lg"></div>
+
   <a href="#/" class="flex items-center gap-2">
     <Mark size={19} />
     <span class="text-body font-semibold tracking-tight">SplitStep</span>
