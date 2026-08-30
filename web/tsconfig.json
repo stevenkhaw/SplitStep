@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noUnusedLocals": true,
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "node"],
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "isolatedModules": true

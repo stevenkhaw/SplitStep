@@ -1,8 +1,8 @@
 <script lang="ts">
   import ClipsPanel from '../components/ClipsPanel.svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
   import LabelMode from '../components/LabelMode.svelte'
+  import Mark from '../components/Mark.svelte'
   import QueueMode from '../components/QueueMode.svelte'
   import QuadEditor from '../components/QuadEditor.svelte'
   import ResegmentPanel from '../components/ResegmentPanel.svelte'
@@ -219,32 +219,25 @@
   }
 </script>
 
-<header class="mb-4 flex items-baseline justify-between">
-  <div class="flex items-baseline gap-4">
-    <button class="text-body text-dim hover:text-fg motion-safe:transition-colors" onclick={() => navigate('/')}>
-      ← library
-    </button>
-    <h1 class="text-display font-semibold">{detail?.session.title ?? id}</h1>
-  </div>
-  <!--
-    Finding 9: QueueMode's persist-failure handling deliberately doesn't
-    halt the review queue on a failed star/reject/skip, reasoning that a
-    dead server is "already surfaced by the jobs badge" -- but that badge
-    previously only rendered in Library's header, never here, which is
-    exactly where that reasoning is invoked.
-  -->
-  <JobsBadge />
-</header>
+<div class="mb-5">
+  <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/')}>
+    Sessions
+  </button>
+  <span class="font-data text-caption text-faint"> › </span>
+  <h1 class="mt-1 text-display font-semibold">{id}</h1>
+</div>
 
 {#if error}
   <ErrorNote {error} subject="session" />
 {:else if !detail}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else}
   {#if needsSetupSources.length > 0}
-    <div class="mb-4 space-y-2 rounded-lg border border-accent/50 bg-accent/5 p-4">
-      <h2 class="text-body font-semibold text-accent">Set up sources</h2>
-      <p class="text-caption text-accent/80">
+    <div class="mb-4 space-y-2 rounded-lg border border-line bg-surface p-4">
+      <h2 class="text-body font-semibold text-fg">Set up sources</h2>
+      <p class="text-caption text-dim">
         These sources need setup before detection can begin. Pick the rotation and play region for
         each.
       </p>
@@ -252,7 +245,7 @@
         {#each needsSetupSources as source (source.id)}
           <li>
             <button
-              class="inline-block rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 motion-safe:transition-colors"
+              class="inline-block rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 motion-safe:transition-colors"
               onclick={() => openSetupWizard(source)}
             >
               Set up source {source.idx}
@@ -277,7 +270,7 @@
         <button
           class="border-b-2 px-3 py-1.5 font-data text-data motion-safe:transition-colors
                  {selectedSourceId === tab.id
-            ? 'border-accent text-fg'
+            ? 'border-fg text-fg'
             : 'border-transparent text-dim hover:text-fg'}"
           onclick={() => selectTab(tab.id)}
         >

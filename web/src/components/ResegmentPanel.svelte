@@ -206,7 +206,7 @@
       <span class="w-12 font-data text-body">{threshold === null ? '…' : threshold.toFixed(2)}</span>
 
       <button
-        class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
+        class="rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
         onclick={run}
         disabled={busy || !source || threshold === null}
       >

@@ -95,7 +95,7 @@
       class="flex items-center gap-2 rounded-full border px-3 py-1 font-data text-caption
              {failed.length > 0 && !label
         ? 'border-danger/30 bg-danger/10 text-danger'
-        : 'border-accent/30 bg-accent/10 text-accent'}"
+        : 'border-fg/50 text-fg'}"
       aria-expanded={open}
       aria-label={label ? `${label}. Show the job queue` : 'Show the job queue'}
       onclick={() => (open = !open)}
@@ -128,7 +128,7 @@
             >
               <span
                 class="h-1.5 w-1.5 shrink-0 rounded-full {r.status === 'running'
-                  ? 'bg-accent'
+                  ? 'bg-fg'
                   : r.status === 'failed'
                     ? 'bg-danger'
                     : 'bg-faint'}"
@@ -163,7 +163,7 @@
               <li class="flex items-center gap-4 border-b border-line px-3 pb-2 font-data text-caption">
                 <button
                   type="button"
-                  class="text-accent hover:underline disabled:opacity-50"
+                  class="text-fg hover:underline disabled:opacity-50"
                   disabled={retrying.has(r.id)}
                   onclick={() => retry(r.id)}
                 >
@@ -171,7 +171,7 @@
                 </button>
                 <button
                   type="button"
-                  class="text-accent hover:underline"
+                  class="text-fg hover:underline"
                   onclick={() => dismissals.add(r.id)}
                 >
                   Dismiss

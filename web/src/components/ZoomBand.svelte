@@ -158,7 +158,7 @@
 >
   {#each neighbours as n (n.id)}
     <div
-      class="pointer-events-none absolute top-2 bottom-2 rounded bg-accent/30"
+      class="pointer-events-none absolute top-2 bottom-2 rounded bg-fg/25"
       style={`left:${frac(n.start_ms) * 100}%;width:${
         Math.max(0.2, (frac(n.end_ms) - frac(n.start_ms)) * 100)
       }%`}
@@ -181,7 +181,7 @@
     was always the true fraction -- which is why only the right handle broke.
   -->
   <div
-    class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-accent bg-accent/25"
+    class="pointer-events-none absolute top-1.5 bottom-1.5 rounded border-2 border-fg bg-fg/20"
     style={`left:${frac(rally.start_ms) * 100}%;width:${
       Math.max(0.4, (frac(rally.end_ms) - frac(rally.start_ms)) * 100)
     }%`}
@@ -190,8 +190,8 @@
          target is wider still (HANDLE_GRAB_PX); this is only the affordance,
          sized so the thing you aim at is actually visible against a 66px-wide
          short rally. -->
-    <div class="absolute -top-0.5 -bottom-0.5 -left-1.5 w-3 rounded bg-accent"></div>
-    <div class="absolute -top-0.5 -bottom-0.5 -right-1.5 w-3 rounded bg-accent"></div>
+    <div class="absolute -top-0.5 -bottom-0.5 -left-1.5 w-3 rounded bg-fg"></div>
+    <div class="absolute -top-0.5 -bottom-0.5 -right-1.5 w-3 rounded bg-fg"></div>
   </div>
 
   <!--

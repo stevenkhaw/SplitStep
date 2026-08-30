@@ -1,6 +1,6 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
+  import Mark from '../components/Mark.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
@@ -50,14 +50,7 @@
   }
 </script>
 
-<header class="mb-6 flex items-baseline justify-between">
-  <h1 class="text-display font-semibold">Reels</h1>
-  <div class="flex items-center gap-4">
-    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={() => navigate('/')}>Sessions</button>
-    <JobsBadge />
-  </div>
-</header>
+<h1 class="mb-6 text-display font-semibold">Reels</h1>
 
 <form class="mb-6 flex gap-2" onsubmit={(e) => { e.preventDefault(); create() }}>
   <input
@@ -78,18 +71,31 @@
 {#if error}
   <ErrorNote {error} subject="reel" />
 {:else if loading}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else if reels.length === 0}
-  <p class="text-body text-dim">
+  <!-- bg-surface, not bare: `dim` fails 4.5:1 over the browse-tier scrim's
+       middle band (worst case is the court-run apron, not bare court, and
+       CourtGround is viewport-fixed so a scroll can carry this into that
+       band regardless of page position). -->
+  <p class="rounded-xl border border-line bg-surface p-4 text-body text-dim">
     No reels yet. Finish reviewing a session and compile its points, or name one above.
   </p>
 {:else}
-  <ul class="space-y-2">
+  <!-- One column narrow, two once there is 1800px to give each card real
+       width -- a 152px thumbnail alone on a 3400px row was the ultrawide
+       complaint in miniature, and a wider single column just stretches the
+       same thin row instead of fixing it. -->
+  <ul class="grid grid-cols-1 gap-3 ultra:grid-cols-2">
     {#each reels as r (r.id)}
       <li>
         <button
-          class="flex w-full items-center gap-4 rounded-lg border border-line bg-surface p-3
-                 text-left hover:bg-surface-2 motion-safe:transition-colors"
+          class="flex w-full items-center gap-4 rounded-xl border border-line bg-surface p-2.5
+                 text-left shadow-card
+                 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2
+                 focus-visible:outline-fg motion-safe:transition-colors
+                 motion-safe:duration-quick"
           onclick={() => navigate(`/reels/${r.slug}`)}
         >
           <!-- The cover is the reel's first clip, which is the frame that

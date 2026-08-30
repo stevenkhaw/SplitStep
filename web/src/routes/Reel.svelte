@@ -2,7 +2,7 @@
   import { untrack } from 'svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
   import AddRalliesPicker from '../components/AddRalliesPicker.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
+  import Mark from '../components/Mark.svelte'
   import ReelItemList from '../components/ReelItemList.svelte'
   import ReelPreview from '../components/ReelPreview.svelte'
   import { api } from '../lib/api'
@@ -304,58 +304,65 @@
   }
 </script>
 
-<header class="mb-6 flex items-baseline justify-between">
-  <div>
-    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={() => navigate('/reels')}>← Reels</button>
-    {#if editingName}
-      <div class="mt-1 flex items-center gap-2">
-        <input
-          data-rename-input
-          class="rounded border border-line bg-surface px-2 py-1 text-display
-                 font-semibold"
-          bind:value={nameBuffer}
-          onkeydown={onNameKey}
-          aria-label="Reel name"
-        />
-        <!-- No onblur here at all -- see saveName's comment. Save and
-             Cancel are the only ways this field closes besides the keys
-             onNameKey already handles. -->
+<div class="mb-6">
+  <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/reels')}>
+    Reels
+  </button>
+  <span class="font-data text-caption text-faint"> › </span>
+  {#if editingName}
+    <div class="mt-1 flex items-center gap-2">
+      <input
+        data-rename-input
+        class="rounded border border-line bg-surface px-2 py-1 text-display
+               font-semibold"
+        bind:value={nameBuffer}
+        onkeydown={onNameKey}
+        aria-label="Reel name"
+      />
+      <!-- No onblur here at all -- see saveName's comment. Save and
+           Cancel are the only ways this field closes besides the keys
+           onNameKey already handles. -->
+      <button
+        data-rename-save
+        class="rounded border border-line px-2 py-1 font-data text-data
+               text-fg hover:bg-surface-2 disabled:cursor-not-allowed
+               disabled:opacity-40 motion-safe:transition-colors"
+        disabled={busy || normalizedReelName(nameBuffer) === null}
+        onclick={saveName}
+      >Save</button>
+      <button
+        class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
+        onclick={cancelRename}
+      >Cancel</button>
+    </div>
+  {:else}
+    <h1 class="mt-1 flex items-center gap-2 text-display font-semibold">
+      {detail?.reel.name ?? slug}
+      {#if detail}
         <button
-          data-rename-save
-          class="rounded border border-line px-2 py-1 font-data text-data
-                 text-fg hover:bg-surface-2 disabled:cursor-not-allowed
-                 disabled:opacity-40 motion-safe:transition-colors"
-          disabled={busy || normalizedReelName(nameBuffer) === null}
-          onclick={saveName}
-        >Save</button>
-        <button
-          class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-          onclick={cancelRename}
-        >Cancel</button>
-      </div>
-    {:else}
-      <h1 class="mt-1 flex items-center gap-2 text-display font-semibold">
-        {detail?.reel.name ?? slug}
-        {#if detail}
-          <button
-            data-rename
-            class="font-data text-data font-normal text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={startRename}
-          >rename</button>
-        {/if}
-      </h1>
-    {/if}
-  </div>
-  <JobsBadge />
-</header>
+          data-rename
+          class="font-data text-data font-normal text-dim hover:text-fg motion-safe:transition-colors"
+          onclick={startRename}
+        >rename</button>
+      {/if}
+    </h1>
+  {/if}
+</div>
 
 {#if error}
   <ErrorNote {error} subject="reel" />
 {:else if loading && !detail}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else if detail}
-  <div class="mb-4 flex flex-wrap items-center gap-3">
+  <!-- rounded-lg border bg-surface, not a bare flex row: this bar carries
+       `dim`/`faint` text (the numbered-render label, the clip count, the
+       delete-confirmation "Cancel") that measures under 4.5:1 over browse's
+       scrim mid-band -- see the header comment in Setup.svelte for the same
+       rule. The bordered buttons already look like a toolbar; giving the
+       bar itself a surface just makes that literal. -->
+  <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3">
     <button
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
              hover:bg-surface-2 motion-safe:transition-colors"
@@ -401,12 +408,14 @@
 
     <!-- The one filled button in this row: rendering is the page's primary
          action and was invisible among five identical outlined buttons.
-         Filled accent needs the explicit text-bg (app.css: a white label on
-         accent measures ~2:1), same idiom as Session.svelte's setup buttons. -->
+         The filled-button idiom, app-wide: bg-fg with an explicit text-bg.
+         It replaces a filled accent that needed the same explicit text-bg
+         for a different reason (a white label on that blue measured ~2:1);
+         here the pairing is correct by construction. -->
     <button
       data-render
-      class="rounded bg-accent px-3 py-1.5 font-data text-data font-medium text-bg
-             hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40
+      class="rounded bg-fg px-3 py-1.5 font-data text-data font-medium text-bg
+             hover:bg-fg/90 disabled:cursor-not-allowed disabled:opacity-40
              motion-safe:transition-colors"
       disabled={blocked !== null || busy}
       title={blocked ?? ''}
@@ -466,11 +475,11 @@
       <!-- Visible whenever a rendered file exists, dirty or not -- a stale
            render is still a real file someone may want to grab. -->
       {#if detail.reel.rendered_path}
-        <!-- text-accent, not text-dim: it sat unnoticed in gray beside the
+        <!-- text-fg, not text-dim: it sat unnoticed in gray beside the
              equally gray path text (2026-08-26). -->
         <button
           data-reveal-rendered
-          class="text-accent hover:brightness-110 motion-safe:transition-colors"
+          class="text-fg hover:underline motion-safe:transition-colors"
           onclick={revealRendered}
         >reveal file</button>
       {/if}
@@ -508,7 +517,11 @@
   {/if}
 
   {#if showWatch && canWatch && detail.reel.rendered_path}
-    <div class="mb-4 rounded-lg border border-line p-4">
+    <!-- bg-surface added to the existing border: this panel carries `dim`
+         text (the rendered-file caption below) and a bare border with no
+         fill left it sitting straight on the court, same failure as the
+         action bar above. -->
+    <div class="mb-4 rounded-lg border border-line bg-surface p-4">
       <div class="mb-3 flex items-baseline justify-between">
         <h2 class="text-body font-semibold">Watch</h2>
         <div class="flex items-center gap-4 font-data text-data text-dim">
@@ -548,7 +561,9 @@
   {/if}
 
   {#if items.length === 0}
-    <p class="text-body text-dim">
+    <!-- bg-surface, not bare -- see Reels.svelte's empty state for the same
+         rule and reasoning. -->
+    <p class="rounded-xl border border-line bg-surface p-4 text-body text-dim">
       Nothing in this reel yet. Add rallies above, or compile a session's points from the
       end of its review queue.
     </p>

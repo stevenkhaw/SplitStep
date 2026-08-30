@@ -10,41 +10,40 @@
    nobody opens. It is expressed through these tokens rather than through
    two literals on <html>/<body>, so changing it later is one file. */
 @theme {
-  /* Base. The ramp is shifted toward violet rather than sitting on
-     Tailwind's neutral grey, so the chrome sits *with* night-court footage
-     instead of against it: the video is a violet-cast sky, blown warm
-     floodlights and a desaturated green court, and pure grey chrome reads
-     as a separate object pasted over it. */
-  --color-bg: #0b0b0e;
-  --color-surface: #141419;
-  --color-surface-2: #1d1d24;
-  --color-line: #2a2a33;
+  /* Base. The ground is a night hard court: navy rather than the previous
+     violet-black, because the app's own backdrop is now a court rendered in
+     perspective and the chrome has to sit in the same world as it. */
+  --color-bg: #080e16;
+  --color-surface: #101b28;
+  --color-surface-2: #16273a;
+  --color-line: #1e3247;
 
   /* Text. Named for their job, not their lightness. All three clear 4.5:1
-     against both --color-bg and --color-surface (16.1 / 7.1 / 5.2 on bg),
-     which is what lets `faint` be used for the keyboard legend -- real
-     functional text, not decoration. */
-  --color-fg: #e8e8ee;
-  --color-dim: #9a9aa8;
-  --color-faint: #82828e;
+     against all three grounds -- enforced by tests/tokens.test.ts, not by
+     this comment, because this exact token has silently fallen under the
+     line twice: #74747F in the 2026-08-23 pass and #7186a0 in this one. */
+  --color-fg: #e6eef8;
+  --color-dim: #8fa4bd;
+  --color-faint: #8598b0;
 
-  /* Semantic. Four, and *reject is deliberately not one of them*.
+  /* Semantic. Three, and *neither reject nor "interactive" is one of them*.
 
-     Detection is recall-biased by design ("rejecting a false rally is one
-     keystroke, a missed rally means rescrubbing an hour"), so rejecting is
-     the single most frequent action in the app. Colouring the routine case
-     red states "error" about normal work and wears the reviewer down over
-     hundreds of reps. Reject is instead the *absence* of emphasis --
-     `text-faint` plus a strikethrough -- which both matches its meaning
-     (dismissed, receded) and leaves --color-danger free to mean an actual
-     failure: a failed job, a missing clip, a render refusing to run.
+     Reject is the most frequent action in a recall-biased review loop, so
+     colouring it red would state "error" about normal work; it stays
+     `text-faint` plus a strikethrough.
 
-     star and point are different axes, not two grades of the same one: a
-     rally can be either, both or neither. Warm versus cool keeps them
-     apart at a glance, which a single hue at two saturations would not. */
+     There is no accent. A blue button, a blue tab and a blue focus ring on
+     every screen state "look here" about chrome that is never the point --
+     the footage is the colour. State is fill, outline and weight instead,
+     and `fg` as a focus ring measures 14.84:1 on surface, far past the 3:1
+     an indicator needs. The attempt that shifted accent to cyan died on
+     measurement rather than taste: against `point` it sat at a 1.14
+     luminance ratio, two cyans a reviewer would have to tell apart.
+
+     star and point are different axes, not two grades of one: a rally can be
+     either, both or neither, so they are warm against cool. */
   --color-star: #f0a94c; /* sodium floodlight, off the footage's own lights */
   --color-point: #6fd0e8; /* ice; counted, clinical, not a rating */
-  --color-accent: #6e9bff; /* the one interactive blue: links, focus, progress */
   --color-danger: #f0666b; /* real failure only */
 
   /* Type. Five roles rather than a size ramp, because the failure this
@@ -73,6 +72,49 @@
   --font-data: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/* Motion. Durations are named for what they are for, not for their length,
+   because the constraint they encode is behavioural: `quick` is what a
+   confirmation gets in the review loop, where a reviewer presses a key
+   hundreds of times a session and anything slower is still on screen when
+   the next one lands. `slow` is chrome only and never fires in that loop.
+
+   `--transition-duration-*` and not `--duration-*`: that is the namespace
+   Tailwind v4 generates `duration-…` utilities from, and a token in the
+   wrong one produces no utility *and* vanishes from the output without an
+   error -- verified against Tailwind 4.3.3.
+
+   `static` because Tailwind tree-shakes theme variables no utility
+   references. The motion values are named directly by the `animate-[…]`
+   arbitrary values, and the court colours below are read as raw var() from
+   inside SVG fill/stroke attributes -- neither route is a utility, so
+   without `static` both vanish from the compiled CSS and the court renders
+   with empty fills. */
+@theme static {
+  --transition-duration-quick: 160ms;
+  --transition-duration-calm: 260ms;
+  --transition-duration-slow: 420ms;
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* The court's own colours. make_icon.py reads these out of this file by
+     regex so the app icon cannot drift from the chrome it sits beside. */
+  --color-court: #2d6595;
+  --color-court-run: #1c5c4f;
+  --color-court-line: #f4f9ff;
+  --color-ball: #d6e02c;
+
+  /* The card elevation: a hairline highlight along the top edge and a soft
+     shadow beneath. One token rather than an arbitrary value at each call
+     site, because the session list and the reel list have to lift by the
+     same amount or the two lists read as different components. */
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 12px 28px -18px #000;
+
+  /* The ultrawide threshold. Named rather than repeated as min-[1800px] at
+     each call site: the grid going two-up and the thumbnail growing have to
+     happen at the same width, and a literal in three files cannot enforce
+     that. */
+  --breakpoint-ultra: 1800px;
+}
+
 /* The verdict confirmation over the video (QueueMode). It rises and fades
    rather than merely fading, so a repeat of the same verdict reads as a
    second event and not as one long one. Under 700ms on purpose: this fires
@@ -98,6 +140,60 @@
   100% {
     opacity: 0;
     transform: translateY(-6px);
+  }
+}
+
+/* The rally counter, when the queue advances. It travels a few pixels rather
+   than cross-fading, so a run of fast presses reads as a series of discrete
+   advances instead of one continuous blur -- the same reasoning the verdict
+   flash is built on, and the same 200ms ceiling, because both fire on a key
+   the reviewer presses hundreds of times a session.
+
+   Unlike `verdict`, the callsite's `animate-[…]` carries no `forwards` --
+   deliberately, not an oversight. `verdict`'s `to` state (opacity 0, lifted)
+   differs from the element's own resting style, so without `forwards` the
+   browser would snap it back to fully visible the instant the animation
+   ends. This keyframe's `to` state (opacity 1, translateY(0)) *is* the
+   counter's un-animated resting style, so reverting to it when the
+   animation finishes is a no-op -- there is nothing for `forwards` to hold
+   that the element does not already have. */
+@keyframes counter-roll {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The mark's loading state: the two ball halves step apart and back.
+   Declared here for the same reason as `verdict` above -- Tailwind's
+   arbitrary-animation syntax can name a keyframe but not define one --
+   and also because no component in this app has ever carried a Svelte
+   `<style>` block, and this toolchain's component-style preprocessing
+   (`vitePreprocess()` in svelte.config.js, standalone-`resolveConfig`
+   against Vite 6's Environment API) throws under Vitest for *any* such
+   block, content notwithstanding. Filed as a real gap, not routed around
+   silently: `Mark.svelte`'s halves carry `--mk-gap`/`--mk-step` as an
+   inline style computed straight from `lib/mark.ts`'s MARK, and every
+   number below is a multiplier on those two custom properties -- never a
+   pixel value -- so the geometry still has exactly one source. */
+@keyframes mark-step-left {
+  from {
+    transform: translate(calc(var(--mk-gap) * -1), calc(var(--mk-step) * -1));
+  }
+  to {
+    transform: translate(calc(var(--mk-gap) * -2.7), calc(var(--mk-step) * -2.7));
+  }
+}
+@keyframes mark-step-right {
+  from {
+    transform: translate(var(--mk-gap), var(--mk-step));
+  }
+  to {
+    transform: translate(calc(var(--mk-gap) * 2.7), calc(var(--mk-step) * 2.7));
   }
 }
 

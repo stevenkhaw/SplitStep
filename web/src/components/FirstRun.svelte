@@ -65,7 +65,7 @@
     </p>
     <button
       type="button"
-      class="mt-6 rounded-lg bg-accent px-4 py-2 text-body font-semibold text-bg"
+      class="mt-6 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg"
       onclick={() => (step = 'tips')}
     >
       Get started
@@ -79,14 +79,14 @@
     <div class="mt-6 flex items-center justify-center gap-4">
       <button
         type="button"
-        class="text-body text-accent hover:underline"
+        class="text-body text-fg hover:underline"
         onclick={() => (step = 'welcome')}
       >
         Back
       </button>
       <button
         type="button"
-        class="rounded-lg bg-accent px-4 py-2 text-body font-semibold text-bg"
+        class="rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg"
         onclick={() => (step = 'drop')}
       >
         Next
@@ -99,7 +99,7 @@
     <button
       type="button"
       class="mt-4 w-full rounded-lg border-2 border-dashed p-10 text-body
-             {dragOver ? 'border-accent text-fg' : 'border-line text-dim'}"
+             {dragOver ? 'border-fg text-fg' : 'border-line text-dim'}"
       disabled={uploading}
       ondragover={(e) => {
         e.preventDefault()
@@ -135,7 +135,7 @@
     </p>
     <button
       type="button"
-      class="mt-4 text-body text-accent hover:underline"
+      class="mt-4 text-body text-fg hover:underline"
       onclick={() => (step = 'tips')}
     >
       Back

@@ -617,7 +617,7 @@
   >
     <div
       bind:this={progressBar}
-      class="h-full origin-left rounded bg-accent"
+      class="h-full origin-left rounded bg-fg"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -668,12 +668,17 @@
         <span
           class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
                  {currentHasNote
-            ? 'border-accent/35 bg-accent/15 text-accent'
+            ? 'border-fg bg-surface-2 text-fg'
             : 'border-transparent bg-surface-2 text-faint'}"
           title={currentHasNote ? currentNote : 'no note'}
         >✎</span>
       </span>
-      <span class="text-fg">rally {stats.index + 1} / {stats.total}</span>
+      {#key current.id}
+        <span
+          class="text-fg motion-safe:animate-[counter-roll_var(--transition-duration-quick)_var(--ease-out-soft)]"
+          >rally {stats.index + 1} / {stats.total}</span
+        >
+      {/key}
       <span>{formatTs(current.start_ms)} · {formatDuration(current.end_ms - current.start_ms)}</span>
       <!-- Rejected is deliberately not danger-coloured. Detection is
            recall-biased, so rejecting is the most frequent action here; red

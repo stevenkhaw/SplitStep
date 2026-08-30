@@ -91,8 +91,11 @@ the right-click → Open bypass.
 - UI: design tokens only (`web/src/app.css`), `font-data` for every count
   and timecode, logic in `web/src/lib/` with tests, components thin,
   no blur-commits (the note editor commits on switching fields instead).
-  Primary action per page = one filled accent button; inline text actions
-  are `text-accent`, never gray.
+  Primary action per page = one filled `bg-fg` button (with an explicit
+  `text-bg` — `fg` is light enough that a white label measures ~2:1);
+  inline text actions are `text-fg`, never gray. `--color-accent` was
+  deleted in the 2026-08-30 hard-court redesign, so `bg-accent`/`text-accent`
+  now resolve to nothing.
 
 Start by reading `CLAUDE.md` — it now covers the desktop tier too — then
 `git log --oneline -15`, then ask me what I want. The build phases are done;

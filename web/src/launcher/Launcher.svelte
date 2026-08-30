@@ -108,13 +108,13 @@
     <span class="text-caption text-faint">{describeTarget(free, targetHasLibrary)}</span>
     <div class="flex items-center gap-3 pt-1">
       <button
-        class="rounded bg-accent px-3 py-1.5 text-body text-bg disabled:opacity-50"
+        class="rounded bg-fg px-3 py-1.5 text-body text-bg disabled:opacity-50"
         disabled={busy || !target}
         onclick={() => go(target, !targetHasLibrary)}
       >
         {busy ? 'Starting…' : targetHasLibrary ? 'Open' : 'Create'}
       </button>
-      <button class="text-body text-accent disabled:opacity-50" disabled={busy} onclick={choose}>
+      <button class="text-body text-fg disabled:opacity-50" disabled={busy} onclick={choose}>
         Choose folder…
       </button>
     </div>

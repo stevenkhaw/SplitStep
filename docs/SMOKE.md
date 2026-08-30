@@ -93,3 +93,18 @@ cp ~/Desktop/SplitStep_0.1.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.q
 
 Detection quality on a friend's footage is Gate 0's business, not this
 phase's. If the cuts are wrong here, that is not the app being broken.
+
+## The redesign (2026-08-30)
+
+- [ ] The court is visible behind Library and quiets on a session page
+- [ ] Reels is reachable from a session page, not only from Library
+- [ ] At full ultrawide width the cards go two-up and the review video is
+      centred at 1920, not stretched
+- [ ] Navigating to a session shows the split-ball mark where "Loading…"
+      used to be, and it animates while the page's data loads
+- [ ] A running detect job still shows its own indicator in the jobs badge
+      — that is a different component from the mark, and neither one
+      drives the other
+- [ ] Every interactive element shows a visible focus ring with the mouse
+      untouched
+- [ ] The Dock icon is the split ball, and is legible in a Finder list view

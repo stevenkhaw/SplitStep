@@ -9,6 +9,7 @@
   import type { BoundaryFlag, LabelAction, Verdict } from '../lib/labels'
   import type { LabelRecord, SessionDetail, Source } from '../lib/types'
   import KeyHints from './KeyHints.svelte'
+  import Mark from './Mark.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
@@ -246,7 +247,9 @@
 {#if loadError}
   <p class="rounded bg-danger/10 p-3 text-body text-danger">{loadError}</p>
 {:else if !controller}
-  <p class="text-body text-dim">Loading labels…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" label="Loading labels…" />
+  </div>
 {:else if !current}
   <section class="rounded-lg border border-line p-8 text-center">
     <h2 class="text-title font-semibold">Nothing to label</h2>
@@ -313,7 +316,7 @@
   >
     <div
       bind:this={scrubFill}
-      class="h-full origin-left rounded bg-accent"
+      class="h-full origin-left rounded bg-fg"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -336,7 +339,7 @@
       <button
         class="rounded border px-3 py-1 font-data text-body
                {verdict === v
-          ? 'border-accent bg-accent/20 text-accent'
+          ? 'border-fg bg-surface-2 text-fg'
           : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.setVerdict(v) ?? null)}
       >
@@ -351,7 +354,7 @@
         disabled={!flagsEnabled}
         class="rounded border px-3 py-1 font-data text-data disabled:opacity-30
                {flags.includes(f)
-          ? 'border-accent bg-accent/20 text-accent'
+          ? 'border-fg bg-surface-2 text-fg'
           : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.toggleFlag(f) ?? null)}
       >

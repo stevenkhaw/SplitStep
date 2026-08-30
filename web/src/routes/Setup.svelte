@@ -1,9 +1,11 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
+  import Mark from '../components/Mark.svelte'
   import QuadCanvas from '../components/QuadCanvas.svelte'
   import { api } from '../lib/api'
   import { previewTimestamps } from '../lib/preview'
   import { DEFAULT_QUAD_POINTS, clonePoints, defaultPresetName } from '../lib/quad'
+  import { navigate } from '../lib/router.svelte'
   import { clamp, formatTs, lastSafeFrameMs } from '../lib/time'
   import type { Preset, Source } from '../lib/types'
 
@@ -140,11 +142,23 @@
 {/if}
 
 {#if !source}
-  <p class="text-body text-dim">Loading…</p>
+  <div class="flex justify-center py-12">
+    <Mark size={40} state="loading" />
+  </div>
 {:else}
   <header class="mb-4">
-    <h1 class="text-display font-semibold">Set up source {source.idx}</h1>
-    <p class="mt-1 text-body text-dim">
+    <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/')}>
+      Sessions
+    </button>
+    <span class="font-data text-caption text-faint"> › </span>
+    <h1 class="mt-1 text-display font-semibold">Set up source {source.idx}</h1>
+    <!-- bg-surface, not bare: `dim` on browse's court-run scrim (the run-off
+         apron most of the viewport's middle band shows) measures under
+         4.5:1 -- CourtGround is viewport-fixed, so a scroll can carry any
+         block of page content through that band regardless of how far down
+         the page it sits. `fg`, just above, is the one token exempted for
+         headings; this is body copy and needs the card. -->
+    <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-body text-dim">
       Pick the rotation and drag the play region over a real frame, then start detection.
     </p>
     {#if source.status === 'ready'}
@@ -156,7 +170,15 @@
   </header>
 
   <section>
-    <div class="flex items-center gap-3">
+    <!-- rounded border bg-surface, not a bare flex row: the rotation-degree
+         readout between the two buttons is `dim` text with no surface
+         under it otherwise -- this section has no heading and sits right
+         on the court, so a scroll can carry it through browse's 0.18 scrim
+         band the same way the Reel.svelte action bar was carried through
+         it (see that fix's comment). Wrapping the whole row, not just the
+         label, matches that fix and reads better than a lone chip floating
+         between two bordered buttons. -->
+    <div class="flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
       <button
         class="rounded border border-line px-2 py-1 text-body hover:bg-surface-2 motion-safe:transition-colors"
         onclick={() => rotate(-1)}
@@ -200,7 +222,7 @@
 
   <section class="mt-6">
     <h2 class="text-body font-semibold">Play region</h2>
-    <p class="mt-1 text-caption text-dim">
+    <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-caption text-dim">
       Drag the four corners to cover the area both players move in, extended to the bottom of
       frame.
     </p>
@@ -244,7 +266,7 @@
   </section>
 
   <button
-    class="mt-6 rounded bg-accent px-4 py-1.5 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
+    class="mt-6 rounded bg-fg px-4 py-1.5 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
     onclick={start}
     disabled={!points || busy}
     aria-label="start detection"
@@ -254,12 +276,16 @@
   <!-- The why and the cost, stated at the moment of commitment (spec §Phase
        2): the quad's purpose was previously explained only inside
        QuadEditor's session-page copy, and the twenty-minute encode+detect
-       surprised anyone who expected an upload-style progress bar. -->
-  <p class="mt-3 text-caption text-dim">
-    Outlining your court keeps players on the next court out of your rallies.
-  </p>
-  <p class="mt-1 text-caption text-faint">
-    Detection takes roughly 20 minutes for an hour of 4K footage; you can keep
-    using the app while it runs.
-  </p>
+       surprised anyone who expected an upload-style progress bar. One
+       bg-surface card for both lines, not bare text -- see the comment on
+       the header subtitle above for why. -->
+  <div class="mt-3 max-w-md rounded bg-surface p-3">
+    <p class="text-caption text-dim">
+      Outlining your court keeps players on the next court out of your rallies.
+    </p>
+    <p class="mt-1 text-caption text-faint">
+      Detection takes roughly 20 minutes for an hour of 4K footage; you can keep
+      using the app while it runs.
+    </p>
+  </div>
 {/if}

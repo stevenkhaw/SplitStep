@@ -127,13 +127,13 @@
     onload={() => (frameError = false)}
   />
   <div
-    class="pointer-events-none absolute inset-0 bg-accent/20"
+    class="pointer-events-none absolute inset-0 bg-fg/15"
     style={`clip-path: ${polygon}`}
   ></div>
   {#each points as p, i (i)}
     <button
       class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full
-             border-2 border-fg bg-accent touch-none"
+             border-2 border-bg bg-fg touch-none"
       style={`left:${p[0] * 100}%;top:${p[1] * 100}%`}
       onpointerdown={(e) => onHandleDown(e, i)}
       onpointermove={(e) => onHandleMove(e, i)}
@@ -178,7 +178,7 @@
     value={timeMs}
     oninput={(e) => (draftMs = e.currentTarget.valueAsNumber)}
     onchange={(e) => onseek(e.currentTarget.valueAsNumber)}
-    class="min-w-0 flex-1 accent-accent"
+    class="min-w-0 flex-1 accent-fg"
     aria-label="frame timestamp"
   />
   <button

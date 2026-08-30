@@ -140,7 +140,7 @@ describe('ZoomBand drag tracks the pointer 1:1 (Finding 3: window must not recen
   // ZoomBand's highlighted-rally box -- its rendered `left` percentage is
   // exactly what a real user watches the handle do while dragging.
   function boxLeftPercent(): number {
-    const el = target.querySelector('.border-accent') as HTMLElement | null
+    const el = target.querySelector('.border-fg') as HTMLElement | null
     if (!el) throw new Error('rally box not found')
     const match = /left:\s*([\d.]+)%/.exec(el.getAttribute('style') ?? '')
     if (!match) throw new Error(`no left% in style: ${el.getAttribute('style')}`)

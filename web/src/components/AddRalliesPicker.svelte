@@ -1,5 +1,6 @@
 <script lang="ts">
   import ErrorNote from './ErrorNote.svelte'
+  import Mark from './Mark.svelte'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { spanKey, spanRef } from '../lib/reels'
@@ -137,7 +138,7 @@
           data-filter={f}
           class="rounded border px-2 py-1 font-data text-data
                  {filter === f
-                   ? 'border-accent text-accent'
+                   ? 'border-fg text-fg'
                    : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
           onclick={() => (filter = f as Filter)}
         >{f}</button>
@@ -153,7 +154,9 @@
     </div>
 
     {#if loading}
-      <p class="text-body text-dim">Loading…</p>
+      <div class="flex justify-center py-12">
+        <Mark size={40} state="loading" />
+      </div>
     {:else if shown.length === 0}
       <p class="text-body text-dim">Nothing matches this filter in that session.</p>
     {:else}

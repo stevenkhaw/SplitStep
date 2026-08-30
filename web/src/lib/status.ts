@@ -10,9 +10,10 @@ import type { AppMode, Reel, Session } from './types'
  * lives in lib/ rather than in the markup so the two pages cannot drift and
  * the mapping is testable.
  *
- * `active` means "this is moving, or wants you" and takes the accent;
- * `quiet` is a settled state and stays dim; `danger` is reserved for actual
- * failure, per the palette's rule.
+ * `active` means "this is moving, or wants you" and is an `fg`-outlined pill
+ * -- the chrome carries no hue, so contrast and a border do the work a
+ * coloured fill used to; `quiet` is a settled state and stays dim; `danger`
+ * is reserved for actual failure, per the palette's rule.
  */
 export type StatusTone = 'quiet' | 'active' | 'danger'
 
