@@ -2,7 +2,6 @@
   import { untrack } from 'svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
   import AddRalliesPicker from '../components/AddRalliesPicker.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
   import Mark from '../components/Mark.svelte'
   import ReelItemList from '../components/ReelItemList.svelte'
   import ReelPreview from '../components/ReelPreview.svelte'
@@ -305,51 +304,50 @@
   }
 </script>
 
-<header class="mb-6 flex items-baseline justify-between">
-  <div>
-    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={() => navigate('/reels')}>← Reels</button>
-    {#if editingName}
-      <div class="mt-1 flex items-center gap-2">
-        <input
-          data-rename-input
-          class="rounded border border-line bg-surface px-2 py-1 text-display
-                 font-semibold"
-          bind:value={nameBuffer}
-          onkeydown={onNameKey}
-          aria-label="Reel name"
-        />
-        <!-- No onblur here at all -- see saveName's comment. Save and
-             Cancel are the only ways this field closes besides the keys
-             onNameKey already handles. -->
+<div class="mb-6">
+  <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/reels')}>
+    Reels
+  </button>
+  <span class="font-data text-caption text-faint"> › </span>
+  {#if editingName}
+    <div class="mt-1 flex items-center gap-2">
+      <input
+        data-rename-input
+        class="rounded border border-line bg-surface px-2 py-1 text-display
+               font-semibold"
+        bind:value={nameBuffer}
+        onkeydown={onNameKey}
+        aria-label="Reel name"
+      />
+      <!-- No onblur here at all -- see saveName's comment. Save and
+           Cancel are the only ways this field closes besides the keys
+           onNameKey already handles. -->
+      <button
+        data-rename-save
+        class="rounded border border-line px-2 py-1 font-data text-data
+               text-fg hover:bg-surface-2 disabled:cursor-not-allowed
+               disabled:opacity-40 motion-safe:transition-colors"
+        disabled={busy || normalizedReelName(nameBuffer) === null}
+        onclick={saveName}
+      >Save</button>
+      <button
+        class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
+        onclick={cancelRename}
+      >Cancel</button>
+    </div>
+  {:else}
+    <h1 class="mt-1 flex items-center gap-2 text-display font-semibold">
+      {detail?.reel.name ?? slug}
+      {#if detail}
         <button
-          data-rename-save
-          class="rounded border border-line px-2 py-1 font-data text-data
-                 text-fg hover:bg-surface-2 disabled:cursor-not-allowed
-                 disabled:opacity-40 motion-safe:transition-colors"
-          disabled={busy || normalizedReelName(nameBuffer) === null}
-          onclick={saveName}
-        >Save</button>
-        <button
-          class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-          onclick={cancelRename}
-        >Cancel</button>
-      </div>
-    {:else}
-      <h1 class="mt-1 flex items-center gap-2 text-display font-semibold">
-        {detail?.reel.name ?? slug}
-        {#if detail}
-          <button
-            data-rename
-            class="font-data text-data font-normal text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={startRename}
-          >rename</button>
-        {/if}
-      </h1>
-    {/if}
-  </div>
-  <JobsBadge />
-</header>
+          data-rename
+          class="font-data text-data font-normal text-dim hover:text-fg motion-safe:transition-colors"
+          onclick={startRename}
+        >rename</button>
+      {/if}
+    </h1>
+  {/if}
+</div>
 
 {#if error}
   <ErrorNote {error} subject="reel" />

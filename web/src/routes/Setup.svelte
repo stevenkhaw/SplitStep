@@ -5,6 +5,7 @@
   import { api } from '../lib/api'
   import { previewTimestamps } from '../lib/preview'
   import { DEFAULT_QUAD_POINTS, clonePoints, defaultPresetName } from '../lib/quad'
+  import { navigate } from '../lib/router.svelte'
   import { clamp, formatTs, lastSafeFrameMs } from '../lib/time'
   import type { Preset, Source } from '../lib/types'
 
@@ -146,7 +147,11 @@
   </div>
 {:else}
   <header class="mb-4">
-    <h1 class="text-display font-semibold">Set up source {source.idx}</h1>
+    <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/')}>
+      Sessions
+    </button>
+    <span class="font-data text-caption text-faint"> › </span>
+    <h1 class="mt-1 text-display font-semibold">Set up source {source.idx}</h1>
     <p class="mt-1 text-body text-dim">
       Pick the rotation and drag the play region over a real frame, then start detection.
     </p>

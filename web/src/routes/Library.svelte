@@ -1,39 +1,16 @@
 <script lang="ts">
-  import Credits from '../components/Credits.svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
   import FirstRun from '../components/FirstRun.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
   import Mark from '../components/Mark.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
   import { api } from '../lib/api'
-  import { appmode } from '../lib/appmode.svelte'
-  import { librarySize } from '../lib/librarysize.svelte'
   import { startPolling } from '../lib/polling'
   import { navigate } from '../lib/router.svelte'
-  import { formatBytes } from '../lib/reels'
-  import { changeLibrary, inShell } from '../lib/shell'
   import { sessionStatus } from '../lib/status'
   import type { Session } from '../lib/types'
 
   let sessions = $state<Session[]>([])
-  let settingsOpen = $state(false)
-  let switchError = $state<string | null>(null)
-
-  async function switchLibrary() {
-    switchError = null
-    try {
-      await changeLibrary()
-      // No success branch: the shell navigates the window away to the
-      // chooser, so reaching the next line means it did not.
-    } catch (e) {
-      switchError = e instanceof Error ? e.message : String(e)
-    }
-  }
-  // Stale-while-revalidate: the store keeps the last figure across route
-  // remounts, so the header doesn't blank and the server doesn't re-walk
-  // the drive on every navigation back to this page.
-  void librarySize.refresh()
   let error = $state<unknown>(null)
   // Session.svelte already has a "Loading…" state for its in-flight fetch;
   // this didn't, so the empty-library copy ("Nothing yet...") was what a
@@ -122,78 +99,7 @@
   }
 </script>
 
-<svelte:window
-  onkeydown={(e) => {
-    if (e.key === 'Escape' && settingsOpen) settingsOpen = false
-  }}
-/>
-
-<header class="mb-6 flex items-baseline justify-between">
-  <h1 class="text-display font-semibold">Sessions</h1>
-  <div class="flex items-center gap-4">
-    {#if librarySize.bytes !== null}
-      <!-- The keep-everything policy's one disk affordance: informational,
-           no action attached (spec 2026-08-26). -->
-      <span class="font-data text-data text-faint">{formatBytes(librarySize.bytes)}</span>
-    {/if}
-    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={() => navigate('/reels')}>Reels</button>
-    <div class="relative">
-      <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-              aria-expanded={settingsOpen}
-              onclick={() => (settingsOpen = !settingsOpen)}>Settings</button>
-      {#if settingsOpen}
-        <!-- Same dismissal pair the jobs panel beside this one offers:
-             Escape (svelte:window below) and clicking anywhere else. The
-             backdrop is transparent -- it exists to catch the outside
-             click, not to dim the page for a two-line popover. -->
-        <div
-          class="fixed inset-0 z-10"
-          role="presentation"
-          onclick={() => (settingsOpen = false)}
-        ></div>
-        <div class="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-line bg-surface p-4
-                    text-left shadow-2xl">
-          <label class="flex items-start gap-2 text-body">
-            <input
-              type="checkbox"
-              class="mt-1 accent-fg"
-              checked={appmode.current === 'dev'}
-              onchange={(e) => appmode.set(e.currentTarget.checked ? 'dev' : 'friend')}
-            />
-            <span>
-              Advanced tools — label mode and re-segment
-              <span class="mt-1 block text-caption text-faint">
-                Hidden in friend mode so a stray keypress can't write to the
-                training corpus or rebuild a reviewed session.
-              </span>
-            </span>
-          </label>
-          {#if inShell()}
-            <!-- Shell-only: a browser tab has nothing to ask. Separated by a
-                 rule because it is a different kind of thing from the toggle
-                 above -- that changes what this library shows, this leaves
-                 the library entirely. -->
-            <div class="mt-3 border-t border-line pt-3">
-              <button class="text-body text-fg" onclick={switchLibrary}>
-                Change library…
-              </button>
-              <span class="mt-1 block text-caption text-faint">
-                Nothing is moved. This library stays where it is, and you can
-                come back to it.
-              </span>
-              {#if switchError}
-                <span class="mt-1 block text-caption text-danger">{switchError}</span>
-              {/if}
-            </div>
-          {/if}
-          <Credits />
-        </div>
-      {/if}
-    </div>
-    <JobsBadge />
-  </div>
-</header>
+<h1 class="mb-6 text-display font-semibold">Sessions</h1>
 
 {#if error}
   <ErrorNote {error} subject="session" />

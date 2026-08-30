@@ -1,6 +1,5 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
   import Mark from '../components/Mark.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
   import Thumb from '../components/Thumb.svelte'
@@ -51,14 +50,7 @@
   }
 </script>
 
-<header class="mb-6 flex items-baseline justify-between">
-  <h1 class="text-display font-semibold">Reels</h1>
-  <div class="flex items-center gap-4">
-    <button class="font-data text-data text-dim hover:text-fg motion-safe:transition-colors"
-            onclick={() => navigate('/')}>Sessions</button>
-    <JobsBadge />
-  </div>
-</header>
+<h1 class="mb-6 text-display font-semibold">Reels</h1>
 
 <form class="mb-6 flex gap-2" onsubmit={(e) => { e.preventDefault(); create() }}>
   <input

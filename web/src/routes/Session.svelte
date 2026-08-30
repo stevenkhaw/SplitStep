@@ -1,7 +1,6 @@
 <script lang="ts">
   import ClipsPanel from '../components/ClipsPanel.svelte'
   import ErrorNote from '../components/ErrorNote.svelte'
-  import JobsBadge from '../components/JobsBadge.svelte'
   import LabelMode from '../components/LabelMode.svelte'
   import Mark from '../components/Mark.svelte'
   import QueueMode from '../components/QueueMode.svelte'
@@ -220,22 +219,13 @@
   }
 </script>
 
-<header class="mb-4 flex items-baseline justify-between">
-  <div class="flex items-baseline gap-4">
-    <button class="text-body text-dim hover:text-fg motion-safe:transition-colors" onclick={() => navigate('/')}>
-      ← library
-    </button>
-    <h1 class="text-display font-semibold">{detail?.session.title ?? id}</h1>
-  </div>
-  <!--
-    Finding 9: QueueMode's persist-failure handling deliberately doesn't
-    halt the review queue on a failed star/reject/skip, reasoning that a
-    dead server is "already surfaced by the jobs badge" -- but that badge
-    previously only rendered in Library's header, never here, which is
-    exactly where that reasoning is invoked.
-  -->
-  <JobsBadge />
-</header>
+<div class="mb-5">
+  <button class="font-data text-caption text-faint hover:text-dim" onclick={() => navigate('/')}>
+    Sessions
+  </button>
+  <span class="font-data text-caption text-faint"> › </span>
+  <h1 class="mt-1 text-display font-semibold">{id}</h1>
+</div>
 
 {#if error}
   <ErrorNote {error} subject="session" />
