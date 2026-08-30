@@ -28,7 +28,7 @@
   })
 </script>
 
-<div class="aspect-video w-38 min-[1800px]:w-70 shrink-0 overflow-hidden rounded bg-black">
+<div class="aspect-video w-38 ultra:w-70 shrink-0 overflow-hidden rounded bg-black">
   {#if src && !broken}
     <img
       {src}

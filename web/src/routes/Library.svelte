@@ -114,7 +114,7 @@
        width -- a 152px thumbnail alone on a 3400px row was the ultrawide
        complaint in miniature, and a wider single column just stretches the
        same thin row instead of fixing it. -->
-  <ul class="grid grid-cols-1 gap-3 min-[1800px]:grid-cols-2">
+  <ul class="grid grid-cols-1 gap-3 ultra:grid-cols-2">
     {#each sessions as s (s.id)}
       <li>
         <!-- A bordered card rather than a divided list row. The rows carried
@@ -122,7 +122,7 @@
              clickable at all -- the whole page read as static text. -->
         <button
           class="flex w-full items-center gap-4 rounded-xl border border-line bg-surface p-2.5
-                 text-left shadow-[0_1px_0_rgba(255,255,255,0.05)_inset,0_12px_28px_-18px_#000]
+                 text-left shadow-card
                  hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2
                  focus-visible:outline-fg motion-safe:transition-colors
                  motion-safe:duration-quick"
