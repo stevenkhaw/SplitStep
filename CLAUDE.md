@@ -294,6 +294,22 @@ ordering `_renumber` uses), `flash.ts` (the verdict confirmation) and
 and are verified by hand, because jsdom has no `<video>` implementation. Put
 new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
+A scoped `<style>` block works, but only because `vite.config.ts` declares an
+empty `environments.client` in test mode. Without it `vitePreprocess()` kills
+every component carrying one — under vitest, and only under vitest, because
+vitest 2 serves the config from its bundled Vite 5 while the preprocessor
+calls Vite 6's `preprocessCSS`. `vite build` and `npm run check` both pass
+throughout, so `tests/scoped-style.test.ts` is the only thing that can see it;
+the long comment in `vite.config.ts` has the mechanism. Upgrading
+`@sveltejs/vite-plugin-svelte` is not the escape hatch — v6 crashes vitest 2
+outright — a vitest major is.
+
+Global `@keyframes` in `app.css` plus Tailwind arbitrary-value utilities
+(`motion-safe:animate-[...]`) stays the house style regardless: Tailwind's
+arbitrary-animation syntax can name a keyframe but cannot define one, so the
+definition has to live in `app.css` even for a component that does use a
+`<style>` block.
+
 ### Design tokens
 
 `web/src/app.css` holds the `@theme` block, and it is the only place a colour
