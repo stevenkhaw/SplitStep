@@ -75,7 +75,11 @@
     <Mark size={40} state="loading" />
   </div>
 {:else if reels.length === 0}
-  <p class="text-body text-dim">
+  <!-- bg-surface, not bare: `dim` fails 4.5:1 over the browse-tier scrim's
+       middle band (worst case is the court-run apron, not bare court, and
+       CourtGround is viewport-fixed so a scroll can carry this into that
+       band regardless of page position). -->
+  <p class="rounded-xl border border-line bg-surface p-4 text-body text-dim">
     No reels yet. Finish reviewing a session and compile its points, or name one above.
   </p>
 {:else}

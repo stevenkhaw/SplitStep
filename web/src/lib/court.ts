@@ -24,6 +24,12 @@ const NET_Z = 39
 const SERVICE_OFFSET = 21
 const NET_HALF_W = 21
 const NET_HEIGHT_FT = 3.5
+
+// Not ITF, unlike everything above: the real centre mark is 4 inches long,
+// not 18. This stylised backdrop draws it longer so it actually reads at
+// the sizes this ground renders at -- fine for a background, but it would
+// be a wrong measurement anywhere this file's numbers were taken as real
+// court dimensions, so it does not get to hide inside the ITF block.
 const CENTRE_MARK_FT = 1.5
 
 const RUNOFF_BACK_FT = 102

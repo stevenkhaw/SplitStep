@@ -356,7 +356,13 @@
     <Mark size={40} state="loading" />
   </div>
 {:else if detail}
-  <div class="mb-4 flex flex-wrap items-center gap-3">
+  <!-- rounded-lg border bg-surface, not a bare flex row: this bar carries
+       `dim`/`faint` text (the numbered-render label, the clip count, the
+       delete-confirmation "Cancel") that measures under 4.5:1 over browse's
+       scrim mid-band -- see the header comment in Setup.svelte for the same
+       rule. The bordered buttons already look like a toolbar; giving the
+       bar itself a surface just makes that literal. -->
+  <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3">
     <button
       class="rounded border border-line px-3 py-1.5 font-data text-data text-fg
              hover:bg-surface-2 motion-safe:transition-colors"
@@ -473,7 +479,7 @@
              equally gray path text (2026-08-26). -->
         <button
           data-reveal-rendered
-          class="text-fg hover:brightness-110 motion-safe:transition-colors"
+          class="text-fg hover:underline motion-safe:transition-colors"
           onclick={revealRendered}
         >reveal file</button>
       {/if}
@@ -511,7 +517,11 @@
   {/if}
 
   {#if showWatch && canWatch && detail.reel.rendered_path}
-    <div class="mb-4 rounded-lg border border-line p-4">
+    <!-- bg-surface added to the existing border: this panel carries `dim`
+         text (the rendered-file caption below) and a bare border with no
+         fill left it sitting straight on the court, same failure as the
+         action bar above. -->
+    <div class="mb-4 rounded-lg border border-line bg-surface p-4">
       <div class="mb-3 flex items-baseline justify-between">
         <h2 class="text-body font-semibold">Watch</h2>
         <div class="flex items-center gap-4 font-data text-data text-dim">
@@ -551,7 +561,9 @@
   {/if}
 
   {#if items.length === 0}
-    <p class="text-body text-dim">
+    <!-- bg-surface, not bare -- see Reels.svelte's empty state for the same
+         rule and reasoning. -->
+    <p class="rounded-xl border border-line bg-surface p-4 text-body text-dim">
       Nothing in this reel yet. Add rallies above, or compile a session's points from the
       end of its review queue.
     </p>

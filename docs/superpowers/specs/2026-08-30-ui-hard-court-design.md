@@ -1,6 +1,11 @@
 # Hard court — ground, chrome, mark and icon
 
-Status: implemented 2026-08-30.
+Status: implemented 2026-08-30. **Amended 2026-08-30** after the whole-branch
+review found three places where this document described behaviour that did
+not ship: the launcher (§2, §4 — deliberately deferred, not implemented),
+per-verdict motion and the progress bar's easing (§2, §5 — only the counter
+roll shipped), and the `accent`-removal risk's "canvas draws" (§8 — there is
+no `<canvas>` anywhere in `web/src`). See the amendment notes inline.
 
 The 2026-08-23 audit fixed what was *wrong* with the frontend: no tokens, a
 collapsed type scale, an unreadable status row, a wall of a keyboard legend,
@@ -65,6 +70,18 @@ launcher, and its animated form replaces every bare `Loading…` in the app. The
 split and the step are the product's name drawn literally, and they are also
 the only two states an indeterminate spinner needs.
 
+> **Amendment note (2026-08-30).** "Large on the launcher" did not ship, and
+> is deliberately deferred rather than missing by accident. `Library.open()`
+> refuses to run without a `library.db`, so the launcher is rendered by Tauri
+> from its own bundle before any Python process exists — it is not on the
+> browse court tier this document describes, and does not import `Mark` or
+> `CourtGround`. It was left alone because a working `.dmg` built from this
+> branch was already in the user's hands for testing before this review; touching
+> the launcher would have silently invalidated that build. Its boot state is
+> still the bare string `busy ? 'Starting…' : …` in `web/src/launcher/Launcher.svelte`.
+> Everything else in this bullet — the app bar mark, the loading replacement
+> across the routed app — shipped as written.
+
 **The icon becomes that mark.** The ball on court blue, ad-hoc signed and
 regenerated through `make_icon.py` as today.
 
@@ -72,6 +89,16 @@ regenerated through `make_icon.py` as today.
 the review loop only the confirmations move — star, point and reject each get
 their own sub-200ms motion, the counter rolls, the progress bar eases. Rally
 advance stays instant. Nothing may sit between a key and its response.
+
+> **Amendment note (2026-08-30).** Only the counter roll shipped as written.
+> The verdict flash (`QueueMode.svelte`) is one shared
+> `motion-safe:animate-[verdict_700ms_ease-out_forwards]` for all three
+> verdicts — star, point and reject differ only in `FLASH_TONE`'s colour
+> class, not in motion, so "each get their own sub-200ms motion" did not
+> ship. The progress bar is a direct `progressBar.style.transform =
+> \`scaleX(${fraction})\`` write, not an eased transition — see §5's
+> amendment note for why that is arguably the correct choice rather than a
+> gap to close.
 
 ## 3. Token layer
 
@@ -183,6 +210,11 @@ States: `still` (default), and `loading`, where the halves ease apart and back
 on a slow loop. `loading` replaces every bare `Loading…` string in the app, and
 is what the launcher shows during the sidecar's 3–20s boot.
 
+> **Amendment note (2026-08-30).** The launcher half of that last sentence did
+> not ship — see the amendment note on §2's "The mark is the loader" for why,
+> and why it stays that way for now. Everywhere else in the routed app,
+> `loading` did replace the bare string as written.
+
 **Guard against drift.** The mark is drawn twice — SVG in Svelte for the app,
 PIL in `make_icon.py` for the `.icns` — and two drawings of one shape drift.
 `make_icon.py` already reads its colours out of `app.css` by regex so the icon
@@ -225,6 +257,27 @@ unnamed default.
 - `motion-safe:` throughout, as `@keyframes verdict` already does — under
   `prefers-reduced-motion` every state still appears and clears, it simply does
   not travel.
+
+> **Amendment note (2026-08-30).** Of this list, only the mark's loader loop
+> and the rally counter roll shipped as distinct, named-token motion. Route
+> transitions and list entrances did not ship at all — there is still no
+> `svelte/transition` or `svelte/animate` import anywhere in `web/src`, the
+> same "zero Svelte transitions" §1 measured before this redesign. Most
+> hovers (54 call sites) are still bare `motion-safe:transition-colors`,
+> Tailwind's unnamed default the opening paragraph above says this section
+> replaces; only a handful of animations (the mark, the counter roll,
+> `CourtGround`'s tier fade) actually reference `--transition-duration-*` /
+> `--ease-out-soft`. Star, point and reject share one `verdict_700ms`
+> keyframe, distinguished only by `FLASH_TONE`'s colour — not three
+> distinct motions. The progress bar writes `style.transform` directly
+> rather than transitioning it, which is arguably the *right* call rather
+> than a gap: it is redrawn on every video `timeupdate` (≈4-60 times a
+> second depending on the source), so a CSS transition racing a value that
+> changes faster than the transition itself would either be invisible or
+> introduce lag behind the actual playhead. Tightening "the progress bar
+> eases" to name that reasoning is on the list; widening the motion pass
+> to the rest of this bullet list is not, and is out of scope for this
+> fix wave.
 
 **Compositor only.** This app runs beside 4K proxy decode and a Python worker
 doing YOLO and ffmpeg on the same laptop. Anything continuous animates
@@ -275,6 +328,19 @@ verifying what changed rather than what runs.
   QuadCanvas's handles, OverviewBand). Those become `fg`, which is also more
   legible over the score curve than periwinkle was. A missed callsite fails at
   runtime as an unstyled element, not at build.
+
+  > **Amendment note (2026-08-30).** This anticipated risk described the wrong
+  > mechanism. There is no `<canvas>` element anywhere in `web/src`, and no
+  > `getComputedStyle`/`getPropertyValue` call that would read a CSS custom
+  > property at runtime. ZoomBand's playhead, ScoreCurve's line, QuadCanvas's
+  > handles and OverviewBand are all plain SVG/DOM elements styled with
+  > ordinary Tailwind classes (`text-fg`, `border-fg`, `bg-fg`), compiled at
+  > build time exactly like every other colour callsite in this list. They
+  > did become `fg`, and the "more legible over the score curve than
+  > periwinkle" observation still holds — only the "canvas" and "at runtime"
+  > framing was wrong, which also means the "fails at runtime as an unstyled
+  > element" risk applies to all 61 callsites equally, not especially to
+  > these four.
 - **`CLAUDE.md`'s "Design tokens" section is wrong the moment this lands** and
   is rewritten in the same change, including the reject-has-no-colour rationale,
   which survives, and the accent paragraph, which does not.

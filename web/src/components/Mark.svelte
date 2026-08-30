@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MARK } from '../lib/mark'
+  import { MARK, seamPath } from '../lib/mark'
 
   interface Props {
     size?: number
@@ -11,8 +11,8 @@
   let { size = 19, state = 'still', label = 'Loading…' }: Props = $props()
 
   const c = MARK.viewBox / 2
-  const seam = `M${MARK.seamLeftX} ${MARK.seamTopY} A${MARK.seamRx} ${MARK.seamRy} 0 0 1 ${MARK.seamLeftX} ${MARK.seamBottomY}`
-  const seam2 = `M${MARK.seamRightX} ${MARK.seamTopY} A${MARK.seamRx} ${MARK.seamRy} 0 0 0 ${MARK.seamRightX} ${MARK.seamBottomY}`
+  const seam = seamPath('left')
+  const seam2 = seamPath('right')
   // Unique per instance: two marks on one page would otherwise share clip
   // paths, and the second would clip against the first's rects.
   const uid = $props.id()
@@ -43,8 +43,13 @@
     style="--mk-gap: {MARK.gap}px; --mk-step: {MARK.step}px;"
   >
     <defs>
-      <clipPath id="mk-l-{uid}"><rect x="0" y="0" width={c - 0.5} height={MARK.viewBox} /></clipPath>
-      <clipPath id="mk-r-{uid}"><rect x={c + 0.5} y="0" width={c - 0.5} height={MARK.viewBox} /></clipPath>
+      <clipPath id="mk-l-{uid}"
+        ><rect x="0" y="0" width={c - MARK.splitInset} height={MARK.viewBox} /></clipPath
+      >
+      <clipPath id="mk-r-{uid}"
+        ><rect x={c + MARK.splitInset} y="0" width={c - MARK.splitInset} height={MARK.viewBox}
+        /></clipPath
+      >
     </defs>
     <!-- One circle per half -- the ball, split -- not a third one for the
          disc clip: the fill circle is already exactly circular and needs no
@@ -75,6 +80,21 @@
     </g>
   </svg>
   {#if state === 'loading'}
-    <span class="sr-only">{label}</span>
+    <!-- Screen-reader-only under motion-safe, because the stepping halves
+         already say "loading" to a sighted user there. Under
+         prefers-reduced-motion the animation classes above never apply --
+         motion-safe:animate-[…] simply does not fire -- so a sighted
+         reduced-motion viewer was left looking at a static ball with no
+         visible difference from the app-bar's own still mark, and no way
+         to tell "loading" from "loaded". motion-reduce:not-sr-only reveals
+         exactly the same label a screen reader already had, matching the
+         spec's rule that reduced motion may drop the travel but must never
+         drop the state. text-fg because this can render directly over
+         exposed court (Library, Reels, Setup, Session, Reel loading
+         states, none of them behind a `surface` card) -- the one token the
+         spec allows there. -->
+    <span class="sr-only motion-reduce:not-sr-only motion-reduce:ml-2 motion-reduce:text-body motion-reduce:text-fg">
+      {label}
+    </span>
   {/if}
 </span>

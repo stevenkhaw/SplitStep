@@ -152,7 +152,13 @@
     </button>
     <span class="font-data text-caption text-faint"> › </span>
     <h1 class="mt-1 text-display font-semibold">Set up source {source.idx}</h1>
-    <p class="mt-1 text-body text-dim">
+    <!-- bg-surface, not bare: `dim` on browse's court-run scrim (the run-off
+         apron most of the viewport's middle band shows) measures under
+         4.5:1 -- CourtGround is viewport-fixed, so a scroll can carry any
+         block of page content through that band regardless of how far down
+         the page it sits. `fg`, just above, is the one token exempted for
+         headings; this is body copy and needs the card. -->
+    <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-body text-dim">
       Pick the rotation and drag the play region over a real frame, then start detection.
     </p>
     {#if source.status === 'ready'}
@@ -208,7 +214,7 @@
 
   <section class="mt-6">
     <h2 class="text-body font-semibold">Play region</h2>
-    <p class="mt-1 text-caption text-dim">
+    <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-caption text-dim">
       Drag the four corners to cover the area both players move in, extended to the bottom of
       frame.
     </p>
@@ -262,12 +268,16 @@
   <!-- The why and the cost, stated at the moment of commitment (spec §Phase
        2): the quad's purpose was previously explained only inside
        QuadEditor's session-page copy, and the twenty-minute encode+detect
-       surprised anyone who expected an upload-style progress bar. -->
-  <p class="mt-3 text-caption text-dim">
-    Outlining your court keeps players on the next court out of your rallies.
-  </p>
-  <p class="mt-1 text-caption text-faint">
-    Detection takes roughly 20 minutes for an hour of 4K footage; you can keep
-    using the app while it runs.
-  </p>
+       surprised anyone who expected an upload-style progress bar. One
+       bg-surface card for both lines, not bare text -- see the comment on
+       the header subtitle above for why. -->
+  <div class="mt-3 max-w-md rounded bg-surface p-3">
+    <p class="text-caption text-dim">
+      Outlining your court keeps players on the next court out of your rallies.
+    </p>
+    <p class="mt-1 text-caption text-faint">
+      Detection takes roughly 20 minutes for an hour of 4K footage; you can keep
+      using the app while it runs.
+    </p>
+  </div>
 {/if}

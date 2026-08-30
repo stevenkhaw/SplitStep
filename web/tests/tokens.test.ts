@@ -114,6 +114,20 @@ describe('the palette', () => {
     expect(contrast(t['dim'], t['court'])).toBeLessThan(4.5)
   })
 
+  // court-run -- the run-off apron -- is the ground most of the viewport's
+  // middle actually shows: CourtGround fills it first and the playing
+  // surface sits narrower inside it at any aspect ratio wider than the
+  // court's own. The check above only ever measured bare `court`, so a
+  // scrim tuned against that number was never verified against the ground
+  // most secondary text actually scrolls over -- which is how dim/faint
+  // text landed unprotected on it in Setup.svelte and Reel.svelte.
+  it('lets fg cross the run-off apron too, and only fg', () => {
+    const t = tokens()
+    expect(contrast(t['fg'], t['court-run'])).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(t['dim'], t['court-run'])).toBeLessThan(4.5)
+    expect(contrast(t['faint'], t['court-run'])).toBeLessThan(4.5)
+  })
+
   it('keeps the ball legible on the icon ground', () => {
     const t = tokens()
     expect(contrast(t['ball'], t['court'])).toBeGreaterThanOrEqual(3.0)

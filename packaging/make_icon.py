@@ -46,6 +46,7 @@ MARK = {
     "radius": 13.0,
     "gap": 0.9,
     "step": 1.5,
+    "splitInset": 0.5,
     "seamWidth": 2.6,
     "seamRx": 13.8,
     "seamRy": 13.3,
@@ -214,12 +215,21 @@ def render(size: int) -> Image.Image:
     seam.putalpha(Image.composite(seam.getchannel("A"), Image.new("L", (big, big), 0), disc))
     layer.alpha_composite(seam)
 
-    # Split, and step.
+    # Split, and step. The crop line sits `splitInset` short of dead centre
+    # on each side, not at plain `half` -- mirroring Mark.svelte's clip
+    # rects, which stop the same distance short (mark.ts's `splitInset`).
+    # The visible gap this produces is 2*(splitInset + gap), and it is
+    # exactly the piece that used to be missing here: this file cropped at
+    # `half` with no inset while the SVG clipped inset from centre, so the
+    # two drawings' splits differed by a full unit at the 32-unit scale.
     gap = int(MARK["gap"] * unit)
     step = int(MARK["step"] * unit)
+    inset = int(MARK["splitInset"] * unit)
     half = big // 2
-    img.alpha_composite(layer.crop((0, 0, half, big)), (-gap, -step))
-    img.alpha_composite(layer.crop((half, 0, big, big)), (half + gap, step))
+    left_edge = half - inset
+    right_edge = half + inset
+    img.alpha_composite(layer.crop((0, 0, left_edge, big)), (-gap, -step))
+    img.alpha_composite(layer.crop((right_edge, 0, big, big)), (right_edge + gap, step))
     return img.resize((size, size), Image.LANCZOS)
 
 

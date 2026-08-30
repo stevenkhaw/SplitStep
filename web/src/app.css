@@ -147,7 +147,16 @@
    than cross-fading, so a run of fast presses reads as a series of discrete
    advances instead of one continuous blur -- the same reasoning the verdict
    flash is built on, and the same 200ms ceiling, because both fire on a key
-   the reviewer presses hundreds of times a session. */
+   the reviewer presses hundreds of times a session.
+
+   Unlike `verdict`, the callsite's `animate-[…]` carries no `forwards` --
+   deliberately, not an oversight. `verdict`'s `to` state (opacity 0, lifted)
+   differs from the element's own resting style, so without `forwards` the
+   browser would snap it back to fully visible the instant the animation
+   ends. This keyframe's `to` state (opacity 1, translateY(0)) *is* the
+   counter's un-animated resting style, so reverting to it when the
+   animation finishes is a no-op -- there is nothing for `forwards` to hold
+   that the element does not already have. */
 @keyframes counter-roll {
   from {
     opacity: 0;
