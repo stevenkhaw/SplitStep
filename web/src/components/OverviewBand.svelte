@@ -31,7 +31,7 @@
       type="button"
       class="absolute top-1 bottom-1 rounded-sm {r.starred
         ? 'bg-star'
-        : 'bg-accent'} {r.id === currentId ? 'ring-2 ring-fg' : 'opacity-60'}"
+        : 'bg-dim'} {r.id === currentId ? 'ring-2 ring-fg' : 'opacity-60'}"
       style={pos(r)}
       title={`rally ${r.idx}`}
       onclick={() => onpick(r.id)}

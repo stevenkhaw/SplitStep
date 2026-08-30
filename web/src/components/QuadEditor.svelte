@@ -238,7 +238,7 @@
             aria-label="preset name"
           />
           <button
-            class="rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
+            class="rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
             onclick={save}
             disabled={busy}
           >
@@ -263,11 +263,11 @@
         {/if}
 
         {#if status}
-          <p class="mt-2 font-data text-caption text-accent">{status}</p>
+          <p class="mt-2 font-data text-caption text-fg">{status}</p>
         {/if}
         {#if offerDetect}
           <button
-            class="mt-2 text-caption text-accent hover:underline disabled:opacity-40"
+            class="mt-2 text-caption text-fg hover:underline disabled:opacity-40"
             onclick={redetect}
             disabled={busy}
           >

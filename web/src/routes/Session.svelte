@@ -242,9 +242,9 @@
   <p class="text-body text-dim">Loading…</p>
 {:else}
   {#if needsSetupSources.length > 0}
-    <div class="mb-4 space-y-2 rounded-lg border border-accent/50 bg-accent/5 p-4">
-      <h2 class="text-body font-semibold text-accent">Set up sources</h2>
-      <p class="text-caption text-accent/80">
+    <div class="mb-4 space-y-2 rounded-lg border border-line bg-surface p-4">
+      <h2 class="text-body font-semibold text-fg">Set up sources</h2>
+      <p class="text-caption text-dim">
         These sources need setup before detection can begin. Pick the rotation and play region for
         each.
       </p>
@@ -252,7 +252,7 @@
         {#each needsSetupSources as source (source.id)}
           <li>
             <button
-              class="inline-block rounded bg-accent px-3 py-1 text-body font-medium text-bg hover:brightness-110 motion-safe:transition-colors"
+              class="inline-block rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 motion-safe:transition-colors"
               onclick={() => openSetupWizard(source)}
             >
               Set up source {source.idx}
@@ -277,7 +277,7 @@
         <button
           class="border-b-2 px-3 py-1.5 font-data text-data motion-safe:transition-colors
                  {selectedSourceId === tab.id
-            ? 'border-accent text-fg'
+            ? 'border-fg text-fg'
             : 'border-transparent text-dim hover:text-fg'}"
           onclick={() => selectTab(tab.id)}
         >

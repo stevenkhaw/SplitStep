@@ -174,11 +174,11 @@
            listener this could intercept -- preventDefault on the click is
            what a button nested in a <summary> needs to act on its own
            without also opening/closing the panel. -->
-      <!-- text-accent, not text-dim: gray text-buttons disappear next to the
-           gray labels around them -- a reviewer overlooked exactly this
-           (2026-08-26). Accent is the app's "this acts" voice. -->
+      <!-- text-fg, not text-dim: gray text-buttons disappear next to the
+           filenames beside them. There is no accent any more, so contrast
+           rather than hue is what makes a text button look pressable. -->
       <button
-        class="shrink-0 rounded border border-line px-2 py-1 font-data text-caption text-accent
+        class="shrink-0 rounded border border-line px-2 py-1 font-data text-caption text-fg
                hover:bg-surface-2 hover:brightness-110 motion-safe:transition-colors"
         onclick={(e) => {
           e.preventDefault()
@@ -215,7 +215,7 @@
                         >{expandedKey === clipKey(clip) ? 'Hide' : 'Watch'}</button>
                         <button
                           class="rounded border border-line px-2 py-1 font-data text-caption
-                                 text-accent hover:bg-surface-2 hover:brightness-110
+                                 text-fg hover:bg-surface-2 hover:brightness-110
                                  motion-safe:transition-colors"
                           onclick={() => reveal(clipRevealRelpath(sessionId, clip))}
                         >Reveal</button>

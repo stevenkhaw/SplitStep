@@ -617,7 +617,7 @@
   >
     <div
       bind:this={progressBar}
-      class="h-full origin-left rounded bg-accent"
+      class="h-full origin-left rounded bg-fg"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -668,7 +668,7 @@
         <span
           class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
                  {currentHasNote
-            ? 'border-accent/35 bg-accent/15 text-accent'
+            ? 'border-fg bg-surface-2 text-fg'
             : 'border-transparent bg-surface-2 text-faint'}"
           title={currentHasNote ? currentNote : 'no note'}
         >✎</span>

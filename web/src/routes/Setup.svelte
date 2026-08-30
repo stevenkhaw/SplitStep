@@ -244,7 +244,7 @@
   </section>
 
   <button
-    class="mt-6 rounded bg-accent px-4 py-1.5 text-body font-medium text-bg hover:brightness-110 disabled:opacity-40 motion-safe:transition-colors"
+    class="mt-6 rounded bg-fg px-4 py-1.5 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
     onclick={start}
     disabled={!points || busy}
     aria-label="start detection"

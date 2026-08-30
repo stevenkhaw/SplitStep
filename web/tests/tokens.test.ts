@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -118,5 +118,30 @@ describe('the palette', () => {
     const t = tokens()
     expect(contrast(t['ball'], t['court'])).toBeGreaterThanOrEqual(3.0)
     expect(contrast(t['ball'], t['bg'])).toBeGreaterThanOrEqual(3.0)
+  })
+})
+
+function sourceFiles(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) sourceFiles(full, acc)
+    else if (/\.(svelte|ts)$/.test(entry)) acc.push(full)
+  }
+  return acc
+}
+
+describe('no callsite still reaches for accent', () => {
+  // Deleting the token is only half of it: a `bg-accent` left behind resolves
+  // to nothing and fails at runtime as an unstyled element, not at build.
+  it('has no accent class anywhere in src', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '../src')
+    const guilty: string[] = []
+    for (const file of sourceFiles(root)) {
+      const text = readFileSync(file, 'utf8')
+      if (/\b(bg|text|border|ring|accent|fill|stroke)-accent\b/.test(text)) {
+        guilty.push(file.slice(root.length + 1))
+      }
+    }
+    expect(guilty).toEqual([])
   })
 })

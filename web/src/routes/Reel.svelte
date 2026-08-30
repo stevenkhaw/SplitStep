@@ -401,12 +401,14 @@
 
     <!-- The one filled button in this row: rendering is the page's primary
          action and was invisible among five identical outlined buttons.
-         Filled accent needs the explicit text-bg (app.css: a white label on
-         accent measures ~2:1), same idiom as Session.svelte's setup buttons. -->
+         The filled-button idiom, app-wide: bg-fg with an explicit text-bg.
+         It replaces a filled accent that needed the same explicit text-bg
+         for a different reason (a white label on that blue measured ~2:1);
+         here the pairing is correct by construction. -->
     <button
       data-render
-      class="rounded bg-accent px-3 py-1.5 font-data text-data font-medium text-bg
-             hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40
+      class="rounded bg-fg px-3 py-1.5 font-data text-data font-medium text-bg
+             hover:bg-fg/90 disabled:cursor-not-allowed disabled:opacity-40
              motion-safe:transition-colors"
       disabled={blocked !== null || busy}
       title={blocked ?? ''}
@@ -466,11 +468,11 @@
       <!-- Visible whenever a rendered file exists, dirty or not -- a stale
            render is still a real file someone may want to grab. -->
       {#if detail.reel.rendered_path}
-        <!-- text-accent, not text-dim: it sat unnoticed in gray beside the
+        <!-- text-fg, not text-dim: it sat unnoticed in gray beside the
              equally gray path text (2026-08-26). -->
         <button
           data-reveal-rendered
-          class="text-accent hover:brightness-110 motion-safe:transition-colors"
+          class="text-fg hover:brightness-110 motion-safe:transition-colors"
           onclick={revealRendered}
         >reveal file</button>
       {/if}

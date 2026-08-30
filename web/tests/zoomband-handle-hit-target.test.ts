@@ -114,7 +114,7 @@ describe('ZoomBand draws handles where the hit test looks for them', () => {
     return Number(match[1])
   }
 
-  const box = () => target.querySelector('.border-accent')
+  const box = () => target.querySelector('.border-fg')
 
   function pointerAt(type: string, clientX: number, pointerId = 1): FakePointerEvent {
     return new FakePointerEvent(type, { clientX, pointerId, bubbles: true })
@@ -211,7 +211,7 @@ describe('ZoomBand draws handles where the hit test looks for them', () => {
 
   it('draws neighbours at their true width too', () => {
     render(rally(), [rally({ id: 'r2', start_ms: 112_000, end_ms: 118_000 })])
-    const neighbour = target.querySelector('.bg-accent\\/30')
+    const neighbour = target.querySelector('.bg-fg\\/25')
     // 6s of a 40s window is 15%, not the 20% floor.
     expect(stylePercent(neighbour, 'width')).toBeCloseTo(15, 5)
   })

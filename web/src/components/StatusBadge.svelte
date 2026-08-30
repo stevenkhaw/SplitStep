@@ -9,7 +9,7 @@
   // status string had.
   const TONE = {
     quiet: 'text-faint',
-    active: 'rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-accent',
+    active: 'rounded-full border border-fg/50 px-2 py-0.5 text-fg',
     danger: 'rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-danger',
   } as const
 </script>

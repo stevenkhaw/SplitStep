@@ -313,7 +313,7 @@
   >
     <div
       bind:this={scrubFill}
-      class="h-full origin-left rounded bg-accent"
+      class="h-full origin-left rounded bg-fg"
       style="transform: scaleX(0)"
     ></div>
   </div>
@@ -336,7 +336,7 @@
       <button
         class="rounded border px-3 py-1 font-data text-body
                {verdict === v
-          ? 'border-accent bg-accent/20 text-accent'
+          ? 'border-fg bg-surface-2 text-fg'
           : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.setVerdict(v) ?? null)}
       >
@@ -351,7 +351,7 @@
         disabled={!flagsEnabled}
         class="rounded border px-3 py-1 font-data text-data disabled:opacity-30
                {flags.includes(f)
-          ? 'border-accent bg-accent/20 text-accent'
+          ? 'border-fg bg-surface-2 text-fg'
           : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
         onclick={() => apply(controller?.toggleFlag(f) ?? null)}
       >

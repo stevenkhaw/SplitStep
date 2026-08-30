@@ -137,7 +137,7 @@
           data-filter={f}
           class="rounded border px-2 py-1 font-data text-data
                  {filter === f
-                   ? 'border-accent text-accent'
+                   ? 'border-fg text-fg'
                    : 'border-line text-dim hover:bg-surface-2'} motion-safe:transition-colors"
           onclick={() => (filter = f as Filter)}
         >{f}</button>

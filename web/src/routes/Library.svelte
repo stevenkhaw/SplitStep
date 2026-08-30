@@ -156,7 +156,7 @@
           <label class="flex items-start gap-2 text-body">
             <input
               type="checkbox"
-              class="mt-1 accent-accent"
+              class="mt-1 accent-fg"
               checked={appmode.current === 'dev'}
               onchange={(e) => appmode.set(e.currentTarget.checked ? 'dev' : 'friend')}
             />
@@ -174,7 +174,7 @@
                  above -- that changes what this library shows, this leaves
                  the library entirely. -->
             <div class="mt-3 border-t border-line pt-3">
-              <button class="text-body text-accent" onclick={switchLibrary}>
+              <button class="text-body text-fg" onclick={switchLibrary}>
                 Change library…
               </button>
               <span class="mt-1 block text-caption text-faint">

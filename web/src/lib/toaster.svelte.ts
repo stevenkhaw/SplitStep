@@ -55,16 +55,19 @@ export function createToaster(durationMs: number = DEFAULT_DURATION_MS) {
  * QueueMode/LabelMode's filled pill, 'muted' is TimelineMode's quieter one
  * over the boundary editor. Both now resolve through the design tokens
  * (app.css) rather than raw palette steps, so a toast cannot drift from the
- * rest of the app: 'error' is --color-danger, 'info' is --color-accent, the
- * colour this app already uses for "progressing, not broken" (the jobs
- * badge, the queue/label progress bars, the primary buttons).
+ * rest of the app: 'error' is --color-danger. 'info' carries no hue at all,
+ * because the chrome no longer has an accent to spend on "progressing, not
+ * broken" -- it is the same fg-on-dark the primary buttons and the progress
+ * bars now use, and contrast rather than colour is what separates it from
+ * the error tone.
  *
- * Solid pills set an explicit dark label. Both tokens are light enough that
- * white-on-fill measures about 2:1, while bg-on-fill clears 6.4:1.
+ * The solid pills keep their explicit dark label: both fills are light
+ * enough that a white label would measure about 2:1, while bg-on-fill
+ * clears 6.4:1.
  */
 export function toastToneClasses(tone: ToastTone, surface: 'solid' | 'muted' = 'solid'): string {
   if (surface === 'muted') {
-    return tone === 'error' ? 'bg-danger/20 text-danger' : 'bg-accent/20 text-accent'
+    return tone === 'error' ? 'bg-danger/20 text-danger' : 'bg-fg/20 text-fg'
   }
-  return tone === 'error' ? 'bg-danger text-bg' : 'bg-accent text-bg'
+  return tone === 'error' ? 'bg-danger text-bg' : 'bg-fg text-bg'
 }

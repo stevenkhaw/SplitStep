@@ -44,6 +44,6 @@
     stroke="currentColor"
     stroke-width="1.5"
     stroke-dasharray="5 4"
-    class="text-accent"
+    class="text-fg"
   />
 </svg>
