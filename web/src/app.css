@@ -46,14 +46,6 @@
   --color-point: #6fd0e8; /* ice; counted, clinical, not a rating */
   --color-danger: #f0666b; /* real failure only */
 
-  /* The court. These are the ground's own colours, and make_icon.py reads
-     them out of this file by regex so the app icon cannot drift from the
-     chrome it sits beside. */
-  --color-court: #2d6595; /* the playing surface */
-  --color-court-run: #1c5c4f; /* the run-off apron */
-  --color-court-line: #f4f9ff; /* court markings, and the ball's seam */
-  --color-ball: #d6e02c; /* optic yellow; the mark and the icon */
-
   /* Type. Five roles rather than a size ramp, because the failure this
      replaces was 74 uses of text-xs and 50 of text-sm -- naming sizes by
      magnitude is what let everything collapse into the same two. A role
@@ -78,6 +70,37 @@
   --font-ui:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-data: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Motion. Durations are named for what they are for, not for their length,
+   because the constraint they encode is behavioural: `quick` is what a
+   confirmation gets in the review loop, where a reviewer presses a key
+   hundreds of times a session and anything slower is still on screen when
+   the next one lands. `slow` is chrome only and never fires in that loop.
+
+   `--transition-duration-*` and not `--duration-*`: that is the namespace
+   Tailwind v4 generates `duration-…` utilities from, and a token in the
+   wrong one produces no utility *and* vanishes from the output without an
+   error -- verified against Tailwind 4.3.3.
+
+   `static` because Tailwind tree-shakes theme variables no utility
+   references. The motion values are named directly by the `animate-[…]`
+   arbitrary values, and the court colours below are read as raw var() from
+   inside SVG fill/stroke attributes -- neither route is a utility, so
+   without `static` both vanish from the compiled CSS and the court renders
+   with empty fills. */
+@theme static {
+  --transition-duration-quick: 160ms;
+  --transition-duration-calm: 260ms;
+  --transition-duration-slow: 420ms;
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* The court's own colours. make_icon.py reads these out of this file by
+     regex so the app icon cannot drift from the chrome it sits beside. */
+  --color-court: #2d6595;
+  --color-court-run: #1c5c4f;
+  --color-court-line: #f4f9ff;
+  --color-ball: #d6e02c;
 }
 
 /* The verdict confirmation over the video (QueueMode). It rises and fades

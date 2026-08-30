@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CourtGround from './components/CourtGround.svelte'
   import Library from './routes/Library.svelte'
   import Reel from './routes/Reel.svelte'
   import Reels from './routes/Reels.svelte'
@@ -12,6 +13,8 @@
   // this lands; nothing below blocks on it.
   appmode.load()
 </script>
+
+<CourtGround tier={router.current.name === 'session' ? 'review' : 'browse'} />
 
 <main class="mx-auto max-w-6xl p-6">
   {#if router.current.name === 'library'}
