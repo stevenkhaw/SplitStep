@@ -1,7 +1,8 @@
 # SplitStep — Review UX Fixes
 
 **Date:** 2026-08-20
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — `web/src/components/QueueMode.svelte`
+and `TimelineMode.svelte`, with the bindings in `web/src/lib/shortcuts.ts`.
 **Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` (§6 UI)
 
 ---

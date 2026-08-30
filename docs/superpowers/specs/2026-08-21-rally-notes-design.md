@@ -1,7 +1,8 @@
 # SplitStep — Rally Notes and Burned-In Captions
 
 **Date:** 2026-08-21
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — migration 006 (`N` in queue mode);
+migration 012 later added the per-item note a numbered reel burns in.
 **Extends:** `docs/superpowers/specs/2026-08-21-clip-export-and-reels-design.md` §4
 **Depends on:** the reels builder landing first, for §7's phase 2 only
 

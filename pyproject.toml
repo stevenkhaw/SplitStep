@@ -2,6 +2,13 @@
 name = "splitstep"
 version = "0.1.0"
 requires-python = "==3.12.*"
+# AGPL-3.0 is inherited, not chosen: Ultralytics YOLO11 is AGPL-3.0 and the
+# frozen sidecar links it into the shipped .dmg, so nothing weaker would state
+# the obligation a recipient actually has. FFmpeg (GPL) is invoked as a
+# separate process, which is why it is a note in LICENSE-THIRD-PARTY.md rather
+# than the reason for this line.
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -24,7 +31,8 @@ dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
 splitstep = "splitstep.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+# >=77 for PEP 639 (`license` as an SPDX string + `license-files`).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 # Name the package instead of letting setuptools guess. Flat-layout

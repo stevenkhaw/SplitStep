@@ -1,7 +1,9 @@
 # SplitStep — Colour Metadata in the Locked Clip Profile
 
 **Date:** 2026-08-21
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — `media/probe.py::color_tag` is the
+single place ffprobe's two spellings of "missing" collapse to `None`, and
+both `make_clip` and `media/concat.py`'s pre-flight read it.
 **Extends:** `docs/superpowers/specs/2026-08-21-clip-export-and-reels-design.md` §4.2
 **Adds a fifth unpinned property to the three that section already records** —
 SAR, audio presence, and now colour.

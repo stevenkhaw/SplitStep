@@ -1,7 +1,10 @@
 # Mac app distribution — design
 
 Date: 2026-08-26
-Status: Approved design, awaiting implementation plan
+Status: Approved and implemented. All four phases are merged — server
+friend-readiness, friend-mode UI, the Tauri shell and `.dmg`, and numbered
+reels. The `.dmg` has been installed and run from a browser download on a
+second Mac; see `docs/SMOKE.md` for what a human has actually exercised.
 
 ## Goal
 

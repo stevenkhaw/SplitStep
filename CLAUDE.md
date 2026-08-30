@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 767 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 848 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -81,7 +81,7 @@ if one is there. This is load-bearing: an unclean eject leaves an empty
 mountpoint that passes `is_dir`/`os.access`, and without the guard sqlite would
 silently create a second library on the internal SSD.
 
-### Pipeline (the README is stale here — trust this)
+### Pipeline
 
 ```
 watcher -> ingest job -> [human: setup wizard] -> build_proxy job -> detect job

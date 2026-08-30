@@ -1,7 +1,8 @@
 # Clips grouped by source — design
 
 Date: 2026-08-26
-Status: Approved (Steven, 2026-08-26). Lands on `phase1-server-friend-readiness`,
+Status: Approved (Steven, 2026-08-26) and implemented — `Library.clips_dir`
+lays clips out per source. Landed on `phase1-server-friend-readiness`,
 not master — master stays frozen-stable while the phase is tested.
 
 ## What changes

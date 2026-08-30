@@ -1,7 +1,10 @@
 # SplitStep — Design
 
 **Date:** 2026-08-19
-**Status:** Approved, ready for implementation planning
+**Status:** Approved and implemented. Backend core and the review UI both
+shipped — `plans/2026-08-19-backend-core.md`, `plans/2026-08-19-review-ui.md`.
+Kept as the original decision record; where it disagrees with `CLAUDE.md`,
+`CLAUDE.md` is current.
 
 ---
 

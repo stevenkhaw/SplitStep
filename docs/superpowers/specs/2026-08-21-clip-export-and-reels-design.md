@@ -1,7 +1,9 @@
 # SplitStep — Clip Export and Reels
 
 **Date:** 2026-08-21
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — `splitstep clips export`, the `clip`
+and `reel` job handlers, and `/reels` + `/reels/:slug`. Migration 007 rekeyed
+`reel_items` to `(source_id, start_ms, end_ms)` before it ever held a row.
 **Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` §7
 **Corrects that document in three places** — see §2.
 

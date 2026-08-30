@@ -5,6 +5,13 @@ using motion + audio detection, and serves a review UI for starring/rejecting
 rallies and tuning the segmentation. Everything — the API, the media server,
 and the review UI — runs as one process: `splitstep serve`.
 
+It ships in two tiers, and they are the same program. A **development
+checkout** is what the rest of this file describes: a conda env, a Node build,
+and `splitstep serve` on :8420. A **Mac app** wraps exactly that server in a
+Tauri shell and a `.dmg` so someone who has never opened a terminal can use it
+— see [The Mac app](#the-mac-app) below, and `docs/INSTALL.md` for the
+instructions written for them rather than for you.
+
 ## Setup
 
 ```bash
@@ -91,6 +98,55 @@ labels export/score         export or score the human label corpus
 clips export/orphans/prune  cut, list, and clean up rally clips
 ```
 
+## The Mac app
+
+The same server, wrapped so it can be double-clicked. `src-tauri/` is a thin
+Tauri v2 shell and `packaging/` freezes `splitstep serve` with PyInstaller;
+the window loads `http://127.0.0.1:<port>`, so the UI is still served by
+Python and `/media` range requests behave identically to the browser tier.
+
+```bash
+./packaging/build_app.sh                       # assets -> web -> icon -> freeze -> .dmg
+cd src-tauri && ~/.cargo/bin/cargo test        # the shell's own tests
+cd src-tauri && ~/.cargo/bin/cargo tauri dev   # shell + launcher, no freeze needed
+```
+
+`cargo` lives at `~/.cargo/bin` and is not on the default PATH. `build_app.sh`
+is the only supported path to a `.dmg` — it takes about 12 minutes and wants
+~10 GB free, plus ~2.5 GB of headroom beyond the output or `bundle_dmg.sh`
+fails with an unhelpful error. It carries three guards, each standing where a
+silent failure already shipped once: the freeze must contain as many `.sql`
+migrations as the source tree, it must contain the overlay font, and every
+Rust source must be older than the built executable.
+
+The output is `SplitStep_<version>_aarch64.dmg`. **Apple Silicon only**;
+Intel Macs are not supported. The bundle is ad-hoc signed
+(`bundle.macOS.signingIdentity: "-"`), not notarized, so macOS blocks the
+first launch and the way through is System Settings → Privacy & Security →
+**Open Anyway**. macOS 15 removed the old right-click → Open shortcut.
+`docs/INSTALL.md` is that walkthrough written for a non-technical user.
+
+Two things about the shell are worth knowing before you touch it:
+
+- **The library chooser is rendered by Tauri, not by Python.** `Library.open()`
+  refuses without a `library.db`, so there is no server available to serve a
+  page asking which library the server should open. It is a second Vite entry
+  (`web/launcher.html` → `web/dist-launcher/`, built by `npm run build:launcher`),
+  which keeps `web/dist` exactly what the sidecar ships. A normal launch skips
+  it and boots straight into the configured library.
+- **Adding a shell command means editing two lists.** `generate_handler!` in
+  `src-tauri/src/main.rs` and `COMMANDS` in `src-tauri/build.rs` must agree, or
+  the command works in the launcher and fails only in the packaged app, only at
+  runtime, with `not allowed by ACL`. CLAUDE.md's "The desktop app" section has
+  the full rationale — read it before changing `src-tauri/` or `packaging/`.
+
+A library *created* through the app is marked friend mode, which hides the two
+tuning surfaces — label mode and the re-segment panel — behind
+**Settings → Advanced tools**, so a stray keypress can't write to the training
+corpus or rebuild a reviewed session. Merely *opening* an existing library
+never changes the mode. `docs/SMOKE.md` records what a human has actually
+exercised in the app versus what only has tests behind it.
+
 ## The ingest -> detect -> review -> tune loop
 
 1. **Ingest.** Drop a video in `_inbox/`. The watcher picks it up within 5
@@ -175,30 +231,64 @@ splitstep --library /Volumes/SplitStep detect <source_id> --now
 
 ## Keybindings
 
-Queue mode (`web/src/components/QueueMode.svelte`):
+`?` (or `/`) opens the full reference over whichever mode you are in. Both
+that overlay and the inline strip under the video render from
+`web/src/lib/shortcuts.ts` — that file is the single place a binding is
+written down, and the tables below are a copy of it. If they disagree, the
+source is right.
+
+Queue mode:
 
 | Key | Action |
 |---|---|
-| `S` | star |
-| `X` | reject |
-| `R` | replay |
-| `→` | skip to next rally |
-| `←` | back to previous rally |
-| `U` | undo |
-| `1` `2` `3` | playback speed 1x / 1.5x / 2x |
-| `space` | play / pause |
-| `T` | open timeline mode on the current rally |
+| `S` | star this rally |
+| `P` | mark it a point |
+| `X` | reject it (again to undo) |
+| `U` | undo the last verdict |
+| `N` | write a note |
+| `space` | play or pause |
+| `R` | replay from the start |
+| `` ` `` `1` `2` `3` | playback speed |
+| `←` `→` | previous / next rally |
+| `T` | timeline, to fix the boundaries |
+| `L` | label mode, to judge the detector *(dev mode only)* |
+| `?` | this list |
 
-Timeline mode (`web/src/components/TimelineMode.svelte`):
+Timeline mode:
 
 | Key | Action |
 |---|---|
-| `[` | set the rally's in-point to the current playhead |
-| `]` | set the rally's out-point to the current playhead |
-| `,` | step back one frame |
-| `.` | step forward one frame |
-| `space` | play / pause |
-| `esc` | close timeline, back to queue |
+| `[` | set the in point here |
+| `]` | set the out point here |
+| `C` | split here into two rallies |
+| `U` | merge back into the previous |
+| `space` | play or pause |
+| `,` `.` | back / forward one frame |
+| `esc` | back to the queue |
+| `?` | this list |
+
+`C` rather than `S` for split: `S` is *star* in queue mode, you cross between
+the two modes constantly, and a reflex `S` that cut instead of starring is the
+worst misfire available for a key whose inverse is conditional.
+
+Label mode (dev mode only — this is the human-judgement corpus
+`splitstep labels score` reads):
+
+| Key | Action |
+|---|---|
+| `1` `2` `3` `4` | clean rally / not play / partly play / unsure |
+| `Q` `W` | starts early / starts late |
+| `O` `P` | ends early / ends late |
+| `space` | play or pause |
+| `R` | replay from the start |
+| `←` `→` | previous / next rally |
+| `U` | retract this judgement |
+| `L` `esc` | back to the queue |
+| `?` | this list |
+
+The boundary keys are laid out on the keyboard the way they are on the clip:
+left hand for the clip's start, right hand for its end, and the first of each
+pair is early, the second late.
 
 ## Development workflow
 
@@ -241,14 +331,28 @@ npm run check       # svelte-check: type errors and a11y warnings
 
 ## Current state
 
-**Plan 1 (backend core), Plan 2 (review UI), 4K clip export and reel building
-are complete.** Ingest, transcode, detection (vision + audio), segmentation,
-the job queue, the inbox watcher, the REST API, the full review UI (queue
-mode, timeline mode, re-segment tuning, play-region editor), cutting
-starred/point rallies to 4K clips at the locked libx264 profile, and building
-and rendering reels (`reel_items` keyed on `(source_id, start_ms, end_ms)` by
-migration 007, the `reel` job's `-c copy` concat, `/api/reels*`) all work end
-to end and are served from a single `splitstep serve` process.
+**Everything planned is built, and SplitStep is a Mac app that has been
+installed from a browser download on a second machine.** Ingest, transcode,
+detection (vision + audio), segmentation, the job queue, the inbox watcher,
+the REST API, and the full review UI — queue mode, timeline mode with
+boundary editing and rally split, coaching notes, re-segment tuning, the
+play-region editor — all work end to end from a single `splitstep serve`
+process. On top of that:
+
+- **4K clip export.** Starred and point rallies cut at the library's locked
+  colour profile (`splitstep clips export`, the `clip` job).
+- **Reels.** An ordered list of clips, keyed on `(source_id, start_ms, end_ms)`
+  by migration 007 so a re-segment can never silently empty one, concatenated
+  by the `reel` job's guarded `-c copy`, built and previewed at `/reels`.
+- **Numbered renders.** A reel can burn in a "3 / 20" counter and a per-clip
+  note (migration 012), composited as a PIL-rendered PNG through ffmpeg's
+  `overlay`. The plain render is untouched and stays the fast default.
+- **The rally-label corpus.** Label mode and `POST /api/rallies/{id}/bounds`
+  both write human judgements that survive a re-segment, and
+  `splitstep labels score` replays a segmentation against them.
+- **Distribution.** All four phases of the Mac-app plan are merged: server
+  friend-readiness, friend-mode UI, the Tauri shell and `.dmg`, and numbered
+  reels. See [The Mac app](#the-mac-app).
 
 **Still deferred:** the cross-session rally browser with filters — the last
 piece of Plan 3. It only becomes meaningful once a second session exists to
@@ -287,6 +391,14 @@ produced the bug where every clip came out one hit long. Full findings:
 phone high enough to see both players at different depths is the only change
 that gives the detector a real signal; the viewpoint classifier will switch
 profiles on its own.
+
+## Licence
+
+**AGPL-3.0-or-later** (`LICENSE`). Inherited rather than chosen: Ultralytics
+YOLO11 is AGPL-3.0 and the frozen sidecar links it into the shipped `.dmg`, so
+anything weaker would misstate what a recipient is entitled to. The bundle
+also redistributes GPL-3.0 FFmpeg binaries. Full component list, and the
+FFmpeg source obligation that comes with them: `LICENSE-THIRD-PARTY.md`.
 
 ## First real use
 

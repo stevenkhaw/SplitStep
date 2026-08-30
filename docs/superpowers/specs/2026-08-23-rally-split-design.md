@@ -1,7 +1,9 @@
 # SplitStep — Splitting a Rally in Two
 
 **Date:** 2026-08-23
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — migration 009, `web/src/lib/split.ts`,
+and `C`/`U` in timeline mode. Follow-ups in
+`plans/2026-08-23-rally-split-followups.md` remain open.
 **Extends:** `docs/superpowers/specs/2026-08-20-review-ux-design.md` (timeline mode)
 **Touches:** `docs/superpowers/specs/2026-08-21-rally-labelling-design.md` (the corpus anchor)
 

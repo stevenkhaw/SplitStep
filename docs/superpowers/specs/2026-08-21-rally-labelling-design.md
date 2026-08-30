@@ -1,7 +1,8 @@
 # SplitStep — Rally Labelling
 
 **Date:** 2026-08-21
-**Status:** Approved, ready for implementation
+**Status:** Approved and implemented — migrations 003 and 004, label mode in
+the UI, and `splitstep labels export/score`.
 **Extends:** `docs/superpowers/specs/2026-08-20-review-ux-design.md`
 **Motivated by:** `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md`
 

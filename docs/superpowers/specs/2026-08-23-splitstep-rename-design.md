@@ -1,7 +1,8 @@
 # SplitStep rename — design
 
 **Date:** 2026-08-23
-**Status:** approved, not yet implemented
+**Status:** Approved and implemented — the package, the CLI and the library
+tree are all `splitstep` throughout.
 **Supersedes the name established in:** `docs/superpowers/specs/2026-08-19-splitstep-design.md`
 (named `2026-08-19-bootlegvision-design.md` until this work landed)
 

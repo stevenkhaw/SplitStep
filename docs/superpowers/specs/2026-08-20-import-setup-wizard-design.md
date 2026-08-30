@@ -1,7 +1,9 @@
 # SplitStep — Import Setup Wizard and Source Rotation
 
 **Date:** 2026-08-20
-**Status:** Approved, ready for implementation planning
+**Status:** Approved and implemented — `splitstep/setup.py::queue_setup`
+(the one function both the API route and the CLI call) and
+`web/src/routes/Setup.svelte`.
 **Extends:** `docs/superpowers/specs/2026-08-19-splitstep-design.md` (§3 pipeline, §5 detection, §6 UI)
 
 ---
