@@ -61,9 +61,9 @@ export function createToaster(durationMs: number = DEFAULT_DURATION_MS) {
  * bars now use, and contrast rather than colour is what separates it from
  * the error tone.
  *
- * The solid pills keep their explicit dark label: both fills are light
- * enough that a white label would measure about 2:1, while bg-on-fill
- * clears 6.4:1.
+ * The solid pills keep their explicit dark label: a white label fails on
+ * both fills -- 3.1:1 on danger, 1.2:1 on the near-white fg -- while
+ * bg-on-fill clears 6.2:1 (6.3 on danger, 16.5 on fg).
  */
 export function toastToneClasses(tone: ToastTone, surface: 'solid' | 'muted' = 'solid'): string {
   if (surface === 'muted') {
