@@ -76,7 +76,7 @@ def create_app(library: Library, spa_dist: Path | None = None) -> FastAPI:
         yield
         conns.close_all()
 
-    app = FastAPI(title="SplitStep", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="SplitStep", version="0.2.0", lifespan=lifespan)
     app.state.library = library
     app.state.conns = conns
     app.include_router(router)

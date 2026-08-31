@@ -40,7 +40,7 @@ To re-test Gatekeeper without a second machine, write the download flag onto a
 copy and open that:
 
 ```bash
-cp ~/Desktop/SplitStep_0.1.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.quarantine "0081;00000000;Safari;" ~/Desktop/q.dmg
+cp ~/Desktop/SplitStep_0.2.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.quarantine "0081;00000000;Safari;" ~/Desktop/q.dmg
 ```
 
 ## Still open
