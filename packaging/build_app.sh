@@ -63,5 +63,41 @@ for src in src-tauri/build.rs src-tauri/tauri.conf.json src-tauri/src/*.rs src-t
 done
 echo "    app is current"
 
+# This guard watches the payload; the one above watches the binary, and the
+# two go stale independently. On 2026-08-30, twice, nothing in the Rust crate
+# had changed, so cargo short-circuited and tauri's bundler reused the
+# *previous* .app's copy of the "splitstep-server" bundle resource wholesale.
+# `npm run build` and the PyInstaller freeze were both correct -- the guard
+# above printed "app is current" truthfully both times, because the
+# executable genuinely was current -- and the shipped dmg still carried the
+# previous run's web_dist regardless:
+#   freeze at 19:27 produced   web_dist/assets/index-DPX1KXY-.js  (correct)
+#   dmg   at 19:30 contained   web_dist/assets/index-Bh4QEhcS.js  (stale)
+# Comparing the freeze in packaging/dist/ against web/dist would not have
+# caught this -- both were already correct at that point; the divergence
+# only exists inside the bundler's copy. And bundle/macos/SplitStep.app is
+# not a place to look either: tauri deletes it on its way out ("Cleaning
+# .../bundle/macos/SplitStep.app"), so the mounted dmg is the only place the
+# truth still lives. Filenames alone would usually show this -- Vite hashes
+# them by content -- but the check has to compare bytes, not names, or it
+# would miss the rarer case of a same-named file with different content.
+echo "==> verifying the dmg's web bundle matches what this build just produced"
+DMG_PATH=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+DMG_MOUNT=$(mktemp -d)
+cleanup_dmg_mount() {
+  hdiutil detach "$DMG_MOUNT" -quiet >/dev/null 2>&1 || true
+  rmdir "$DMG_MOUNT" 2>/dev/null || true
+}
+trap cleanup_dmg_mount EXIT
+hdiutil attach "$DMG_PATH" -nobrowse -readonly -mountpoint "$DMG_MOUNT" >/dev/null
+SHIPPED_WEBDIST="$DMG_MOUNT/SplitStep.app/Contents/Resources/splitstep-server/_internal/web_dist"
+if ! DIFF_OUT=$(diff -rq "web/dist" "$SHIPPED_WEBDIST" 2>&1); then
+  echo "FATAL: the dmg's web bundle is not byte-identical to the one this build just produced in web/dist" >&2
+  echo "$DIFF_OUT" | sed 's/^/       /' >&2
+  echo "       Run: touch src-tauri/build.rs && rm -rf src-tauri/target/aarch64-apple-darwin/release/bundle && cargo tauri build" >&2
+  exit 1
+fi
+echo "    dmg web bundle matches web/dist byte-for-byte"
+
 echo "==> done"
 ls -lh src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
