@@ -998,3 +998,112 @@ def test_detect_uses_subject_mode_on_ground_level_features(
 
     rallies = list_rallies(conn, session_id)
     assert len(rallies) == 16
+
+
+# -- Defect: a failed detect must not strand the source at 'detecting' -------
+# handle_detect set the source to 'detecting' and then did its work outside
+# any try, so an exception marked the JOB failed and left the SOURCE pinned
+# mid-flight forever. Nothing ever clears that: the worker only touches the
+# jobs table, and the next detect is the only writer of the source status.
+# The cost is a lie in the interface -- status.ts renders 'detecting' as the
+# active "Finding rallies" pill and emptyQueueCopy says "detection is still
+# running", which is the exact wrong promise its own docstring exists to
+# remove. Observed on a real library: three sources sat at 'detecting' for
+# fifteen hours after a frozen build died on a missing matplotlib, with the
+# jobs badge the only surface that knew.
+
+def _detect_ready_source(library, conn, dropped_video, name="IMG_4000.MOV"):
+    """A registered source whose detect can be driven to the YOLO call."""
+    handle_ingest(library, {"path": str(dropped_video)})
+    session_id = list_sessions(conn)[0]["id"]
+    return session_id, list_sources(conn, session_id)[0]
+
+
+def _detect_explodes(monkeypatch, exc: Exception):
+    """Fail at iter_person_boxes, where the real one failed.
+
+    _audio_grid is stubbed rather than left to run: the point of the test is
+    the status after a raise, and a real ffmpeg audio pass on the fixture
+    would only add a way for it to fail for an unrelated reason.
+    """
+    monkeypatch.setattr("splitstep.jobs.handlers._audio_grid", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "splitstep.jobs.handlers.iter_person_boxes",
+        lambda *a, **k: (_ for _ in ()).throw(exc),
+    )
+
+
+def test_detect_failure_marks_the_source_failed_rather_than_leaving_it_detecting(
+    library, conn, dropped_video, monkeypatch
+):
+    session_id, source = _detect_ready_source(library, conn, dropped_video)
+    _detect_explodes(monkeypatch, ModuleNotFoundError("No module named 'matplotlib'"))
+
+    with pytest.raises(ModuleNotFoundError):
+        handle_detect(library, {"source_id": source["id"]})
+
+    assert get_source(conn, source["id"])["status"] == "failed"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id=?", (session_id,)
+    ).fetchone()
+    assert session_after["status"] == "failed"
+
+
+def test_detect_failure_does_not_fail_the_session_when_a_sibling_is_ready(
+    library, conn, dropped_video, sample_video, monkeypatch
+):
+    """The same healthy-sibling rule build_proxy and ingest already carry:
+    a session holding one finished source must not be dragged to 'failed'
+    by a second source's detect, or refresh_session_review_status can never
+    move it again and the sibling's reviewed rallies are stranded.
+    """
+    session_id, source_a = _detect_ready_source(library, conn, dropped_video)
+    handlers.set_source_status(conn, source_a["id"], "ready")
+    handlers.set_session_status(conn, session_id, "ready")
+
+    source_b_id, idx_b = add_source(
+        conn, session_id,
+        recorded_at="2024-01-01T00:00:01+00:00",
+        duration_ms=2000, width=640, height=360, fps=30.0,
+        original_name="IMG_4001.MOV",
+    )
+    handlers.set_source_status(conn, source_b_id, "ingested")
+    b_dir = library.source_dir(session_id, idx_b)
+    b_dir.mkdir(parents=True, exist_ok=True)
+    (b_dir / "original.mp4").write_bytes(sample_video.read_bytes())
+    _detect_explodes(monkeypatch, RuntimeError("yolo exploded"))
+
+    with pytest.raises(RuntimeError):
+        handle_detect(library, {"source_id": source_b_id})
+
+    assert get_source(conn, source_b_id)["status"] == "failed"
+    session_after = conn.execute(
+        "SELECT status FROM sessions WHERE id=?", (session_id,)
+    ).fetchone()
+    assert session_after["status"] == "ready"
+
+
+def test_detect_retry_after_a_failure_brings_the_source_back_to_ready(
+    library, conn, dropped_video, monkeypatch
+):
+    """'failed' is a waypoint, not a grave: the retry path re-enters
+    handle_detect, which sets 'detecting' on the way in and 'ready' on the
+    way out. Without this the fix would trade one stuck status for another.
+    """
+    session_id, source = _detect_ready_source(library, conn, dropped_video)
+    _detect_explodes(monkeypatch, RuntimeError("yolo exploded"))
+    with pytest.raises(RuntimeError):
+        handle_detect(library, {"source_id": source["id"]})
+    assert get_source(conn, source["id"])["status"] == "failed"
+
+    frames = [
+        FeatureFrame(i * 200, 2,
+                     Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9)
+        for i in range(40)
+    ]
+    write_features(library.source_dir(session_id, source["idx"]) / "features.jsonl", frames)
+    handle_detect(library, {"source_id": source["id"], "reuse_features": True})
+
+    assert get_source(conn, source["id"])["status"] == "ready"
+    assert len(list_rallies(conn, session_id)) == 1

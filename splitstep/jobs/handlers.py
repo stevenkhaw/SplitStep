@@ -301,19 +301,38 @@ def handle_detect(library: Library, payload: dict,
     proxy = src_dir / "proxy.mp4"
     features_path = src_dir / "features.jsonl"
 
-    if payload.get("reuse_features") and features_path.exists():
-        frames = read_features(features_path)
-    else:
-        set_source_status(conn, source["id"], "detecting")
-        audio_path = _audio_source(src_dir, proxy, source)
-        grid = _audio_grid(audio_path, source["duration_ms"])
-        quad = _quad_for(conn, source)
-        boxes = list(iter_person_boxes(proxy, sample_fps=SAMPLE_FPS))
-        frames = build_features(boxes, quad, grid, STEP_MS)
-        write_features(features_path, frames)
+    # The same try/except ingest and build_proxy carry, and for a sharper
+    # reason here: this handler writes 'detecting' on the way in, and the
+    # worker only ever touches the jobs table, so an escaping exception used
+    # to leave the source pinned mid-flight with nothing that could ever
+    # clear it -- the next detect is the only other writer of the status.
+    # The interface then states the opposite of the truth: status.ts renders
+    # 'detecting' as the active "Finding rallies" pill and emptyQueueCopy
+    # promises "detection is still running", which is the exact lie its
+    # docstring exists to remove. Three sources sat that way for fifteen
+    # hours after a frozen build died on a missing matplotlib, with the jobs
+    # badge the only surface that knew anything had failed.
+    try:
+        if payload.get("reuse_features") and features_path.exists():
+            frames = read_features(features_path)
+        else:
+            set_source_status(conn, source["id"], "detecting")
+            audio_path = _audio_source(src_dir, proxy, source)
+            grid = _audio_grid(audio_path, source["duration_ms"])
+            quad = _quad_for(conn, source)
+            boxes = list(iter_person_boxes(proxy, sample_fps=SAMPLE_FPS))
+            frames = build_features(boxes, quad, grid, STEP_MS)
+            write_features(features_path, frames)
 
-    intervals = segment(frames, params_for_frames(frames))
-    replace_rallies(conn, source["session_id"], source["id"], intervals)
+        intervals = segment(frames, params_for_frames(frames))
+        replace_rallies(conn, source["session_id"], source["id"], intervals)
+    except Exception:
+        set_source_status(conn, source["id"], "failed")
+        # See _session_should_fail: don't strand a sibling source's
+        # already-reviewed work behind this one's failure.
+        if _session_should_fail(conn, source["session_id"], source["id"]):
+            set_session_status(conn, source["session_id"], "failed")
+        raise
 
     set_source_status(conn, source["id"], "ready")
     if all(r["status"] == "ready" for r in conn.execute(
