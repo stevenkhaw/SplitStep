@@ -71,7 +71,21 @@ a = Analysis(
     # fifteen minutes into a job rather than at startup. The others are
     # genuinely unreachable here and are frequent sources of PyInstaller
     # import failures.
-    excludes=["matplotlib", "tkinter", "PyQt5", "PySide2", "IPython", "pytest"],
+    #
+    # matplotlib WAS on this list and is the exact failure that paragraph
+    # warned about, arriving through the door it was watching. Nearly every
+    # matplotlib import in ultralytics is function-scoped and commented
+    # "scope for faster 'import ultralytics'", which is what made excluding
+    # it look safe. One is not: `models/yolo/semantic/train.py` imports
+    # `matplotlib.pyplot` at module level, and it sits under
+    # `ultralytics.models`, which `ultralytics/__init__.py` resolves lazily
+    # on first attribute access. So the freeze started, served, ingested and
+    # built proxies, and only died inside `iter_person_boxes` -- fifteen
+    # minutes into the first detect, with a traceback naming a plotting
+    # library the app never plots with. Weighing ~40 MB against that is not
+    # a trade. `tests/test_freeze_spec.py` now fails if any excluded module
+    # is imported at module level anywhere ultralytics can reach.
+    excludes=["tkinter", "PyQt5", "PySide2", "IPython", "pytest"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -43,6 +43,20 @@ if ! find packaging/dist/splitstep-server -name "font.ttf" | grep -q .; then
 fi
 echo "    overlay font present"
 
+# Third of the same family, and the one that has actually shipped broken:
+# matplotlib is imported at module level by ultralytics.models, which
+# ultralytics resolves lazily, so a freeze without it starts, serves, and
+# fails only inside the first detect job -- fifteen minutes in, on the user's
+# machine. mpl-data is checked rather than the package directory because it
+# is the half PyInstaller collects through a hook: if the hook stops firing
+# the modules can be present and the runtime still dies looking for
+# matplotlibrc. `tests/test_freeze_spec.py` guards the source side of this.
+if ! find packaging/dist/splitstep-server -type d -name "mpl-data" | grep -q .; then
+  echo "FATAL: the freeze carries no matplotlib -- detect would die mid-job" >&2
+  exit 1
+fi
+echo "    matplotlib present"
+
 echo "==> app"
 (cd src-tauri && "$CARGO/cargo" tauri build --target aarch64-apple-darwin)
 
