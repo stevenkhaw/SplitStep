@@ -150,8 +150,12 @@ pub fn open_library(
                     *state.sidecar.lock().unwrap() = Some(child);
                     return Ok(());
                 }
-                last_error = drain_stderr(&mut child);
+                // Terminate first: the lines that explain the failure are
+                // only complete once the reader hits EOF, and the reader is
+                // now running for the whole life of the process rather than
+                // being started here.
                 child.terminate();
+                last_error = child.last_output(3);
             }
             Err(e) => last_error = e.to_string(),
         }
@@ -161,22 +165,6 @@ pub fn open_library(
     } else {
         format!("SplitStep could not start its server. {last_error}")
     })
-}
-
-fn drain_stderr(child: &mut Sidecar) -> String {
-    use std::io::Read;
-    let Some(mut stderr) = child.child.stderr.take() else {
-        return String::new();
-    };
-    let mut buf = String::new();
-    let _ = stderr.read_to_string(&mut buf);
-    // The last few lines carry the actual failure; the rest is uvicorn noise.
-    buf.lines()
-        .filter(|line| !line.trim().is_empty())
-        .rev()
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn persist(path: &str, create: bool) -> Result<(), String> {

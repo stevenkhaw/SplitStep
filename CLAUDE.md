@@ -247,6 +247,23 @@ reparented to launchd, which also covers SIGKILL. A pid file reaped on next
 launch is the third line. `entry.py` also reorders argv: `--library` is a
 top-level flag, so it must precede the `serve` subcommand it injects.
 
+**Its output must be read, continuously, or the app deadlocks.** The pipes
+`Sidecar::spawn` hands the sidecar are drained by a thread each for the life
+of the process (`src-tauri/src/logs.rs`), into
+`~/Library/Logs/SplitStep/server.log` at 5MB with one previous run kept. This
+is not tidiness. A pipe holds 64KB -- measured at **885 uvicorn access-log
+lines** -- and with nobody reading, the write that does not fit blocks
+forever: the server stops answering HTTP mid-session, which reads as the app
+freezing on whatever you were doing (a reel, where preview seeks and reorder
+PUTs burn the budget in minutes). SIGTERM cannot rescue it either, because
+uvicorn logs on its way out and blocks on the same full pipe, so the shell's
+`wait()` never returns. Three `.hang` reports, 14s, 18s and 101s, all parked
+in `wait4`. `terminate()` is therefore bounded: SIGTERM, five seconds, then
+SIGKILL. `last_output` replaced `drain_stderr` -- one reader owns the stream,
+and the failed-launch sentence comes from the tail it keeps. The real-server
+proof is an `#[ignore]`d test; the command to run it is in its doc comment,
+and without the drain it fails at request ~1050.
+
 **The ACL trap, and it is a trap.** Tauri v2 gates commands by origin.
 `tauri://localhost` (the launcher) is local and permissive; the page the
 sidecar serves is *remote* and denied by default. Two things must agree or a

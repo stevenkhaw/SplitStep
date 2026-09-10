@@ -88,6 +88,14 @@ cp ~/Desktop/SplitStep_0.2.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.q
       that stayed on the launcher passed because the launcher is a local
       origin. Fixed by src-tauri/capabilities/default.json — re-verify.
 - [ ] Switch to the other one and back; nothing was moved or lost
+- [ ] Work a reel for ten minutes -- preview seeks, Alt+Arrow reorders, a
+      render -- and the app is still answering. Before the output drain, the
+      sidecar wedged on a full pipe at ~885 log lines and the app froze on
+      whatever you touched next; `~/Library/Logs/SplitStep/server.log`
+      growing past 64KB is the thing to check
+- [ ] Quit straight after that session: the window closes at once. The three
+      `.hang` reports this replaced were all the quit path, waiting on a
+      sidecar that could no longer act on SIGTERM
 
 ## Known-unknown
 

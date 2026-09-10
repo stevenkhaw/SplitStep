@@ -2,6 +2,7 @@
 
 mod commands;
 mod lifecycle;
+mod logs;
 mod sidecar;
 mod state;
 
