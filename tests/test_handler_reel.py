@@ -6,6 +6,7 @@ from splitstep.config import NotEnoughSpace
 from splitstep.db.rallies import replace_rallies
 from splitstep.db.reels import add_items, create_reel, get_reel
 from splitstep.db.sessions import add_source, find_or_create_session_for_date
+from splitstep.db.settings import set_hr_clips_root
 from splitstep.detect.segment import Interval
 from splitstep.jobs.handlers import HANDLERS, handle_reel
 from splitstep.media.clips import clip_relpath
@@ -245,3 +246,46 @@ def test_a_reencode_fallback_still_marks_the_reel_rendered(
     assert any((slug in r.message and "fell back" in r.message) or
                (slug in r.getMessage() and "fell back" in r.getMessage())
                for r in caplog.records)
+
+
+def _hr_copies(library, fx, hr_root, seconds=2.0):
+    """RallyMetrics-shaped copies: same relpath under the SplitStep session id,
+    longer than the originals so a render that used them is measurable."""
+    return [
+        _real_clip(hr_root / fx["session_id"] / clip_relpath(fx["idx"], start, end), seconds)
+        for _src, start, end in fx["spans"]
+    ]
+
+
+def test_handle_reel_hr_uses_the_overlaid_copies(library, conn, reel_of_two, tmp_path):
+    fx = reel_of_two
+    _cut_all(library, fx, seconds=1.0)
+    hr_root = tmp_path / "rm" / "clips"
+    hr_parts = _hr_copies(library, fx, hr_root, seconds=2.0)
+    set_hr_clips_root(conn, hr_root)
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "hr": True})
+
+    dst = library.reels_dir / "2026-08-18-points.mp4"
+    total = sum(probe(p).duration_ms for p in hr_parts)
+    assert abs(probe(dst).duration_ms - total) <= 500  # ~4 s, not the originals' ~2 s
+
+
+def test_handle_reel_hr_refuses_when_one_copy_is_missing(library, conn, reel_of_two, tmp_path):
+    fx = reel_of_two
+    _cut_all(library, fx)
+    hr_root = tmp_path / "rm" / "clips"
+    set_hr_clips_root(conn, hr_root)
+    _src, start, end = fx["spans"][0]
+    _real_clip(hr_root / fx["session_id"] / clip_relpath(fx["idx"], start, end), 1.0)
+
+    with pytest.raises(ValueError, match="1 clip\\(s\\) with no heart-rate overlay"):
+        handle_reel(library, {"reel_id": fx["reel"]["id"], "hr": True})
+    assert not (library.reels_dir / "2026-08-18-points.mp4").exists()
+
+
+def test_handle_reel_hr_refuses_without_a_configured_root(library, conn, reel_of_two):
+    fx = reel_of_two
+    _cut_all(library, fx)
+    with pytest.raises(ValueError, match="set-hr-clips"):
+        handle_reel(library, {"reel_id": fx["reel"]["id"], "hr": True})

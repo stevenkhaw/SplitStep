@@ -8,8 +8,14 @@ not a fact about the app.
 
 import json
 import sqlite3
+from pathlib import Path
 
 CLIP_COLOR_PROFILE_KEY = "clip_color_profile"
+# The RallyMetrics `clips/` folder: copies of this library's clips with a
+# heart-rate overlay burned in, named `<session_id>/<idx>/<start>-<end>.mp4`
+# to mirror clip_relpath exactly. A library setting rather than app config
+# because it pairs with THIS library's clips.
+HR_CLIPS_ROOT_KEY = "hr_clips_root"
 
 
 def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
@@ -36,3 +42,16 @@ def get_color_profile(conn: sqlite3.Connection) -> tuple[str, str, str, str] | N
 
 def lock_color_profile(conn: sqlite3.Connection, profile: tuple[str, str, str, str]) -> None:
     set_setting(conn, CLIP_COLOR_PROFILE_KEY, json.dumps(list(profile)))
+
+
+def get_hr_clips_root(conn: sqlite3.Connection) -> Path | None:
+    raw = get_setting(conn, HR_CLIPS_ROOT_KEY)
+    return Path(raw) if raw else None
+
+
+def set_hr_clips_root(conn: sqlite3.Connection, root: Path | None) -> None:
+    if root is None:
+        conn.execute("DELETE FROM settings WHERE key=?", (HR_CLIPS_ROOT_KEY,))
+        conn.commit()
+        return
+    set_setting(conn, HR_CLIPS_ROOT_KEY, str(root))

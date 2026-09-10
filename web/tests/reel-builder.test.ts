@@ -48,6 +48,9 @@ const mockApi = {
     queued: 2, already_cut: 0, in_flight: 0, unavailable: 0, total: 2,
   }),
   renderReel: vi.fn().mockResolvedValue({ job_id: 'j1', already_running: false }),
+  // No RallyMetrics folder by default: the heart-rate checkbox stays disabled
+  // and render passes hr:false. Tests that want it set override this.
+  config: vi.fn().mockResolvedValue({ mode: 'dev', hr_clips_root: null, hr_clips_available: false }),
   listSessions: vi.fn().mockResolvedValue([]),
   getSession: vi.fn().mockResolvedValue({ session: {}, sources: [], rallies: [] }),
   jobs: vi.fn().mockResolvedValue([]),
@@ -152,7 +155,7 @@ describe('Reel builder', () => {
     // The numbered checkbox is checked out of the box (Steven's call,
     // 2026-08-26): the overlay is the reason a render happens at all, and
     // unticking stays the escape hatch for a fast plain -c copy render.
-    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true)
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true, false)
   })
 
   it('passes numbered:false once the checkbox is unchecked', async () => {
@@ -163,7 +166,29 @@ describe('Reel builder', () => {
     flushSync()
     render().click()
     flushSync()
-    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', false)
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', false, false)
+  })
+
+  it('keeps the heart-rate checkbox disabled without a RallyMetrics folder', async () => {
+    await open(detail([item(1000), item(9000)]))
+    const hr = host.querySelector('[data-hr]') as HTMLInputElement
+    expect(hr.disabled).toBe(true)
+    expect(hr.checked).toBe(false)
+  })
+
+  it('passes hr:true once the folder is available and the box is ticked', async () => {
+    mockApi.config.mockResolvedValue({
+      mode: 'dev', hr_clips_root: '/Volumes/X/RallyMetrics/clips', hr_clips_available: true,
+    })
+    await open(detail([item(1000), item(9000)]))
+    await vi.waitFor(() => expect((host.querySelector('[data-hr]') as HTMLInputElement).disabled).toBe(false))
+    const hr = host.querySelector('[data-hr]') as HTMLInputElement
+    hr.checked = true
+    hr.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    render().click()
+    flushSync()
+    expect(mockApi.renderReel).toHaveBeenCalledWith('2026-08-18-points', true, true)
   })
 
   it('cutting reports the four counts separately', async () => {

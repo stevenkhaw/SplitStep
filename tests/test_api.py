@@ -743,11 +743,11 @@ def test_config_roundtrip(client, tmp_path, monkeypatch):
     from splitstep import appconfig
 
     monkeypatch.setattr(appconfig, "config_path", lambda: tmp_path / "config.json")
-    assert client.get("/api/config").json() == {"mode": "dev"}
+    assert client.get("/api/config").json()["mode"] == "dev"
     r = client.post("/api/config/mode", json={"mode": "friend"})
     assert r.status_code == 200
     assert r.json() == {"mode": "friend"}
-    assert client.get("/api/config").json() == {"mode": "friend"}
+    assert client.get("/api/config").json()["mode"] == "friend"
     assert client.post("/api/config/mode", json={"mode": "expert"}).status_code == 422
 
 
@@ -758,7 +758,7 @@ def test_config_routes_survive_a_corrupt_config_file(client, tmp_path, monkeypat
     (tmp_path / "config.json").write_text("{not valid json")
     # Read never 500s over a corrupt file; the write refuses with the
     # friendly fix-or-delete sentence rather than silently rewriting it.
-    assert client.get("/api/config").json() == {"mode": "dev"}
+    assert client.get("/api/config").json()["mode"] == "dev"
     r = client.post("/api/config/mode", json={"mode": "friend"})
     assert r.status_code == 500
     assert "config" in r.json()["detail"].lower()

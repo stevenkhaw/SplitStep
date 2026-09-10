@@ -306,7 +306,7 @@ def test_render_carries_the_numbered_flag_into_the_job(client, conn, session, li
     client.post(f"/api/reels/{reel['slug']}/render", json={"numbered": True})
 
     row = conn.execute("SELECT payload FROM jobs WHERE type='reel'").fetchone()
-    assert json.loads(row["payload"]) == {"reel_id": reel["id"], "numbered": True}
+    assert json.loads(row["payload"]) == {"reel_id": reel["id"], "numbered": True, "hr": False}
 
 
 def test_render_without_a_body_stays_plain(client, conn, session, library):
@@ -717,3 +717,57 @@ def test_reel_list_does_not_report_rendered_bytes(client, conn, library):
     _rendered_reel(conn, library, "r")
     listed = client.get("/api/reels").json()
     assert "rendered_bytes" not in listed[0]
+
+
+def _cut(library, session, spans):
+    """Mark clips as cut. The render route only checks existence; the job
+    that would read them is never run by these tests."""
+    clips = library.clips_dir(session["id"])
+    for start, end in spans:
+        path = clips / clip_relpath(session["idx"], start, end)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+
+
+def test_render_hr_refuses_without_root_then_without_copies_then_enqueues(
+    client, conn, session, library, tmp_path
+):
+    from splitstep.db.settings import set_hr_clips_root
+
+    reel = create_reel(conn, "hr reel")
+    conn.execute(
+        "INSERT INTO reel_items (reel_id, source_id, start_ms, end_ms, position)"
+        " VALUES (?, ?, 1000, 5000, 0)", (reel["id"], session["source_id"]),
+    )
+    conn.commit()
+    _cut(library, session, [(1000, 5000)])
+
+    r = client.post(f"/api/reels/{reel['slug']}/render", json={"hr": True})
+    assert r.status_code == 409 and "set-hr-clips" in r.json()["detail"]
+
+    hr_root = tmp_path / "rm" / "clips"
+    hr_root.mkdir(parents=True)
+    set_hr_clips_root(conn, hr_root)
+    r = client.post(f"/api/reels/{reel['slug']}/render", json={"hr": True})
+    assert r.status_code == 409 and "1 clip(s) have no heart-rate overlay" in r.json()["detail"]
+
+    copy = hr_root / session["id"] / clip_relpath(session["idx"], 1000, 5000)
+    copy.parent.mkdir(parents=True)
+    copy.write_bytes(b"x")
+    r = client.post(f"/api/reels/{reel['slug']}/render", json={"hr": True, "numbered": True})
+    assert r.status_code == 200
+    row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (r.json()["job_id"],)).fetchone()
+    assert json.loads(row["payload"]) == {"reel_id": reel["id"], "numbered": True, "hr": True}
+
+
+def test_config_reports_and_sets_hr_clips_root(client, tmp_path, monkeypatch):
+    from splitstep import appconfig
+
+    monkeypatch.setattr(appconfig, "config_path", lambda: tmp_path / "config.json")
+    assert client.get("/api/config").json()["hr_clips_root"] is None
+    assert client.post("/api/config/hr-clips", json={"path": str(tmp_path / "nope")}).status_code == 400
+    root = tmp_path / "rm-clips"
+    root.mkdir()
+    body = client.post("/api/config/hr-clips", json={"path": str(root)}).json()
+    assert body["hr_clips_root"] == str(root) and body["hr_clips_available"] is True
+    assert client.post("/api/config/hr-clips", json={"path": None}).json()["hr_clips_root"] is None

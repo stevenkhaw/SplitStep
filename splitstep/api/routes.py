@@ -61,6 +61,7 @@ from splitstep.db.sessions import (
     refresh_session_review_status,
     set_source_preset,
 )
+from splitstep.db.settings import get_hr_clips_root, set_hr_clips_root
 from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
@@ -72,6 +73,7 @@ from splitstep.media.probe import ProbeError
 from splitstep.media.transcode import TranscodeError, rotation_filter
 from splitstep.reels import (
     delete_rendered_file,
+    hr_missing_count,
     missing_clip_count,
     plan_reel_export,
     rendered_file,
@@ -277,6 +279,13 @@ class ItemNoteBody(BaseModel):
 
 class RenderBody(BaseModel):
     numbered: bool = False
+    # Use RallyMetrics's heart-rate-overlaid copies of the clips. Refused
+    # (409) while any item lacks one, the same shape as the cut check.
+    hr: bool = False
+
+
+class HrClipsBody(BaseModel):
+    path: str | None
 
 
 class SessionReelBody(BaseModel):
@@ -917,7 +926,28 @@ class ModeBody(BaseModel):
 
 @router.get("/api/config")
 def api_config(request: Request):
-    return {"mode": appconfig.get_mode()}
+    hr_root = get_hr_clips_root(_conn(request))
+    return {
+        "mode": appconfig.get_mode(),
+        "hr_clips_root": str(hr_root) if hr_root else None,
+        "hr_clips_available": bool(hr_root and hr_root.is_dir()),
+    }
+
+
+@router.post("/api/config/hr-clips")
+def api_set_hr_clips(body: HrClipsBody, request: Request):
+    """Point this library at RallyMetrics's clips folder, or clear it (null).
+    Refuses a path that is not a directory right now: a typo must not be
+    remembered as the place heart-rate reels come from."""
+    conn = _conn(request)
+    if body.path is None:
+        set_hr_clips_root(conn, None)
+    else:
+        root = Path(body.path).expanduser()
+        if not root.is_dir():
+            raise HTTPException(status_code=400, detail=f"Not a directory: {root}")
+        set_hr_clips_root(conn, root)
+    return api_config(request)
 
 
 @router.post("/api/config/mode")
@@ -1569,8 +1599,24 @@ def api_render_reel(slug: str, request: Request, body: RenderBody | None = None)
     # under one write lock (see its docstring) -- this route must not inline
     # that SELECT itself, or it drifts back into the race the function exists
     # to close.
+    hr = bool(body and body.hr)
+    if hr:
+        hr_root = get_hr_clips_root(conn)
+        if hr_root is None:
+            raise HTTPException(
+                status_code=409,
+                detail="No RallyMetrics clips folder is set. Run "
+                       "`splitstep config set-hr-clips PATH` first.",
+            )
+        missing_hr = hr_missing_count(hr_root, items)
+        if missing_hr:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{missing_hr} clip(s) have no heart-rate overlay yet. "
+                       f"Render them in RallyMetrics first.",
+            )
     job_id, already_running = jobq.enqueue_reel_once(
-        conn, reel["id"], numbered=body.numbered if body else False
+        conn, reel["id"], numbered=body.numbered if body else False, hr=hr
     )
     return {"job_id": job_id, "already_running": already_running}
 

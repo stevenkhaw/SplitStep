@@ -252,13 +252,13 @@ def test_enqueue_reel_once_enqueues_when_nothing_pending(conn):
     assert row["type"] == "reel"
     assert row["status"] == "queued"
     # numbered defaults to False when the caller doesn't pass it.
-    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": False}
+    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": False, "hr": False}
 
 
 def test_enqueue_reel_once_writes_the_numbered_flag(conn):
     job_id, _ = enqueue_reel_once(conn, "reel-1", numbered=True)
     row = conn.execute("SELECT payload FROM jobs WHERE id = ?", (job_id,)).fetchone()
-    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": True}
+    assert json.loads(row["payload"]) == {"reel_id": "reel-1", "numbered": True, "hr": False}
 
 
 def test_enqueue_reel_once_in_flight_check_ignores_the_flag(conn):

@@ -114,10 +114,13 @@ export const api = {
   // forget the flag and silently get the fast render when the numbered
   // checkbox was actually checked. The one caller (Reel.svelte's render())
   // always passes its `numbered` $state explicitly.
-  renderReel: (slug: string, numbered: boolean) =>
+  // `hr` swaps every clip for RallyMetrics's heart-rate-overlaid copy; the
+  // server refuses (409) while any item lacks one, so the checkbox only
+  // needs to be honest about the intent, not the availability.
+  renderReel: (slug: string, numbered: boolean, hr: boolean) =>
     req<RenderResult>(`/api/reels/${slug}/render`, {
       method: 'POST',
-      body: JSON.stringify({ numbered }),
+      body: JSON.stringify({ numbered, hr }),
     }),
   createSessionReel: (sessionId: string, which: 'points' | 'starred') =>
     req<ReelMergeResult>(`/api/sessions/${sessionId}/reels`, {

@@ -127,6 +127,30 @@ def cmd_config_show(args) -> int:
     return 0
 
 
+def cmd_config_set_hr_clips(args) -> int:
+    """A library setting, not app config: the overlaid clips pair with this
+    library's clips, and a second library would have its own folder."""
+    from splitstep.db.settings import set_hr_clips_root
+
+    lib = _library(args)
+    conn = connect(lib.db_path)
+    migrate(conn)
+    try:
+        if args.path.lower() == "none":
+            set_hr_clips_root(conn, None)
+            print("heart-rate clips folder cleared")
+            return 0
+        path = Path(args.path).expanduser()
+        if not path.is_dir():
+            print(f"not a directory: {path}", file=sys.stderr)
+            return 1
+        set_hr_clips_root(conn, path)
+        print(f"heart-rate clips folder: {path}")
+        return 0
+    finally:
+        conn.close()
+
+
 def cmd_config_set_library(args) -> int:
     path = Path(args.path).expanduser()
     if not path.is_dir():
@@ -586,6 +610,12 @@ def main(argv: list[str] | None = None) -> int:
     cl = config_sub.add_parser("set-library", help="remember a default library path")
     cl.add_argument("path")
     cl.set_defaults(func=cmd_config_set_library)
+
+    ch = config_sub.add_parser(
+        "set-hr-clips", help="point this library at RallyMetrics's clips folder (or 'none')"
+    )
+    ch.add_argument("path")
+    ch.set_defaults(func=cmd_config_set_hr_clips)
 
     p = sub.add_parser("serve", help="run the web server, worker and inbox watcher")
     p.add_argument("--host", default="127.0.0.1")

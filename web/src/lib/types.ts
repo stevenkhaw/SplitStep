@@ -78,6 +78,10 @@ export interface Preset {
  *  checkout whose config never wrote the key. */
 export interface AppConfig {
   mode: 'friend' | 'dev'
+  /** RallyMetrics's clips folder for heart-rate reels, or null when unset. */
+  hr_clips_root: string | null
+  /** True only when that folder is a directory right now (drive mounted). */
+  hr_clips_available: boolean
 }
 
 export type AppMode = AppConfig['mode']

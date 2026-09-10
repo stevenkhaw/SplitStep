@@ -113,7 +113,7 @@ def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
 
 
 def enqueue_reel_once(
-    conn: sqlite3.Connection, reel_id: str, numbered: bool = False
+    conn: sqlite3.Connection, reel_id: str, numbered: bool = False, hr: bool = False
 ) -> tuple[str, bool]:
     """Return (job_id, already_running): the in-flight render for `reel_id`
     if one exists, else a freshly enqueued one.
@@ -146,7 +146,10 @@ def enqueue_reel_once(
         conn.execute(
             "INSERT INTO jobs (id,type,payload,status,created_at)"
             " VALUES (?,?,?,'queued',?)",
-            (job_id, "reel", json.dumps({"reel_id": reel_id, "numbered": numbered}), _now()),
+            (
+                job_id, "reel",
+                json.dumps({"reel_id": reel_id, "numbered": numbered, "hr": hr}), _now(),
+            ),
         )
         conn.commit()
     except BaseException:

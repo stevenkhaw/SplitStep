@@ -22,7 +22,7 @@ from splitstep.db.sessions import (
     set_source_dimensions,
     set_source_status,
 )
-from splitstep.db.settings import get_color_profile, lock_color_profile
+from splitstep.db.settings import get_color_profile, get_hr_clips_root, lock_color_profile
 from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
 from splitstep.detect.features import read_features, write_features
 from splitstep.detect.geometry import Quad
@@ -42,7 +42,13 @@ from splitstep.media.transcode import (
     make_proxy,
     make_thumbs,
 )
-from splitstep.reels import clip_paths, missing_clip_count, resolve_items
+from splitstep.reels import (
+    clip_paths,
+    hr_clip_paths,
+    hr_missing_count,
+    missing_clip_count,
+    resolve_items,
+)
 
 log = logging.getLogger(__name__)
 
@@ -502,6 +508,24 @@ def handle_reel(library: Library, payload: dict,
         )
 
     inputs = clip_paths(library, items)
+    if payload.get("hr"):
+        # RallyMetrics's overlaid copies stand in for the clips, one for one.
+        # Refused whole rather than substituted where present, the same rule
+        # as missing clips: a reel where some points show heart rate and
+        # some do not reads as a bug in the render, not as a choice.
+        hr_root = get_hr_clips_root(conn)
+        if hr_root is None:
+            raise ValueError(
+                "No RallyMetrics clips folder is configured; "
+                "run `splitstep config set-hr-clips PATH`"
+            )
+        missing_hr = hr_missing_count(hr_root, items)
+        if missing_hr:
+            raise ValueError(
+                f"Reel {reel['slug']} has {missing_hr} clip(s) with no heart-rate overlay yet; "
+                f"render them in RallyMetrics first"
+            )
+        inputs = hr_clip_paths(hr_root, items)
     dst = library.reels_dir / f"{reel['slug']}.mp4"
 
     if payload.get("numbered"):

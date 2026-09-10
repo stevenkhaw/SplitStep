@@ -210,3 +210,22 @@ def plan_reel_export(
         pending.append(payload)
 
     return ExportPlan(pending=pending, already_cut=already_cut, in_flight=in_flight)
+
+
+def hr_clip_path(hr_root: Path, item: ReelItem) -> Path:
+    """RallyMetrics's overlaid copy of an item's clip. RallyMetrics mirrors
+    clip_relpath under the SplitStep session id, so this is a pure join --
+    no lookup, no database of its own to consult."""
+    return hr_root / item.session_id / item.clip_relpath
+
+
+def hr_clip_paths(hr_root: Path, items: list[ReelItem]) -> list[Path]:
+    return [hr_clip_path(hr_root, i) for i in items]
+
+
+def hr_missing_count(hr_root: Path | None, items: list[ReelItem]) -> int:
+    """Items with no overlaid copy on disk. Everything is missing when no
+    root is configured: the caller turns that into its own sentence."""
+    if hr_root is None:
+        return len(items)
+    return sum(1 for i in items if not hr_clip_path(hr_root, i).is_file())

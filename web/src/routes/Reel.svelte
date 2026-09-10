@@ -41,6 +41,17 @@
   // rather than becoming the only mode: unticking it is the escape hatch
   // for a quick plain render.
   let numbered = $state(true)
+  // Off by default: it depends on RallyMetrics having rendered every clip,
+  // and the server says exactly which are missing when it has not.
+  let hr = $state(false)
+  let hrRoot = $state<string | null>(null)
+  let hrAvailable = $state(false)
+  $effect(() => {
+    void api.config().then((c) => {
+      hrRoot = c.hr_clips_root
+      hrAvailable = c.hr_clips_available
+    }).catch(() => {})
+  })
   // Two-step, inline: the first press only reveals what pressing it again
   // destroys (deleteConfirmationText below, rendered where confirmingDelete
   // gates the markup), never a browser confirm() -- a native dialog cannot
@@ -225,7 +236,7 @@
     // locked check-and-insert already makes a second one harmless server
     // side.
     mutate(async () => {
-      const result = await api.renderReel(slug, numbered)
+      const result = await api.renderReel(slug, numbered, hr)
       toaster.push(
         result.already_running ? 'Already rendering.' : 'Rendering — see the jobs badge.',
         'info',
@@ -436,6 +447,24 @@
         bind:checked={numbered}
       />
       numbered
+    </label>
+    <!-- Heart-rate overlay from RallyMetrics. Disabled, not hidden, when no
+         folder is set or the drive is off: the label's title says which. -->
+    <label
+      class="flex items-center gap-1.5 font-data text-data {hrAvailable ? 'text-dim' : 'text-faint'}"
+      title={hrRoot === null
+        ? 'No RallyMetrics clips folder set. Run: splitstep config set-hr-clips PATH'
+        : hrAvailable
+          ? `Use RallyMetrics's heart-rate-overlaid copies of every clip (${hrRoot}). Refused if any clip has no copy yet.`
+          : `RallyMetrics clips folder is not available right now: ${hrRoot}`}
+    >
+      <input
+        data-hr
+        type="checkbox"
+        bind:checked={hr}
+        disabled={!hrAvailable}
+      />
+      heart rate
     </label>
 
     {#if confirmingDelete}

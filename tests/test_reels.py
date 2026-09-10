@@ -9,6 +9,8 @@ from splitstep.media.clips import clip_relpath
 from splitstep.reels import (
     clip_paths,
     delete_rendered_file,
+    hr_clip_path,
+    hr_missing_count,
     missing_clip_count,
     plan_reel_export,
     rendered_file,
@@ -339,3 +341,18 @@ def test_delete_rendered_file_leaves_a_relative_escape_untouched(library, conn, 
 
     assert delete_rendered_file(library, reel) is False
     assert outside.exists()
+
+
+def test_hr_clip_path_mirrors_clip_relpath_under_the_session(library, conn, seeded, tmp_path):
+    reel = create_reel(conn, "hr")
+    add_items(conn, reel["id"], [(seeded["source_id"], 1000, 5000)])
+    [item] = resolve_items(library, conn, reel["id"])
+    hr_root = tmp_path / "rm-clips"
+    expected = hr_root / seeded["session_id"] / clip_relpath(seeded["idx"], 1000, 5000)
+    assert hr_clip_path(hr_root, item) == expected
+    # missing until the file exists; no root at all counts every item missing
+    assert hr_missing_count(hr_root, [item]) == 1
+    assert hr_missing_count(None, [item]) == 1
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"x")
+    assert hr_missing_count(hr_root, [item]) == 0
