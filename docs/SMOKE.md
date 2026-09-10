@@ -88,14 +88,17 @@ cp ~/Desktop/SplitStep_0.2.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.q
       that stayed on the launcher passed because the launcher is a local
       origin. Fixed by src-tauri/capabilities/default.json — re-verify.
 - [ ] Switch to the other one and back; nothing was moved or lost
-- [ ] Work a reel for ten minutes -- preview seeks, Alt+Arrow reorders, a
-      render -- and the app is still answering. Before the output drain, the
-      sidecar wedged on a full pipe at ~885 log lines and the app froze on
-      whatever you touched next; `~/Library/Logs/SplitStep/server.log`
-      growing past 64KB is the thing to check
-- [ ] Quit straight after that session: the window closes at once. The three
-      `.hang` reports this replaced were all the quit path, waiting on a
-      sidecar that could no longer act on SIGTERM
+- [x] The pipe wedge, against the installed .dmg (2026-09-10): 1500 requests
+      through a launched app, `~/Library/Logs/SplitStep/server.log` at 94,631
+      bytes -- past the 64KB a pipe holds -- and still answering in 3ms. The
+      same run against the previous build stops at ~1050
+- [x] Quit straight after that: **1.21s**, no orphan sidecar, pidfile cleaned,
+      and the log ends in uvicorn's own graceful shutdown, so SIGTERM landed
+      and the SIGKILL fallback was never needed. The three `.hang` reports
+      this replaced were 14s, 18s and 101s on exactly this path
+- [ ] Still unexercised by hand: ten real minutes in a reel -- preview seeks
+      and Alt+Arrow reorders rather than a loop of /api/config. Same mechanism,
+      but nobody has sat through it
 
 ## Known-unknown
 
