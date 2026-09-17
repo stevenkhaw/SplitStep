@@ -43,6 +43,33 @@ copy and open that:
 cp ~/Desktop/SplitStep_0.2.0_aarch64.dmg ~/Desktop/q.dmg && xattr -w com.apple.quarantine "0081;00000000;Safari;" ~/Desktop/q.dmg
 ```
 
+## Score tracking, show-rejected, timeline fit (2026-09-17)
+
+Exercised in the browser against a synthetic scratch library, not the real
+library or a second Mac — the external drive was not mounted this session:
+
+- [x] Track score: tick the checkbox, fill in the setup card, the panel
+      appears beside the video
+- [x] `P` marks a point and (with tracking on) opens the *Who won?* prompt;
+      `A` / `B` record the winner and advance; `Esc` keeps the point and
+      records no winner
+- [x] `U` after `A`/`B` undoes the winner, restoring the previous
+      point/winner state
+- [x] Show rejected (`H`): reject a rally, reload the session, `H` shows it
+      hatched in the overview band, `X` un-rejects it, `H` again hides it
+- [x] Rapid/repeated `H` presses (key-repeat, or a press while the
+      show-rejected refetch is still in flight) do not double-fire or
+      desync the toggle from the list
+- [x] Timeline mode's deck and both bands fit one screen without scrolling:
+      measured 888/900 at 1440×900 and 1068/1080 at 1920×1080
+- [ ] Unticking **Track score** and accepting the confirm dialog — the
+      sandboxed browser used this session suppresses `confirm()`, so only
+      the decline leg was exercised
+- [ ] A numbered reel render with the scoreboard burned in, on real footage
+      (only PNG-level overlay tests have run)
+- [ ] Migration `013_score_tracking.sql` applied to the live library — the
+      external drive was not mounted this session
+
 ## Still open
 
 ## First run

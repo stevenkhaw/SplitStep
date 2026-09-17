@@ -139,12 +139,12 @@ render reads what it needs through `resolve_items` (below).
   when the replay skipped any. Match over shows *«name» wins* in place of
   the points column.
 - **Keys.** `P` still marks a point. With tracking on it also puts the panel
-  into a *Who won? 1 «A» · 2 «B» · Esc* prompt. `1` / `2` record the winner
-  and advance, like a verdict. `Esc` keeps the point and records no winner.
-  `1` / `2` also work on any rally without the prompt — pressing `1` on a
-  rally that is not yet a point makes it one — which is how a wrong winner
-  gets corrected on the way back through. `shortcuts.ts` gains both keys in
-  the queue table, rendered only while tracking is on.
+  into a *Who won? A «name» · B «name» · Esc skip* prompt. `A` / `B` record
+  the winner and advance, like a verdict. `Esc` keeps the point and records
+  no winner. `A` / `B` also work on any rally without the prompt — pressing
+  `A` on a rally that is not yet a point makes it one — which is how a wrong
+  winner gets corrected on the way back through. `shortcuts.ts` gains both
+  keys in the queue table, rendered only while tracking is on.
 - **Undo.** A new `QueueAction` kind `'winner'` carries the previous
   `point` and `winner`, so `U` restores both. `persist.ts` maps it to
   `api.winner`.
@@ -152,6 +152,21 @@ render reads what it needs through `resolve_items` (below).
   Sets, exposes `scoreBefore(rallyId)` built from the engine, and
   `liveSnapshot` writes `winner` back onto the rally the way it writes the
   three flags.
+
+> **2026-09-17 correction (planning):** `1`/`2` are playback-speed keys in
+> queue mode; winner keys are `A`/`B`, positional on `rules.players` (the
+> first name is `A`, the second `B`). Two further corrections surfaced
+> during implementation and are noted here rather than rewritten into the
+> sections above: (b) `POST /api/rallies/{id}/winner`, contrary to the API
+> section's "Refuses (409) if the rally's session has tracking off" above,
+> deliberately does **not** refuse an untracked session — the client's undo
+> re-syncs star/reject/point/winner on every undo, so a 409 there would fail
+> every undo in a session that never tracked a score, and a winner survives
+> tracking being turned off regardless. (c) A finished match's board drops
+> both the games *and* points columns for a single `W` beside the winner's
+> name, not just the points column as `scoreboard_rows`/`scoreboardRows`
+> were first drafted above — games and points would otherwise both read
+> 0-0 after the deciding set, which looks like a match still in play.
 
 ### Overlay — `media/numbered.py`
 

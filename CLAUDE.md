@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 848 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 921 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -306,8 +306,10 @@ plus `shortcuts.ts` (the one place a keybinding is written down; the inline
 strip and the `?` overlay both render from it), `status.ts` (status → label +
 tone for the list cards), `jobs.ts` (job phase names and batch elapsed),
 `split.ts` (cutting a rally in two and putting it back, with the same idx
-ordering `_renumber` uses), `flash.ts` (the verdict confirmation) and
-`errors.ts` (`ApiError` → a sentence) — and that is what `web/tests/` covers. Components are thin shells over those modules
+ordering `_renumber` uses), `flash.ts` (the verdict confirmation),
+`errors.ts` (`ApiError` → a sentence) and `score.ts` (the tennis scoring
+engine, pinned to `splitstep/score.py` by `tests/fixtures/score_cases.json`)
+— and that is what `web/tests/` covers. Components are thin shells over those modules
 and are verified by hand, because jsdom has no `<video>` implementation. Put
 new logic in `lib/`, not in a `.svelte` file, or it becomes untestable.
 
@@ -573,6 +575,23 @@ four had to be retargeted during the migration and would again.
   pipeline shape or status vocabulary.
 - Video files and `yolo11n.pt` are gitignored; `tests/fixtures/**/*.jsonl` is
   explicitly re-included — golden feature fixtures are source.
+- **Score is replayed, never stored.** `rallies.winner` (`''`/`'a'`/`'b'`) and
+  `sessions.scoring` (rules JSON, `''` = off) are the only score columns.
+  `splitstep/score.py` and `web/src/lib/score.ts` are the same function
+  twice, pinned to `tests/fixtures/score_cases.json` by both test suites —
+  change the rules in both and add a case. Everything shows the score
+  *entering* a rally (`score_before`), replayed over the whole session in
+  `idx` order; `QueueMode` takes `sessionRallies` for this because `detail`
+  is scoped to a video tab. `set_point(False)` clears `winner` and
+  `set_winner('a')` sets `point`, so the two columns cannot disagree;
+  `replace_rallies` carries `winner` only where it carries `point`. Winner
+  keys are `A`/`B`, not `1`/`2` — the digits are playback speed. `/winner`
+  deliberately does not refuse an untracked session: the client's undo
+  re-syncs star/reject/point/winner on every undo, and a 409 there would
+  fail every undo in a session that never tracked a score; a winner
+  outlives tracking being turned off regardless. A finished match's board
+  drops the games and points columns for a single `W` beside the winner's
+  name — sets, then `W`, nothing that would read as still in play.
 
 ## Distribution status
 
