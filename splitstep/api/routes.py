@@ -577,13 +577,18 @@ def api_point(rally_id: str, body: PointBody, request: Request):
 
 @router.post("/api/rallies/{rally_id}/winner")
 def api_winner(rally_id: str, body: WinnerBody, request: Request):
-    """Who won this point. Refused while the session does not track a
-    score: a stale tab must not write winners nobody can see. A non-empty
-    winner also marks the point (see set_winner)."""
+    """Who won this point. A non-empty winner also marks the point (see
+    set_winner).
+
+    Deliberately does not check whether the session tracks a score. The
+    winner column outlives the tracking switch -- set_scoring(None) leaves
+    every rally's winner in place -- so writing one while tracking is off is
+    consistent with the data model. And the client's undo re-syncs all four
+    flags (star, reject, point, winner) on every undo: a 409 here would fail
+    every undo in a session that never tracked a score, which cost more than
+    the stale-tab guard it used to buy."""
     conn = _conn(request)
     session_id = _session_id_for_rally(conn, rally_id)
-    if scoring_rules(get_session(conn, session_id)) is None:
-        raise HTTPException(status_code=409, detail="This session is not tracking a score.")
     set_winner(conn, rally_id, body.winner)
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 

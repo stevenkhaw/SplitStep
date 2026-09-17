@@ -66,10 +66,13 @@ def test_scoring_404s_on_an_unknown_session(client, seeded):
     assert client.post("/api/sessions/nope/scoring", json={"rules": RULES}).status_code == 404
 
 
-def test_winner_refuses_while_the_session_does_not_track(client, conn, seeded):
+def test_winner_is_accepted_while_the_session_does_not_track(client, conn, seeded):
     rid = list_rallies(conn, seeded["session_id"])[0]["id"]
     r = client.post(f"/api/rallies/{rid}/winner", json={"winner": "a"})
-    assert r.status_code == 409
+    assert r.status_code == 200
+    row = list_rallies(conn, seeded["session_id"])[0]
+    assert row["winner"] == "a"
+    assert row["point"] == 1
 
 
 def test_winner_sets_the_point_and_refreshes_status(client, conn, seeded):
