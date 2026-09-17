@@ -11,12 +11,16 @@
   import { QueueController } from '../lib/queue'
   import { navigate } from '../lib/router.svelte'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
+  import { DEFAULT_RULES, playerName, scoreBefore } from '../lib/score'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { VerdictFlash } from '../lib/flash'
   import type { QueueAction } from '../lib/queue'
+  import type { Player, ScoreRules } from '../lib/score'
   import type { ExportResult, Rally, SessionDetail, Source } from '../lib/types'
   import KeyHints from './KeyHints.svelte'
+  import ScorePanel from './ScorePanel.svelte'
+  import ScoreSetup from './ScoreSetup.svelte'
   import VideoDeck from './VideoDeck.svelte'
 
   interface Props {
@@ -55,6 +59,13 @@
      * exists. Optional so a bare mount (there are none today, but nothing
      * requires one) does not have to pass a no-op. */
     onexport?: (result: ExportResult) => void
+    /** Every rally in the session, unscoped -- `detail.rallies` above is
+     *  scoped to the selected video tab, and a score is a property of the
+     *  match, so the replay has to see the other tabs' points too. */
+    sessionRallies: Rally[]
+    /** Tracking was switched on/off or its rules changed. Session keeps
+     *  `detail.session.scoring` in step so a remount seeds correctly. */
+    onscoring?: (rules: ScoreRules | null) => void
   }
 
   let {
@@ -64,6 +75,8 @@
     onopen_label,
     startAtRallyId = null,
     onexport,
+    sessionRallies,
+    onscoring,
   }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
@@ -122,6 +135,53 @@
   let editingNote = $state(false)
   let noteBuffer = $state('')
   let noteInput = $state<HTMLInputElement>()
+
+  // Tracking rules, seeded once from the session and owned here until a
+  // remount -- the same one-shot pattern as `queue`. The panel derives the
+  // score from the live snapshot every time `version` bumps, so no score
+  // is ever stored on this side either.
+  let rules = $state<ScoreRules | null>(untrack(() => detail.session.scoring))
+  let settingUp = $state(false)
+  // P was pressed with tracking on: the panel asks who won until A/B/Esc.
+  let awaitingWinner = $state(false)
+
+  const board = $derived.by(() => {
+    version
+    if (!rules || !current) return null
+    return scoreBefore(queue.liveSnapshot(sessionRallies), current.id, rules)
+  })
+
+  async function startTracking(next: ScoreRules): Promise<void> {
+    try {
+      const r = await api.setScoring(detail.session.id, next)
+      rules = r.scoring
+      settingUp = false
+      onscoring?.(rules)
+    } catch (e) {
+      toaster.push(`Couldn't save the score rules -- ${String(e)}`)
+    }
+  }
+
+  async function stopTracking(): Promise<void> {
+    // Winners stay on the rallies (set_scoring leaves them), so this is
+    // cheap to reverse; the confirm is about losing the panel mid-match by
+    // a stray click, not about data.
+    if (!confirm('Stop tracking the score for this session? Winners already recorded are kept.')) return
+    try {
+      await api.setScoring(detail.session.id, null)
+      rules = null
+      awaitingWinner = false
+      onscoring?.(null)
+    } catch (e) {
+      toaster.push(`Couldn't turn off score tracking -- ${String(e)}`)
+    }
+  }
+
+  function recordWinner(p: Player): void {
+    if (!rules) return
+    awaitingWinner = false
+    apply(queue.winner(p))
+  }
 
   // `version` is the dependency that forces a re-read after a mutation --
   // QueueController is a plain class, so Svelte cannot track it directly:
@@ -204,6 +264,9 @@
   function showFlash(action: QueueAction): void {
     const next = flashFor(action)
     if (!next) return
+    if (next && action.kind === 'winner' && rules && action.winner) {
+      next.label = `Point · ${playerName(rules, action.winner)}`
+    }
     flash = next
     flashSeq += 1
     clearTimeout(flashTimer)
@@ -406,8 +469,25 @@
         apply(queue.reject())
         break
       case 'p':
-      case 'P':
-        apply(queue.point())
+      case 'P': {
+        const action = queue.point()
+        apply(action)
+        // With tracking on, a fresh point wants a winner; un-marking does not.
+        awaitingWinner = !!rules && !!action && action.point
+        break
+      }
+      case 'a':
+      case 'A':
+        if (rules) recordWinner('a')
+        break
+      case 'b':
+      case 'B':
+        if (rules) recordWinner('b')
+        break
+      case 'Escape':
+        // Only the prompt: KeyHints owns Escape for its overlay (capture
+        // phase), and queue mode has no other Escape meaning.
+        awaitingWinner = false
         break
       case 'r':
       case 'R':
@@ -415,15 +495,18 @@
         break
       case 'ArrowRight':
         e.preventDefault()
+        awaitingWinner = false
         apply(queue.skip())
         break
       case 'ArrowLeft':
         e.preventDefault()
+        awaitingWinner = false
         queue.back()
         version += 1
         break
       case 'u':
       case 'U':
+        awaitingWinner = false
         apply(queue.undo())
         break
       case '`':
@@ -541,51 +624,86 @@
     </div>
   </section>
 {:else}
-  <!-- `relative` so the position counter can sit over the video. The counter
-       duplicates the "rally N / M" in the metadata line below on purpose: while
-       a clip is playing your eyes are on the video, and looking away to find
-       your place in a 61-rally pass is the thing this removes. -->
-  <div class="relative">
-    <VideoDeck
-      bind:this={deck}
-      src={srcFor(current.source_id)}
-      startMs={current.start_ms}
-      endMs={current.end_ms}
-      nextSrc={next ? srcFor(next.source_id) : undefined}
-      nextStartMs={next?.start_ms}
-      {speed}
-      onended={() => deck?.replay()}
-      onprogress={onProgress}
-      onblocked={onBlocked}
-    />
-    <div
-      class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
-             font-data text-data tabular-nums text-fg"
-    >
-      {stats.index + 1} / {stats.total}
+  <div class="mb-2 flex items-center justify-between gap-4 font-data text-data text-dim">
+    <label class="flex items-center gap-2">
+      <input
+        type="checkbox"
+        class="accent-fg"
+        checked={rules !== null}
+        onchange={(e) => {
+          if (e.currentTarget.checked) settingUp = true
+          else void stopTracking()
+        }}
+      />
+      Track score
+    </label>
+    <!-- Show-rejected toggle lands here in the next task. -->
+  </div>
+  {#if settingUp && !rules}
+    <div class="mb-2">
+      <ScoreSetup initial={DEFAULT_RULES} onstart={startTracking} oncancel={() => (settingUp = false)} />
     </div>
+  {/if}
 
-    {#if flash}
-      <!-- Centred over the video rather than in the status line, because
-           that is where the eye already is during a pass. aria-live so the
-           confirmation is not purely visual; pointer-events-none so it can
-           never swallow a click meant for the deck. -->
-      {#key flashSeq}
-        <div
-          class="pointer-events-none absolute inset-0 flex items-center justify-center"
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            class="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 font-data text-data
-                   motion-safe:animate-[verdict_700ms_ease-out_forwards]
-                   {FLASH_TONE[flash.tone]}"
+  <div class="flex flex-col gap-3 xl:flex-row">
+    <!-- `relative` so the position counter can sit over the video. The counter
+         duplicates the "rally N / M" in the metadata line below on purpose: while
+         a clip is playing your eyes are on the video, and looking away to find
+         your place in a 61-rally pass is the thing this removes. `min-w-0` lets
+         the flex item shrink below the video's intrinsic width once the score
+         panel joins it at `xl:`, or the row would overflow instead of the two
+         sharing the space. -->
+    <div class="relative min-w-0 flex-1">
+      <VideoDeck
+        bind:this={deck}
+        src={srcFor(current.source_id)}
+        startMs={current.start_ms}
+        endMs={current.end_ms}
+        nextSrc={next ? srcFor(next.source_id) : undefined}
+        nextStartMs={next?.start_ms}
+        {speed}
+        onended={() => deck?.replay()}
+        onprogress={onProgress}
+        onblocked={onBlocked}
+      />
+      <div
+        class="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1
+               font-data text-data tabular-nums text-fg"
+      >
+        {stats.index + 1} / {stats.total}
+      </div>
+
+      {#if flash}
+        <!-- Centred over the video rather than in the status line, because
+             that is where the eye already is during a pass. aria-live so the
+             confirmation is not purely visual; pointer-events-none so it can
+             never swallow a click meant for the deck. -->
+        {#key flashSeq}
+          <div
+            class="pointer-events-none absolute inset-0 flex items-center justify-center"
+            role="status"
+            aria-live="polite"
           >
-            <span aria-hidden="true">{flash.glyph}</span>
-            {flash.label}
-          </span>
-        </div>
-      {/key}
+            <span
+              class="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 font-data text-data
+                     motion-safe:animate-[verdict_700ms_ease-out_forwards]
+                     {FLASH_TONE[flash.tone]}"
+            >
+              <span aria-hidden="true">{flash.glyph}</span>
+              {flash.label}
+            </span>
+          </div>
+        {/key}
+      {/if}
+    </div>
+    {#if rules && board}
+      <!-- `xl:` (Tailwind's default 1280px), not the repo's `ultra:` variant
+           -- `--breakpoint-ultra` is 1800px, which would stack the panel
+           under the video on a common 1440-wide laptop screen. Below `xl`
+           the panel stacks beneath the deck instead. -->
+      <div class="xl:w-72 xl:shrink-0">
+        <ScorePanel {rules} state={board.state} unscored={board.unscored} prompting={awaitingWinner} onwin={recordWinner} />
+      </div>
     {/if}
   </div>
 

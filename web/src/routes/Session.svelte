@@ -304,6 +304,10 @@
         onopen_label={openLabel}
         startAtRallyId={focusedRallyId}
         onexport={(result) => (lastExport = result)}
+        sessionRallies={detail.rallies}
+        onscoring={(rules) => {
+          if (detail) detail.session.scoring = rules
+        }}
       />
     {:else if mode === 'label'}
       <LabelMode

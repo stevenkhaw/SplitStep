@@ -42,6 +42,7 @@ const QUEUE: ShortcutGroup[] = [
     items: [
       { keys: ['S'], label: 'Star this rally' },
       { keys: ['P'], label: 'Mark it a point' },
+      { keys: ['A', 'B'], label: 'Who won the point, when tracking a score' },
       { keys: ['X'], label: 'Reject it (again to undo)' },
       { keys: ['U'], label: 'Undo the last verdict' },
       { keys: ['N'], label: 'Write a note' },
@@ -67,6 +68,7 @@ const QUEUE: ShortcutGroup[] = [
     items: [
       { keys: ['T'], label: 'Timeline, to fix the boundaries' },
       { keys: ['L'], label: 'Label mode, to judge the detector', devOnly: true },
+      { keys: ['H'], label: 'Show rejected rallies, to bring one back' },
       { keys: ['?'], label: 'This list' },
     ],
   },
@@ -190,8 +192,8 @@ export function shortcutKeys(mode: ShortcutMode): string[] {
 // different. Six is the ceiling: past that the strip wraps and stops being
 // glanceable, which is the failure it replaces.
 const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
-  queue: [QUEUE[0].items[0], QUEUE[0].items[1], QUEUE[0].items[2], QUEUE[0].items[3],
-          QUEUE[2].items[1], QUEUE[3].items[2]],
+  queue: [QUEUE[0].items[0], QUEUE[0].items[1], QUEUE[0].items[3], QUEUE[0].items[4],
+          QUEUE[2].items[1], QUEUE[3].items[3]],
   timeline: [TIMELINE[0].items[0], TIMELINE[0].items[1], TIMELINE[1].items[0],
              TIMELINE[1].items[1], TIMELINE[3].items[0], TIMELINE[3].items[1]],
   label: [LABEL[0].items[0], LABEL[0].items[1], LABEL[3].items[1], LABEL[3].items[2],
