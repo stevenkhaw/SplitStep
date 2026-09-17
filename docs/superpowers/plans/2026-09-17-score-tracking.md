@@ -409,16 +409,18 @@ def scoreboard_rows(state: ScoreState, rules: ScoreRules) -> list[list[str]]:
     """Two rows for a broadcast-style board: name, one column per completed
     set, current games, points. A tiebreak-only session has no games column
     -- the tiebreak count is the whole score. A finished match replaces the
-    points column with W for the winner, blank for the other; a finished
-    tiebreak-only session keeps its final count instead."""
+    games and points columns with a single W for the winner, blank for the
+    other; a finished tiebreak-only session keeps its final count instead."""
     rows = []
     for i, name in enumerate(rules.players):
         row = [name, *(str(s[i]) for s in state.sets)]
-        if rules.tiebreak != "only":
-            row.append(str(state.games[i]))
         if state.finished is not None and rules.tiebreak != "only":
+            # Games and points are both 0-0 after the deciding set: showing
+            # them would read as a match still in play. Sets, then W.
             row.append("W" if state.finished == ("a", "b")[i] else "")
         else:
+            if rules.tiebreak != "only":
+                row.append(str(state.games[i]))
             row.append(state.points[i])
         rows.append(row)
     return rows
@@ -726,14 +728,15 @@ export function playerName(rules: ScoreRules, p: Player): string {
 
 /** Two rows for a broadcast-style board: name, one column per completed
  *  set, current games, points. Tiebreak-only sessions have no games
- *  column; a finished match shows W in place of the points column. */
+ *  column; a finished match shows W in place of games and points. */
 export function scoreboardRows(state: ScoreState, rules: ScoreRules): string[][] {
   return rules.players.map((name, i) => {
     const row = [name, ...state.sets.map((s) => String(s[i]))]
-    if (rules.tiebreak !== 'only') row.push(String(state.games[i]))
     if (state.finished !== null && rules.tiebreak !== 'only') {
+      // Games and points are 0-0 after the deciding set; sets, then W.
       row.push(state.finished === (i === 0 ? 'a' : 'b') ? 'W' : '')
     } else {
+      if (rules.tiebreak !== 'only') row.push(String(state.games[i]))
       row.push(state.points[i])
     }
     return row
