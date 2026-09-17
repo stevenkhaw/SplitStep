@@ -17,6 +17,8 @@ from splitstep.db.sessions import (
     get_session,
     get_source,
     refresh_session_review_status,
+    scoring_rules,
+    set_scoring,
     set_source_preset,
 )
 from splitstep.detect.features import read_features
@@ -32,6 +34,7 @@ from splitstep.export import (
 from splitstep.jobs.handlers import HANDLERS
 from splitstep.jobs.worker import Worker
 from splitstep.label_score import rows_to_labels, score_against_labels
+from splitstep.score import DEFAULT_RULES, rules_from_dict, score_before, scoreboard_rows
 from splitstep.setup import queue_setup
 from splitstep.watcher import InboxWatcher
 
@@ -429,6 +432,68 @@ def cmd_labels_score(args) -> int:
     return 0
 
 
+def _session_or_fail(conn, session_id: str):
+    row = get_session(conn, session_id)
+    if row is None:
+        print(f"session not found: {session_id}", file=sys.stderr)
+    return row
+
+
+def cmd_score_set(args) -> int:
+    """Same validator as POST /api/sessions/{id}/scoring (set_scoring ->
+    rules_from_dict), so HTTP and terminal cannot drift."""
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    if _session_or_fail(conn, args.session_id) is None:
+        return 1
+    rules = {
+        "players": list(args.players),
+        "sets": args.sets,
+        "ad": not args.no_ad,
+        "tiebreak": args.tiebreak,
+        "tiebreakTo": args.tiebreak_to,
+    }
+    set_scoring(conn, args.session_id, rules)
+    print(f"tracking {args.players[0]} vs {args.players[1]}: best of {args.sets},"
+          f" {'no-ad' if args.no_ad else 'ad'}, tiebreak {args.tiebreak}")
+    return 0
+
+
+def cmd_score_off(args) -> int:
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    if _session_or_fail(conn, args.session_id) is None:
+        return 1
+    set_scoring(conn, args.session_id, None)
+    print("score tracking off; winners kept")
+    return 0
+
+
+def cmd_score_show(args) -> int:
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    session = _session_or_fail(conn, args.session_id)
+    if session is None:
+        return 1
+    rules = scoring_rules(session)
+    if rules is None:
+        print("not tracking a score for this session")
+        return 0
+    parsed = rules_from_dict(rules)
+    # An id no rally holds replays every scored point: the current score.
+    state, unscored = score_before(
+        [dict(r) for r in list_rallies(conn, args.session_id)], "", parsed
+    )
+    for row in scoreboard_rows(state, parsed):
+        print("  ".join(f"{cell:>4}" if i else f"{cell:<12}" for i, cell in enumerate(row)))
+    if unscored:
+        print(f"({unscored} point{'s' if unscored != 1 else ''} with no winner)")
+    return 0
+
+
 def cmd_preset_add(args) -> int:
     """Create a court preset from four normalized 0-1 points.
 
@@ -683,6 +748,27 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--threshold", type=float, default=None,
                     help="override the profile's default score threshold")
     ls.set_defaults(func=cmd_labels_score)
+
+    p = sub.add_parser("score", help="match-score tracking for a session")
+    score_sub = p.add_subparsers(dest="score_cmd", required=True)
+
+    ss = score_sub.add_parser("set", help="turn tracking on (or change the rules)")
+    ss.add_argument("session_id")
+    ss.add_argument("--players", nargs=2, metavar=("A", "B"),
+                    default=list(DEFAULT_RULES.players))
+    ss.add_argument("--sets", type=int, choices=(1, 3, 5), default=DEFAULT_RULES.sets)
+    ss.add_argument("--no-ad", action="store_true", help="sudden death at deuce")
+    ss.add_argument("--tiebreak", choices=("at6", "none", "only"), default=DEFAULT_RULES.tiebreak)
+    ss.add_argument("--tiebreak-to", type=int, choices=(7, 10), default=DEFAULT_RULES.tiebreak_to)
+    ss.set_defaults(func=cmd_score_set)
+
+    so = score_sub.add_parser("off", help="stop tracking; winners are kept")
+    so.add_argument("session_id")
+    so.set_defaults(func=cmd_score_off)
+
+    sw = score_sub.add_parser("show", help="print the current board")
+    sw.add_argument("session_id")
+    sw.set_defaults(func=cmd_score_show)
 
     p = sub.add_parser("clips", help="cut clips from a session's rallies")
     clips_sub = p.add_subparsers(dest="clips_command", required=True)

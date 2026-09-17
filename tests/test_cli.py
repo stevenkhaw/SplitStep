@@ -846,3 +846,64 @@ def test_config_set_library_refuses_a_missing_directory(tmp_path, capsys):
 def test_config_show_reports_unset(capsys):
     assert main(["config", "show"]) == 0
     assert "unset" in capsys.readouterr().out
+
+
+def _scored_session(conn):
+    from splitstep.db.rallies import replace_rallies, set_winner
+    from splitstep.detect.segment import Interval
+
+    session_id = find_or_create_session_for_date(conn, "2026-09-17")
+    source_id, _ = add_source(
+        conn, session_id, recorded_at="2026-09-17T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_1.MOV",
+    )
+    replace_rallies(conn, session_id, source_id,
+                    [Interval(1000, 5000, 0.8), Interval(9000, 14000, 0.7)])
+    rows = list_rallies(conn, session_id)
+    set_winner(conn, rows[0]["id"], "a")
+    set_winner(conn, rows[1]["id"], "a")
+    return session_id
+
+
+def test_score_set_then_show_prints_the_board(library, conn, capsys):
+    session_id = _scored_session(conn)
+    conn.close()
+    rc = main(["--library", str(library.root), "score", "set", session_id,
+               "--players", "Ann", "Bob", "--sets", "3", "--tiebreak", "at6"])
+    assert rc == 0
+    rc = main(["--library", str(library.root), "score", "show", session_id])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Two scored points to Ann: 30-0 in the first game.
+    assert "Ann" in out and "30" in out
+    assert "Bob" in out
+
+
+def test_score_off_then_show_says_not_tracking(library, conn, capsys):
+    session_id = _scored_session(conn)
+    conn.close()
+    main(["--library", str(library.root), "score", "set", session_id])
+    rc = main(["--library", str(library.root), "score", "off", session_id])
+    assert rc == 0
+    rc = main(["--library", str(library.root), "score", "show", session_id])
+    assert rc == 0
+    assert "not tracking" in capsys.readouterr().out
+
+
+def test_score_set_rejects_bad_rules(library, conn, capsys):
+    session_id = _scored_session(conn)
+    conn.close()
+    # argparse's own choices check exits before args.func ever runs, so the
+    # process-exit path is a raised SystemExit here, not a returned int --
+    # parser.parse_args() sits outside main()'s try/except LibraryNotMounted
+    # et al., the same as every other argparse-level rejection in this CLI.
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--library", str(library.root), "score", "set", session_id, "--sets", "4"])
+    assert exc_info.value.code == 2  # argparse choices reject it before any DB write
+
+
+def test_score_on_an_unknown_session_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "score", "show", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()
