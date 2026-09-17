@@ -37,6 +37,7 @@ from splitstep.db.rallies import (
     set_rejected,
     set_seen,
     set_star,
+    set_winner,
     split_rally,
 )
 from splitstep.db.reels import (
@@ -59,6 +60,8 @@ from splitstep.db.sessions import (
     list_sessions,
     list_sources,
     refresh_session_review_status,
+    scoring_rules,
+    set_scoring,
     set_source_preset,
 )
 from splitstep.db.settings import get_hr_clips_root, set_hr_clips_root
@@ -79,6 +82,7 @@ from splitstep.reels import (
     rendered_file,
     resolve_items,
 )
+from splitstep.score import rules_from_dict, rules_to_dict
 from splitstep.setup import queue_setup
 from splitstep.watcher import VIDEO_SUFFIXES, is_ingestible_name
 
@@ -97,6 +101,28 @@ class RejectBody(BaseModel):
 
 class PointBody(BaseModel):
     point: bool
+
+
+class WinnerBody(BaseModel):
+    winner: Literal["", "a", "b"]
+
+
+class ScoringBody(BaseModel):
+    """The rules object, or null to stop tracking. Validation is
+    splitstep.score.rules_from_dict's, surfaced as a 422 -- one validator
+    for the CLI, the column and the route."""
+
+    rules: dict | None
+
+    @field_validator("rules")
+    @classmethod
+    def check_rules(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return None
+        try:
+            return rules_to_dict(rules_from_dict(v))
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class NoteBody(BaseModel):
@@ -318,6 +344,12 @@ def _library(request: Request):
     return request.app.state.library
 
 
+def _session_json(row) -> dict:
+    d = dict(row)
+    d["scoring"] = scoring_rules(row)
+    return d
+
+
 @router.get("/api/sessions")
 def api_list_sessions(request: Request):
     conn = _conn(request)
@@ -344,7 +376,7 @@ def api_list_sessions(request: Request):
             "SELECT MIN(idx) AS idx FROM sources WHERE session_id = ?", (s["id"],)
         ).fetchone()
         out.append({
-            **dict(s),
+            **_session_json(s),
             "rally_count": counts["total"],
             "starred_count": counts["starred"],
             "point_count": counts["point"],
@@ -360,10 +392,19 @@ def api_get_session(session_id: str, request: Request):
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return {
-        "session": dict(session),
+        "session": _session_json(session),
         "sources": [dict(r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
     }
+
+
+@router.post("/api/sessions/{session_id}/scoring")
+def api_set_scoring(session_id: str, body: ScoringBody, request: Request):
+    conn = _conn(request)
+    if get_session(conn, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    set_scoring(conn, session_id, body.rules)
+    return {"scoring": scoring_rules(get_session(conn, session_id))}
 
 
 @router.post("/api/sessions/{session_id}/export")
@@ -531,6 +572,19 @@ def api_point(rally_id: str, body: PointBody, request: Request):
     # Refreshes review status, unlike the label route: marking a point is a
     # ruling on the clip in the same family as star and reject, and
     # reviewed_at records that a human ruled on the rally at all.
+    return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
+
+
+@router.post("/api/rallies/{rally_id}/winner")
+def api_winner(rally_id: str, body: WinnerBody, request: Request):
+    """Who won this point. Refused while the session does not track a
+    score: a stale tab must not write winners nobody can see. A non-empty
+    winner also marks the point (see set_winner)."""
+    conn = _conn(request)
+    session_id = _session_id_for_rally(conn, rally_id)
+    if scoring_rules(get_session(conn, session_id)) is None:
+        raise HTTPException(status_code=409, detail="This session is not tracking a score.")
+    set_winner(conn, rally_id, body.winner)
     return {"ok": True, "session_status": refresh_session_review_status(conn, session_id)}
 
 
