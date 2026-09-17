@@ -1,22 +1,27 @@
 import { UndoStack } from './undo'
 import type { Rally } from './types'
 
+/** Who won a rally's point: '' means unscored. Mirrors `Rally.winner`. */
+export type Winner = '' | 'a' | 'b'
+
 /**
- * An action that changed rally flags (star/reject/point/skip) and may need
- * reverting if its POST to the server fails. Carries the pre-action flag
- * state (previousStarred/previousRejected/previousPoint) so revert() can
- * restore exactly this rally's flags without depending on undo-stack
- * position.
+ * An action that changed rally flags (star/reject/point/winner/skip) and may
+ * need reverting if its POST to the server fails. Carries the pre-action flag
+ * state (previousStarred/previousRejected/previousPoint/previousWinner) so
+ * revert() can restore exactly this rally's flags without depending on
+ * undo-stack position.
  */
 export interface PersistableAction {
-  kind: 'star' | 'reject' | 'skip' | 'point'
+  kind: 'star' | 'reject' | 'skip' | 'point' | 'winner'
   rallyId: string
   starred: boolean
   rejected: boolean
   point: boolean
+  winner: Winner
   previousStarred: boolean
   previousRejected: boolean
   previousPoint: boolean
+  previousWinner: Winner
 }
 
 /**
@@ -30,6 +35,7 @@ export interface UndoAction {
   starred: boolean
   rejected: boolean
   point: boolean
+  winner: Winner
 }
 
 /**
@@ -47,6 +53,7 @@ interface HistoryEntry {
   starred: boolean
   rejected: boolean
   point: boolean
+  winner: Winner
 }
 
 /**
@@ -63,12 +70,18 @@ export class QueueController {
   #starred = new Set<string>()
   #rejected = new Set<string>()
   #points = new Set<string>()
+  // Every rally this controller was built from, winner included ('' when
+  // none). A Map rather than a Set because a winner is one of three
+  // values, and seeding every id (not just the scored ones) is what lets
+  // liveSnapshot tell "this controller cleared it" from "never held it".
+  #winners = new Map<string, Winner>()
   #history = new UndoStack<HistoryEntry>()
 
   constructor(rallies: Rally[]) {
     this.#rallies = rallies.filter((r) => !r.rejected)
     for (const r of this.#rallies) if (r.starred) this.#starred.add(r.id)
     for (const r of this.#rallies) if (r.point) this.#points.add(r.id)
+    for (const r of this.#rallies) this.#winners.set(r.id, r.winner)
 
     // seen_at, not reviewed_at: reviewed_at means "a human ruled on this
     // rally" (star/point/reject) and drives session status alone; seen_at
@@ -147,6 +160,15 @@ export class QueueController {
     return r ? this.#points.has(r.id) : false
   }
 
+  winnerOf(rallyId: string): Winner {
+    return this.#winners.get(rallyId) ?? ''
+  }
+
+  get currentWinner(): Winner {
+    const r = this.current
+    return r ? this.winnerOf(r.id) : ''
+  }
+
   #record(): void {
     const r = this.current
     if (!r) return
@@ -155,6 +177,7 @@ export class QueueController {
       starred: this.#starred.has(r.id),
       rejected: this.#rejected.has(r.id),
       point: this.#points.has(r.id),
+      winner: this.#winners.get(r.id) ?? '',
     })
     // UndoStack bounds its own depth, so a 300-rally session cannot grow it
     // without limit.
@@ -174,15 +197,18 @@ export class QueueController {
     // large share of false positives means watching a clip more than once and
     // changing your mind about it; auto-advance made both awkward. `skip()`
     // (bound to the right arrow) is the only thing that moves the cursor.
+    const previousWinner = this.#winners.get(r.id) ?? ''
     return {
       kind: 'star',
       rallyId: r.id,
       starred: nowStarred,
       rejected: false,
       point: previousPoint,
+      winner: previousWinner,
       previousStarred,
       previousRejected,
       previousPoint,
+      previousWinner,
     }
   }
 
@@ -205,15 +231,18 @@ export class QueueController {
       this.#rejected.delete(r.id)
     }
     // Does not advance, for the same reason star() does not.
+    const previousWinner = this.#winners.get(r.id) ?? ''
     return {
       kind: 'reject',
       rallyId: r.id,
       starred: this.#starred.has(r.id),
       rejected: nowRejected,
       point: this.#points.has(r.id),
+      winner: previousWinner,
       previousStarred,
       previousRejected,
       previousPoint,
+      previousWinner,
     }
   }
 
@@ -230,15 +259,18 @@ export class QueueController {
     // same rally" unreachable. Now the right arrow is the only way forward,
     // so it lands on rallies the user has just flagged -- and hard-coding
     // false here would silently undo the reject they just made.
+    const previousWinner = this.#winners.get(r.id) ?? ''
     return {
       kind: 'skip',
       rallyId: r.id,
       starred: previousStarred,
       rejected: previousRejected,
       point: previousPoint,
+      winner: previousWinner,
       previousStarred,
       previousRejected,
       previousPoint,
+      previousWinner,
     }
   }
 
@@ -247,9 +279,15 @@ export class QueueController {
     if (!r) return null
     this.#record()
     const previousPoint = this.#points.has(r.id)
+    const previousWinner = this.#winners.get(r.id) ?? ''
     const nowPoint = !previousPoint
     if (nowPoint) this.#points.add(r.id)
-    else this.#points.delete(r.id)
+    else {
+      this.#points.delete(r.id)
+      // A winner on a non-point is a contradiction; the server's set_point
+      // clears it too, so the two stay in step without a second round trip.
+      this.#winners.set(r.id, '')
+    }
     // Deliberately does NOT advance, and deliberately does not touch
     // starred/rejected: "was a point played out" is orthogonal to "is this a
     // highlight" and to "is this a rally at all".
@@ -259,9 +297,38 @@ export class QueueController {
       starred: this.#starred.has(r.id),
       rejected: this.#rejected.has(r.id),
       point: nowPoint,
+      winner: nowPoint ? previousWinner : '',
       previousStarred: this.#starred.has(r.id),
       previousRejected: this.#rejected.has(r.id),
       previousPoint,
+      previousWinner,
+    }
+  }
+
+  // Who won the current point. Also marks it a point: pressing A/B is one
+  // judgement ("a point, and she took it"), and asking for P first would
+  // be two keys for it. Replaces a previous winner in place, which is how a
+  // wrong answer gets corrected on the way back through the pass. Does not
+  // advance, like every other verdict.
+  winner(p: 'a' | 'b'): PersistableAction | null {
+    const r = this.current
+    if (!r) return null
+    this.#record()
+    const previousPoint = this.#points.has(r.id)
+    const previousWinner = this.#winners.get(r.id) ?? ''
+    this.#points.add(r.id)
+    this.#winners.set(r.id, p)
+    return {
+      kind: 'winner',
+      rallyId: r.id,
+      starred: this.#starred.has(r.id),
+      rejected: this.#rejected.has(r.id),
+      point: true,
+      winner: p,
+      previousStarred: this.#starred.has(r.id),
+      previousRejected: this.#rejected.has(r.id),
+      previousPoint,
+      previousWinner,
     }
   }
 
@@ -281,12 +348,14 @@ export class QueueController {
     else this.#rejected.delete(r.id)
     if (entry.point) this.#points.add(r.id)
     else this.#points.delete(r.id)
+    this.#winners.set(r.id, entry.winner)
     return {
       kind: 'undo',
       rallyId: r.id,
       starred: entry.starred,
       rejected: entry.rejected,
       point: entry.point,
+      winner: entry.winner,
     }
   }
 
@@ -310,6 +379,7 @@ export class QueueController {
     else this.#rejected.delete(action.rallyId)
     if (action.previousPoint) this.#points.add(action.rallyId)
     else this.#points.delete(action.rallyId)
+    this.#winners.set(action.rallyId, action.previousWinner)
   }
 
   // `rallies`, with `starred`/`rejected`/`point` overwritten from this
@@ -330,14 +400,24 @@ export class QueueController {
   // still needs to place and color those.
   //
   // Returns fresh objects; per the class-level invariant, the Rally objects
-  // this controller was constructed with are never mutated.
+  // this controller was constructed with are never mutated. Rallies the
+  // controller was not built from pass through unchanged -- see the inline
+  // comment.
   liveSnapshot(rallies: Rally[]): Rally[] {
-    return rallies.map((r) => ({
-      ...r,
-      starred: this.#starred.has(r.id) ? 1 : 0,
-      rejected: this.#rejected.has(r.id) ? 1 : 0,
-      point: this.#points.has(r.id) ? 1 : 0,
-    }))
+    return rallies.map((r) => {
+      // Not this controller's rally (another source tab's, when the caller
+      // hands in the whole session for a score replay): its server flags
+      // are the freshest anyone has, so pass it through untouched rather
+      // than zeroing flags this controller never held.
+      if (!this.#winners.has(r.id)) return { ...r }
+      return {
+        ...r,
+        starred: this.#starred.has(r.id) ? 1 : 0,
+        rejected: this.#rejected.has(r.id) ? 1 : 0,
+        point: this.#points.has(r.id) ? 1 : 0,
+        winner: this.#winners.get(r.id) ?? '',
+      }
+    })
   }
 
   jumpTo(rallyId: string): void {

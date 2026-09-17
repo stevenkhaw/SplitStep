@@ -9,9 +9,11 @@ function act(over: Partial<PersistableAction> = {}): QueueAction {
     starred: false,
     rejected: false,
     point: false,
+    winner: '',
     previousStarred: false,
     previousRejected: false,
     previousPoint: false,
+    previousWinner: '',
     ...over,
   }
 }
@@ -70,7 +72,23 @@ describe('flashFor', () => {
 
   it('confirms an undo without claiming to know what it undid', () => {
     expect(
-      flashFor({ kind: 'undo', rallyId: 'r1', starred: false, rejected: false, point: false }),
+      flashFor({
+        kind: 'undo',
+        rallyId: 'r1',
+        starred: false,
+        rejected: false,
+        point: false,
+        winner: '',
+      }),
     ).toEqual({ label: 'Undone', glyph: '⟲', tone: 'neutral' })
+  })
+
+  // The panel names the player; the flash over the footage only ever sees
+  // the letter the reviewer pressed (QueueMode overrides the label with the
+  // name -- Task 7 -- so this is the default tests see).
+  it('confirms a winner with the point tone', () => {
+    const flash = flashFor(act({ kind: 'winner', winner: 'a', point: true }))
+    expect(flash?.tone).toBe('point')
+    expect(flash?.label).toMatch(/^Point/)
   })
 })

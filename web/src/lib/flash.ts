@@ -34,6 +34,16 @@ export function flashFor(action: QueueAction): VerdictFlash | null {
         glyph: '●',
         tone: 'point',
       }
+    case 'winner':
+      // The panel beside the video names the player; the flash over the
+      // footage keys on the letter the reviewer just pressed. QueueMode
+      // overrides this label with the player's name (see Task 7) -- this
+      // default is what tests see.
+      return {
+        label: `Point · ${action.winner === 'a' ? 'A' : 'B'}`,
+        glyph: '●',
+        tone: 'point',
+      }
     case 'reject':
       // 'reject', not 'danger'. Same rule the palette follows: detection is
       // recall-biased, rejecting is the most frequent action in the app, and

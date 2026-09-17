@@ -19,6 +19,7 @@ import type {
   Source,
   SpanRef,
 } from './types'
+import type { ScoreRules } from './score'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -147,6 +148,12 @@ export const api = {
   star: (id: string, starred: boolean) => post(`/api/rallies/${id}/star`, { starred }),
   reject: (id: string, rejected: boolean) => post(`/api/rallies/${id}/reject`, { rejected }),
   point: (id: string, point: boolean) => post(`/api/rallies/${id}/point`, { point }),
+  winner: (id: string, winner: '' | 'a' | 'b') => post(`/api/rallies/${id}/winner`, { winner }),
+  setScoring: (sessionId: string, rules: ScoreRules | null) =>
+    req<{ scoring: ScoreRules | null }>(`/api/sessions/${sessionId}/scoring`, {
+      method: 'POST',
+      body: JSON.stringify({ rules }),
+    }),
   setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
   // Called on every plain right-arrow (see persist.ts's skip case) --
   // on this". See splitstep/db/rallies.py::set_seen.

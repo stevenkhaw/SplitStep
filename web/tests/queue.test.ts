@@ -71,9 +71,11 @@ describe('QueueController', () => {
       starred: true,
       rejected: false,
       point: false,
+      winner: '',
       previousStarred: false,
       previousRejected: false,
       previousPoint: false,
+      previousWinner: '',
     })
     expect(q.current?.id).toBe('r1') // stays put: only skip() advances
     expect(q.starredCount).toBe(1)
@@ -129,6 +131,7 @@ describe('QueueController', () => {
       starred: false,
       rejected: false,
       point: false,
+      winner: '',
     })
     expect(q.current?.id).toBe('r1')
     expect(q.starredCount).toBe(0)
@@ -544,5 +547,74 @@ describe('QueueController.point', () => {
     q.point()
     const action = q.skip()
     expect(action?.point).toBe(true)
+  })
+})
+
+describe('QueueController.winner', () => {
+  let q: QueueController
+
+  beforeEach(() => {
+    q = new QueueController([rally(1), rally(2), rally(3)])
+  })
+
+  it('records a winner, which also makes the rally a point', () => {
+    const a = q.winner('a')!
+    expect(a.kind).toBe('winner')
+    expect(a.winner).toBe('a')
+    expect(a.point).toBe(true)
+    expect(a.previousWinner).toBe('')
+    expect(a.previousPoint).toBe(false)
+    expect(q.currentWinner).toBe('a')
+    expect(q.currentIsPoint).toBe(true)
+    expect(q.pointCount).toBe(1)
+    // Like star/point, it does not advance.
+    expect(q.index).toBe(0)
+  })
+
+  it('replaces a wrong winner in place', () => {
+    q.winner('a')
+    const b = q.winner('b')!
+    expect(b.previousWinner).toBe('a')
+    expect(q.currentWinner).toBe('b')
+    expect(q.pointCount).toBe(1)
+  })
+
+  it('unmarking the point clears the winner', () => {
+    q.winner('a')
+    q.point()
+    expect(q.currentIsPoint).toBe(false)
+    expect(q.currentWinner).toBe('')
+  })
+
+  it('undo restores both the point and the winner', () => {
+    q.winner('a')
+    const u = q.undo()!
+    expect(u.kind).toBe('undo')
+    expect(u.point).toBe(false)
+    expect(u.winner).toBe('')
+    expect(q.currentWinner).toBe('')
+    expect(q.currentIsPoint).toBe(false)
+  })
+
+  it('revert restores the previous winner', () => {
+    const a = q.winner('a')!
+    q.revert(a)
+    expect(q.currentWinner).toBe('')
+    expect(q.currentIsPoint).toBe(false)
+  })
+
+  it('seeds winners from the server snapshot', () => {
+    const s = new QueueController([rally(1, { point: 1, winner: 'b' })])
+    expect(s.currentWinner).toBe('b')
+  })
+
+  it('liveSnapshot carries winner, and leaves rallies it never held alone', () => {
+    q.winner('a')
+    const other = rally(9, { starred: 1, point: 1, winner: 'b' })
+    const snap = q.liveSnapshot([rally(1), other])
+    expect(snap[0].winner).toBe('a')
+    expect(snap[0].point).toBe(1)
+    // A rally from another source tab: not this controller's to zero out.
+    expect(snap[1]).toEqual(other)
   })
 })

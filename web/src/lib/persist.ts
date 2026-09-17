@@ -1,10 +1,11 @@
-import type { PersistableAction, QueueAction } from './queue'
+import type { PersistableAction, QueueAction, Winner } from './queue'
 
 /** The subset of `api` that persisting a QueueAction needs. */
 export interface PersistApi {
   star: (id: string, starred: boolean) => Promise<unknown>
   reject: (id: string, rejected: boolean) => Promise<unknown>
   point: (id: string, point: boolean) => Promise<unknown>
+  winner: (id: string, winner: Winner) => Promise<unknown>
   seen: (id: string) => Promise<unknown>
 }
 
@@ -36,6 +37,11 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
       case 'point':
         await api.point(action.rallyId, action.point)
         break
+      case 'winner':
+        // One POST: the server's set_winner marks the point itself, so a
+        // second /point call would only race it.
+        await api.winner(action.rallyId, action.winner)
+        break
       case 'skip':
         // Stamps seen_at, deliberately NOT reviewed_at. The right arrow is
         // pressed on every clip just to move through the pass, so calling
@@ -63,6 +69,14 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         await api.star(action.rallyId, action.starred)
         await api.reject(action.rallyId, action.rejected)
         await api.point(action.rallyId, action.point)
+        // Winner last, always: set_point(false) clears the winner and
+        // set_winner('a') re-marks the point, so point-then-winner is the
+        // order that leaves the two columns agreeing. Sent even when the
+        // restored winner is '' -- a point that keeps its flag but loses its
+        // winner is only expressible this way. A 409 here can only mean
+        // tracking was switched off in another tab; it surfaces through
+        // the same toast as any other failed undo.
+        await api.winner(action.rallyId, action.winner)
         break
     }
     return { ok: true }
