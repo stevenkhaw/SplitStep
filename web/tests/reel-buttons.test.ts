@@ -51,13 +51,14 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
     det_start_ms: idx * 10000, det_end_ms: idx * 10000 + 8000,
     confidence: 0.9, starred: 0, rejected: 0, point: 0, reviewed_at: null, seen_at: null,
     note: '',
+    winner: '',
     ...overrides,
   }
 }
 
 function reviewed(): SessionDetail {
   return {
-    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready' },
+    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready', scoring: null },
     sources: [{
       id: 'src1', session_id: 's1', idx: 1, recorded_at: '2026-08-19T10:00:00Z',
       offset_ms: 0, duration_ms: 600000, width: 1920, height: 1080, fps: 30,

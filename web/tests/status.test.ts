@@ -8,6 +8,7 @@ function session(over: Partial<Session> = {}): Session {
     title: '2026-08-18',
     played_on: '2026-08-18',
     status: 'ready',
+    scoring: null,
     rally_count: 32,
     starred_count: 6,
     point_count: 25,

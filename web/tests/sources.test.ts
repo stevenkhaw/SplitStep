@@ -38,6 +38,7 @@ function rally(over: Partial<Rally> = {}): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
     ...over,
   }
 }

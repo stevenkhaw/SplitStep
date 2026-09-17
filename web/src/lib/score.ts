@@ -1,0 +1,143 @@
+import type { Rally } from './types'
+
+/**
+ * Tennis scoring as a pure function of who won each point.
+ *
+ * Only the winner is stored per rally; the scoreboard is replayed from
+ * that, so a corrected winner, an undo, a re-segment or a split recomputes
+ * for free. This is the second copy of splitstep/score.py -- the queue
+ * needs the score at keypress time, the reel job needs it in Python --
+ * and both are pinned to tests/fixtures/score_cases.json. Change the rules
+ * in both places together, and add a case.
+ */
+export type Player = 'a' | 'b'
+
+export interface ScoreRules {
+  players: [string, string]
+  sets: 1 | 3 | 5
+  ad: boolean
+  tiebreak: 'at6' | 'none' | 'only'
+  tiebreakTo: 7 | 10
+}
+
+export interface ScoreState {
+  sets: [number, number][]
+  games: [number, number]
+  points: [string, string]
+  inTiebreak: boolean
+  finished: Player | null
+}
+
+export const DEFAULT_RULES: ScoreRules = {
+  players: ['Me', 'Opp'],
+  sets: 3,
+  ad: true,
+  tiebreak: 'at6',
+  tiebreakTo: 7,
+}
+
+const POINT_LABELS = ['0', '15', '30', '40']
+
+function pointLabels(pts: [number, number], inTiebreak: boolean, ad: boolean): [string, string] {
+  if (inTiebreak) return [String(pts[0]), String(pts[1])]
+  const [a, b] = pts
+  if (ad && a >= 3 && b >= 3) {
+    if (a === b) return ['40', '40']
+    return a > b ? ['Ad', '40'] : ['40', 'Ad']
+  }
+  return [POINT_LABELS[Math.min(a, 3)], POINT_LABELS[Math.min(b, 3)]]
+}
+
+export function score(winners: Player[], rules: ScoreRules): ScoreState {
+  const setsNeeded = Math.floor(rules.sets / 2) + 1
+  const sets: [number, number][] = []
+  let games: [number, number] = [0, 0]
+  let pts: [number, number] = [0, 0]
+  let inTb = rules.tiebreak === 'only'
+  let finished: Player | null = null
+  const setsWonBy = (i: 0 | 1) => sets.filter((s) => s[i] > s[1 - i]).length
+
+  for (const w of winners) {
+    // Points after match point are ignored, not rejected: the queue shows
+    // them as unscored, which is honest and needs no error state.
+    if (finished) break
+    const i: 0 | 1 = w === 'a' ? 0 : 1
+    const j: 0 | 1 = i === 0 ? 1 : 0
+    pts[i] += 1
+
+    if (inTb) {
+      if (pts[i] >= rules.tiebreakTo && pts[i] - pts[j] >= 2) {
+        if (rules.tiebreak === 'only') {
+          // One tiebreak is the whole session: the count is the final score.
+          finished = w
+        } else {
+          games[i] += 1
+          sets.push([games[0], games[1]])
+          games = [0, 0]
+          pts = [0, 0]
+          inTb = false
+          if (setsWonBy(i) >= setsNeeded) finished = w
+        }
+      }
+      continue
+    }
+
+    // Four points and two clear with advantage scoring; without it the
+    // seventh point of a game decides it at deuce.
+    const wonGame = pts[i] >= 4 && (!rules.ad || pts[i] - pts[j] >= 2)
+    if (!wonGame) continue
+    games[i] += 1
+    pts = [0, 0]
+    if (rules.tiebreak === 'at6' && games[0] === 6 && games[1] === 6) {
+      inTb = true
+    } else if (games[i] >= 6 && games[i] - games[j] >= 2) {
+      sets.push([games[0], games[1]])
+      games = [0, 0]
+      if (setsWonBy(i) >= setsNeeded) finished = w
+    }
+  }
+
+  return { sets, games, points: pointLabels(pts, inTb, rules.ad), inTiebreak: inTb, finished }
+}
+
+/**
+ * The state entering `rallyId`, and how many earlier points carry no
+ * winner. Replays every non-rejected point with a lower idx, in idx order
+ * whatever order `rallies` arrived in -- the caller hands in the whole
+ * session, not the source-scoped list the queue shows. An id no rally
+ * holds replays everything.
+ */
+export function scoreBefore(
+  rallies: Rally[],
+  rallyId: string,
+  rules: ScoreRules,
+): { state: ScoreState; unscored: number } {
+  const target = rallies.find((r) => r.id === rallyId)
+  const earlier = rallies
+    .filter((r) => (target ? r.idx < target.idx : true) && !r.rejected && r.point)
+    .sort((x, y) => x.idx - y.idx)
+  const winners = earlier.map((r) => r.winner).filter((w): w is Player => w !== '')
+  const unscored = earlier.filter((r) => r.winner === '').length
+  return { state: score(winners, rules), unscored }
+}
+
+export function playerName(rules: ScoreRules, p: Player): string {
+  return rules.players[p === 'a' ? 0 : 1]
+}
+
+/** Two rows for a broadcast-style board: name, one column per completed
+ *  set, current games, points. Tiebreak-only sessions have no games
+ *  column; a finished match shows W in place of games and points. */
+export function scoreboardRows(state: ScoreState, rules: ScoreRules): string[][] {
+  return rules.players.map((name, i) => {
+    const row = [name, ...state.sets.map((s) => String(s[i]))]
+    if (state.finished !== null && rules.tiebreak !== 'only') {
+      // Games and points are 0-0 after the deciding set; sets, then W.
+      row.push(state.finished === (i === 0 ? 'a' : 'b') ? 'W' : '')
+    } else {
+      if (rules.tiebreak !== 'only') row.push(String(state.games[i]))
+      row.push(state.points[i])
+    }
+    return row
+  })
+}

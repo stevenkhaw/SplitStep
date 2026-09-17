@@ -70,6 +70,7 @@ function rally(id: string, idx: number, sourceId: string): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
   }
 }
 
@@ -78,7 +79,7 @@ function rally(id: string, idx: number, sourceId: string): Rally {
 // scenario the review flagged.
 function mixedProfileDetail(): SessionDetail {
   return {
-    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready' },
+    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready', scoring: null },
     sources: [source('src1', 1), source('src2', 2)],
     rallies: [rally('r1', 1, 'src1'), rally('r2', 2, 'src2')],
   }

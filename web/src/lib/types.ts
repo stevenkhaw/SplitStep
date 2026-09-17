@@ -1,8 +1,14 @@
+import type { ScoreRules } from './score'
+
 export interface Session {
   id: string
   title: string
   played_on: string
   status: string
+  /** Match-score tracking rules, or null when the session does not track.
+   *  Parsed server-side from the sessions.scoring column (see
+   *  splitstep/db/sessions.py::scoring_rules). */
+  scoring: ScoreRules | null
   rally_count: number
   starred_count: number
   point_count: number
@@ -46,6 +52,10 @@ export interface Rally {
   reviewed_at: string | null
   seen_at: string | null
   note: string
+  /** '' when nobody has said who won this point -- one representation of
+   *  absence, like `note`. Positional: 'a' is the first name in the
+   *  session's `scoring.players`, so renaming a player touches no rally. */
+  winner: '' | 'a' | 'b'
 }
 
 export interface SessionDetail {

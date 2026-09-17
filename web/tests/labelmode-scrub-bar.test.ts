@@ -81,6 +81,7 @@ function detail(): SessionDetail {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
   }
   return {
     session: {
@@ -88,6 +89,7 @@ function detail(): SessionDetail {
       title: 'session',
       played_on: '2026-08-19',
       status: 'ready',
+      scoring: null,
     },
     sources: [source],
     rallies: [rally],

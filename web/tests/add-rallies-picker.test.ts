@@ -19,23 +19,24 @@ function rally(id: string, idx: number, overrides: Partial<Rally> = {}): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
     ...overrides,
   }
 }
 
 const sessions: Session[] = [
   {
-    id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed',
+    id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed', scoring: null,
     rally_count: 4, starred_count: 1, point_count: 2, thumb_idx: 1,
   },
   {
-    id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed',
+    id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed', scoring: null,
     rally_count: 1, starred_count: 0, point_count: 1, thumb_idx: 1,
   },
 ]
 
 const detailS1: SessionDetail = {
-  session: { id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed' },
+  session: { id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed', scoring: null },
   sources: [],
   rallies: [
     rally('r1', 1, { point: 1 }),
@@ -62,7 +63,7 @@ const detailS1: SessionDetail = {
 // keying: the picker's correctness has to hold without leaning on ids being
 // unique across sessions.
 const detailS2: SessionDetail = {
-  session: { id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed' },
+  session: { id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed', scoring: null },
   sources: [],
   rallies: [
     rally('r1', 1, { session_id: 's2', source_id: 'src2', point: 1 }),

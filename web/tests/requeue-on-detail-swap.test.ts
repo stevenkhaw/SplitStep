@@ -65,6 +65,7 @@ function rally(id: string, idx: number, sourceId = 'src1'): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
   }
 }
 
@@ -75,6 +76,7 @@ function detailWith(rallies: Rally[]): SessionDetail {
       title: 'test session',
       played_on: '2026-08-19',
       status: 'ready',
+      scoring: null,
     },
     sources: [
       {

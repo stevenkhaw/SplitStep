@@ -24,6 +24,7 @@ function rally(overrides: Partial<Rally> = {}): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
     ...overrides,
   }
 }

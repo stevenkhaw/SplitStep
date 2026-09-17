@@ -71,6 +71,7 @@ function rally(id: string, idx: number, sourceId: string): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
   }
 }
 
@@ -119,7 +120,7 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
     // `sources[0]?.id` default would pick this one, and the assertion below
     // would catch it.
     mockApi.getSession.mockResolvedValue({
-      session: { id: 's1', title: 'Mixed Session', played_on: '2026-08-19', status: 'needs_setup' },
+      session: { id: 's1', title: 'Mixed Session', played_on: '2026-08-19', status: 'needs_setup', scoring: null },
       sources: [source('src-setup', 1, 'needs_setup'), source('src-ready', 2, 'ready')],
       rallies: [rally('r1', 1, 'src-ready')],
     } as SessionDetail)
@@ -141,7 +142,7 @@ describe('Session filters sources before handing them to ResegmentPanel', () => 
 
   it('renders no ResegmentPanel and never calls scores() when every source needs setup', async () => {
     mockApi.getSession.mockResolvedValue({
-      session: { id: 's1', title: 'Setup Session', played_on: '2026-08-19', status: 'needs_setup' },
+      session: { id: 's1', title: 'Setup Session', played_on: '2026-08-19', status: 'needs_setup', scoring: null },
       sources: [source('src-setup', 1, 'needs_setup')],
       rallies: [],
     } as SessionDetail)

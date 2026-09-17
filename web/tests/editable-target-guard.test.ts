@@ -57,12 +57,13 @@ function rally(id: string, idx: number): Rally {
     reviewed_at: null,
     seen_at: null,
     note: '',
+    winner: '',
   }
 }
 
 function detailWith(rallies: Rally[]): SessionDetail {
   return {
-    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready' },
+    session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready', scoring: null },
     sources: [
       {
         id: 'src1',
