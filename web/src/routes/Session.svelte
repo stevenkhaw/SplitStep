@@ -167,7 +167,21 @@
   // only flips inside the `.then`, alongside `detail`, so a failed refetch
   // leaves both exactly as they were rather than remounting the queue
   // against data that cannot back up the toggle it is about to show.
+  //
+  // Plain `let`, not `$state`: nothing renders it, it only gates re-entrancy.
+  // A held H (OS key-repeat) or a fast double-press would otherwise start a
+  // second `getSession` before the first resolves; each `.then` reads
+  // whatever `showRejected` is live at the time IT resolves and flips it
+  // again, so two in-flight requests race and whichever response lands last
+  // -- not whichever was fired last -- decides the final filter, with
+  // `detail` potentially regressing to the older response's snapshot too.
+  // Dropping every call while one is already in flight makes a held key a
+  // single toggle instead of a queue of them.
+  let togglingRejected = false
+
   function toggleRejected(rallyId: string | null) {
+    if (togglingRejected) return
+    togglingRejected = true
     api
       .getSession(id)
       .then((d) => {
@@ -179,6 +193,9 @@
       })
       .catch((e) => {
         console.error('failed to refresh session before toggling show-rejected', e)
+      })
+      .finally(() => {
+        togglingRejected = false
       })
   }
 

@@ -565,6 +565,11 @@
         break
       case 'h':
       case 'H':
+        // A held key auto-repeats at OS speed, well faster than a single
+        // getSession round trip -- without this guard every repeat would
+        // fire its own toggle, and Session's own in-flight guard only stops
+        // the resulting race, not the pile of dropped requests causing it.
+        if (e.repeat) break
         ontoggle_rejected(current ? current.id : null)
         break
     }
@@ -663,7 +668,17 @@
         type="checkbox"
         class="accent-fg"
         checked={showRejected}
-        onchange={() => ontoggle_rejected(current ? current.id : null)}
+        onchange={(e) => {
+          // The box is one-way bound to showRejected, not the click: a
+          // click flips the DOM checkbox immediately, but the toggle itself
+          // is async (Session refetches before the filter actually
+          // changes), so left alone the box would show the wrong state for
+          // the length of that round trip and stay wrong forever on a
+          // failed refetch. Snapping it back to the current prop makes it
+          // move only when showRejected itself does.
+          e.currentTarget.checked = showRejected
+          ontoggle_rejected(current ? current.id : null)
+        }}
       />
       Show rejected <span class="text-faint">H</span>
     </label>
