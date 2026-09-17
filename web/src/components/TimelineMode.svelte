@@ -373,14 +373,21 @@
 <svelte:window onkeydown={onKey} />
 
 {#if rally && source}
-  <VideoDeck
-    bind:this={deck}
-    src={api.proxyUrl(detail.session.id, source.idx)}
-    startMs={rally.start_ms}
-    endMs={rally.end_ms}
-    onended={() => writePlayhead(rally.end_ms)}
-    onprogress={() => writePlayhead(deck?.currentMs() ?? 0)}
-  />
+  <!-- Capped so the deck, the status line, both bands and the threshold row
+       share one screen: trimming is a deck-and-band gesture and scrolling
+       between them is the failure this removes. 28rem is what sits below
+       the deck plus the page header; a 16:9 frame at (100vh - 28rem) tall
+       is this wide. On a tall display the cap is never reached. -->
+  <div class="mx-auto w-full max-w-[calc((100vh-28rem)*16/9)]">
+    <VideoDeck
+      bind:this={deck}
+      src={api.proxyUrl(detail.session.id, source.idx)}
+      startMs={rally.start_ms}
+      endMs={rally.end_ms}
+      onended={() => writePlayhead(rally.end_ms)}
+      onprogress={() => writePlayhead(deck?.currentMs() ?? 0)}
+    />
+  </div>
 
   <p class="mt-2 font-data text-data text-dim">
     rally {rally.idx} · {formatTs(rally.start_ms)} → {formatTs(rally.end_ms)}
