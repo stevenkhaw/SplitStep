@@ -120,15 +120,41 @@ def _carried_note(iv: Interval, rows: list[sqlite3.Row]) -> str:
     return best_note
 
 
+def _carried_winner(iv: Interval, rows: list[sqlite3.Row]) -> str:
+    """The winner for `iv` from the best-overlapping old *point*, else ''.
+
+    Same ranking as _carried_note -- overlap_fraction qualifies, raw
+    millisecond overlap ranks, smaller start_ms breaks a tie so two old
+    rallies of equal duration absorbed into one merged span still resolve to
+    a single answer -- restricted to rows that were points because a winner
+    on a non-point row cannot exist (set_point clears it) and should not be
+    invented here.
+    """
+    best_winner, best_overlap_ms, best_start_ms = "", 0, math.inf
+    for r in rows:
+        if not r["point"] or not r["winner"]:
+            continue
+        f = overlap_fraction(iv.start_ms, iv.end_ms, r["start_ms"], r["end_ms"])
+        if f < STAR_OVERLAP_MIN:
+            continue
+        overlap_ms = min(iv.end_ms, r["end_ms"]) - max(iv.start_ms, r["start_ms"])
+        better = overlap_ms > best_overlap_ms or (
+            overlap_ms == best_overlap_ms and r["start_ms"] < best_start_ms
+        )
+        if better:
+            best_winner, best_overlap_ms, best_start_ms = r["winner"], overlap_ms, r["start_ms"]
+    return best_winner
+
+
 def replace_rallies(
     conn: sqlite3.Connection,
     session_id: str,
     source_id: str,
     intervals: list[Interval],
 ) -> int:
-    """Rewrite one source's rallies, carrying stars, rejections, points and
-    notes across by overlap, and clip_path across by exact span match (see
-    _carried_clip_path).
+    """Rewrite one source's rallies, carrying stars, rejections, points,
+    winners and notes across by overlap, and clip_path across by exact span
+    match (see _carried_clip_path).
 
     Manual boundary edits are intentionally not preserved — the caller
     confirms that loss before calling.
@@ -147,7 +173,8 @@ def replace_rallies(
         # to starred/rejected/point rows would silently drop clip_path for a
         # real file still sitting on disk at that exact span.
         old = conn.execute(
-            "SELECT start_ms, end_ms, starred, rejected, point, clip_path, note FROM rallies"
+            "SELECT start_ms, end_ms, starred, rejected, point, winner, clip_path, note"
+            " FROM rallies"
             " WHERE source_id = ? AND (starred = 1 OR rejected = 1 OR point = 1"
             " OR clip_path IS NOT NULL OR note != '')",
             (source_id,),
@@ -169,6 +196,13 @@ def replace_rallies(
             # tiebreaker -- the same class of loss the star carry-over exists
             # to prevent.
             point = _overlaps_any(iv, old, "point")
+            # The winner rides with the point, by the same overlap rule, and
+            # only with it: a new rally that loses `point` loses `winner`
+            # too, so the two columns can never disagree about whether a
+            # point was scored. Best-overlap like the note, not first-match
+            # like the flags -- two old points can both clear 50% of one
+            # merged span and the answer must not depend on row order.
+            winner = _carried_winner(iv, old) if point else ""
             clip_path = _carried_clip_path(iv, old)
             note = _carried_note(iv, old)
             # idx is a temporary, per-row-unique negative placeholder so a batch of
@@ -176,11 +210,12 @@ def replace_rallies(
             # idx) before _renumber() assigns the real sequential values below.
             conn.execute(
                 "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-                "det_start_ms,det_end_ms,confidence,starred,rejected,point,clip_path,note)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "det_start_ms,det_end_ms,confidence,starred,rejected,point,winner,"
+                "clip_path,note)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, session_id, source_id, -placeholder_idx, iv.start_ms,
                  iv.end_ms, iv.start_ms, iv.end_ms, iv.confidence,
-                 int(starred), int(rejected), int(point), clip_path, note),
+                 int(starred), int(rejected), int(point), winner, clip_path, note),
             )
 
         _renumber(conn, session_id)
@@ -239,11 +274,11 @@ def split_rally(conn: sqlite3.Connection, rally_id: str, at_ms: int) -> str:
         # live row under UNIQUE(session_id, idx).
         conn.execute(
             "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
-            "det_start_ms,det_end_ms,confidence,starred,rejected,point,"
+            "det_start_ms,det_end_ms,confidence,starred,rejected,point,winner,"
             "reviewed_at,clip_path,note,seen_at)"
-            " VALUES (?,?,?,?,?,?,NULL,NULL,?,?,?,?,?,NULL,?,?)",
+            " VALUES (?,?,?,?,?,?,NULL,NULL,?,?,?,?,?,?,NULL,?,?)",
             (new_id, row["session_id"], row["source_id"], -1, at_ms, row["end_ms"],
-             row["confidence"], row["starred"], row["rejected"], row["point"],
+             row["confidence"], row["starred"], row["rejected"], row["point"], row["winner"],
              row["reviewed_at"], row["note"], row["seen_at"]),
         )
         conn.execute(
@@ -379,12 +414,36 @@ def set_point(conn: sqlite3.Connection, rally_id: str, point: bool) -> None:
 
     Also stamps seen_at through its own COALESCE, same reasoning as
     set_star: a ruling cannot be made on a rally nobody looked at.
+
+    Unmarking clears `winner`: a winner on a non-point is a contradiction
+    the scoreboard would have to guess about.
     """
     now = _now()
     conn.execute(
-        "UPDATE rallies SET point = ?, reviewed_at = COALESCE(reviewed_at, ?),"
-        " seen_at = COALESCE(seen_at, ?) WHERE id = ?",
-        (int(point), now, now, rally_id),
+        "UPDATE rallies SET point = ?, winner = CASE WHEN ? THEN winner ELSE '' END,"
+        " reviewed_at = COALESCE(reviewed_at, ?), seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (int(point), int(point), now, now, rally_id),
+    )
+    conn.commit()
+
+
+def set_winner(conn: sqlite3.Connection, rally_id: str, winner: str) -> None:
+    """Record who won this point ('a' / 'b'), or '' to say nobody has said.
+
+    A non-empty winner also marks the rally a point: pressing A on a rally
+    is a ruling that a point was played and who took it, and making the
+    reviewer press P first would be two keys for one judgement. Clearing
+    the winner leaves `point` alone -- "a point was played" still stands,
+    only "who won" is withdrawn. Stamps reviewed_at/seen_at like set_point:
+    this is a ruling on the clip.
+    """
+    if winner not in ("", "a", "b"):
+        raise ValueError(f"winner must be '', 'a' or 'b', not {winner!r}")
+    now = _now()
+    conn.execute(
+        "UPDATE rallies SET winner = ?, point = CASE WHEN ? != '' THEN 1 ELSE point END,"
+        " reviewed_at = COALESCE(reviewed_at, ?), seen_at = COALESCE(seen_at, ?) WHERE id = ?",
+        (winner, winner, now, now, rally_id),
     )
     conn.commit()
 

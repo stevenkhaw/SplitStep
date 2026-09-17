@@ -1,8 +1,10 @@
+import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime
 
 from splitstep.media.transcode import rotation_filter
+from splitstep.score import rules_from_dict, rules_to_dict
 
 
 def _now() -> str:
@@ -71,6 +73,24 @@ def add_source(
 
 def get_session(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+
+
+def scoring_rules(row) -> dict | None:
+    """The session's match-score rules, or None when it does not track one.
+    Parsed here, once, so every reader (the API, the reel job) sees a dict
+    or None and never the raw column."""
+    raw = row["scoring"]
+    if not raw:
+        return None
+    return rules_to_dict(rules_from_dict(json.loads(raw)))
+
+
+def set_scoring(conn: sqlite3.Connection, session_id: str, rules: dict | None) -> None:
+    """Turn tracking on with `rules`, or off with None. Off leaves every
+    rally's winner in place: turning it back on restores the score."""
+    value = "" if rules is None else json.dumps(rules_to_dict(rules_from_dict(rules)))
+    conn.execute("UPDATE sessions SET scoring = ? WHERE id = ?", (value, session_id))
+    conn.commit()
 
 
 def list_sessions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
