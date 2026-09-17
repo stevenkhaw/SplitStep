@@ -1,4 +1,4 @@
-"""Burned-in counter and note for a numbered reel render.
+"""Burned-in counter, note and scoreboard for a numbered reel render.
 
 Composited as a PNG overlay, not drawtext: this machine's ffmpeg (Homebrew's
 default `ffmpeg` formula) has no libfreetype/libfontconfig, so `drawtext`
@@ -35,6 +35,9 @@ _FRAME_HEIGHT = 2160
 _MARGIN = 64
 _COUNTER_SIZE = 120
 _NOTE_SIZE = 72
+_BOARD_SIZE = 84
+_BOARD_COL_GAP = 48
+_BOARD_ROW_GAP = 16
 _BOX_PAD = 24
 _BOX_FILL = (0, 0, 0, 115)  # black at ~45% alpha (115/255)
 _TEXT_FILL = (255, 255, 255, 255)
@@ -63,7 +66,58 @@ def _draw_line(
     draw.text((_MARGIN, y), text, font=font, fill=_TEXT_FILL)
 
 
-def render_overlay_png(dst: Path, *, counter: str, note: str, font: str) -> None:
+def _draw_scoreboard(
+    draw: ImageDraw.ImageDraw, rows: list[list[str]], font: ImageFont.FreeTypeFont
+) -> None:
+    """A broadcast-style board, bottom-left: one pill, two rows, columns
+    sized to their widest cell so the numbers line up under each other.
+    Bottom-left because the counter and note own the top-left, and a reel
+    that mixes tracked and untracked sessions must keep the counter in one
+    place while the board comes and goes."""
+    ncols = max(len(r) for r in rows)
+    cells = [r + [""] * (ncols - len(r)) for r in rows]
+
+    def width(text: str) -> int:
+        if not text:
+            return 0
+        left, _, right, _ = draw.textbbox((0, 0), text, font=font)
+        return right - left
+
+    col_w = [max(width(row[c]) for row in cells) for c in range(ncols)]
+    # Row height from the font's own ascent/descent so a name with a
+    # descender does not collide with the row beneath it.
+    ascent, descent = font.getmetrics()
+    row_h = ascent + descent
+    board_w = sum(col_w) + _BOARD_COL_GAP * (ncols - 1)
+    board_h = row_h * len(cells) + _BOARD_ROW_GAP * (len(cells) - 1)
+    x0 = _MARGIN
+    y0 = _FRAME_HEIGHT - _MARGIN - board_h
+    draw.rounded_rectangle(
+        (x0 - _BOX_PAD, y0 - _BOX_PAD, x0 + board_w + _BOX_PAD, y0 + board_h + _BOX_PAD),
+        radius=_BOX_PAD,
+        fill=_BOX_FILL,
+    )
+    for r, row in enumerate(cells):
+        y = y0 + r * (row_h + _BOARD_ROW_GAP)
+        x = x0
+        for c, text in enumerate(row):
+            # Names left-aligned, numbers right-aligned within their column,
+            # which is how every scoreboard on television reads.
+            if c == 0:
+                draw.text((x, y), text, font=font, fill=_TEXT_FILL)
+            else:
+                draw.text((x + col_w[c] - width(text), y), text, font=font, fill=_TEXT_FILL)
+            x += col_w[c] + _BOARD_COL_GAP
+
+
+def render_overlay_png(
+    dst: Path,
+    *,
+    counter: str,
+    note: str,
+    font: str,
+    scoreboard: list[list[str]] | None = None,
+) -> None:
     """A full-frame transparent PNG carrying the counter and (optional) note.
 
     Full-frame and RGBA rather than a cropped label image: overlay is then
@@ -88,6 +142,12 @@ def render_overlay_png(dst: Path, *, counter: str, note: str, font: str) -> None
         for line in textwrap.wrap(note, width=48):
             _draw_line(draw, line, note_font, y)
             y += _NOTE_SIZE + 2 * _BOX_PAD
+
+    if scoreboard:
+        # The score *entering* this clip, like a live broadcast (see
+        # splitstep/score.py::score_before). Rows come pre-formatted from
+        # scoreboard_rows so this module knows nothing about tennis.
+        _draw_scoreboard(draw, scoreboard, ImageFont.truetype(font, _BOARD_SIZE))
 
     canvas.save(dst)
 

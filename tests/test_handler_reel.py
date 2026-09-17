@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from splitstep.config import NotEnoughSpace
-from splitstep.db.rallies import replace_rallies
+from splitstep.db.rallies import list_rallies, replace_rallies
 from splitstep.db.reels import add_items, create_reel, get_reel
 from splitstep.db.sessions import add_source, find_or_create_session_for_date
 from splitstep.db.settings import set_hr_clips_root
@@ -289,3 +289,57 @@ def test_handle_reel_hr_refuses_without_a_configured_root(library, conn, reel_of
     _cut_all(library, fx)
     with pytest.raises(ValueError, match="set-hr-clips"):
         handle_reel(library, {"reel_id": fx["reel"]["id"], "hr": True})
+
+
+def test_handle_reel_numbered_burns_the_score_entering_each_clip(
+    library, conn, reel_of_two, monkeypatch
+):
+    from splitstep.db.rallies import set_winner
+    from splitstep.db.sessions import set_scoring
+    from splitstep.jobs import handlers as handlers_mod
+
+    fx = reel_of_two
+    set_scoring(conn, fx["session_id"], {
+        "players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7,
+    })
+    rows = list_rallies(conn, fx["session_id"])
+    set_winner(conn, rows[0]["id"], "a")
+    set_winner(conn, rows[1]["id"], "b")
+    _cut_all(library, fx)
+
+    seen: list[list[list[str]] | None] = []
+
+    def spy(dst, *, counter, note, font, scoreboard=None):
+        seen.append(scoreboard)
+        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+
+    real = handlers_mod.render_overlay_png
+    monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    # Clip 1 is the first point: nothing has been scored yet. Clip 2 enters
+    # at 15-0 to Me -- the score BEFORE the point it contains.
+    assert seen == [
+        [["Me", "0", "0"], ["Opp", "0", "0"]],
+        [["Me", "0", "15"], ["Opp", "0", "0"]],
+    ]
+
+
+def test_handle_reel_numbered_has_no_board_for_an_untracked_session(
+    library, conn, reel_of_two, monkeypatch
+):
+    from splitstep.jobs import handlers as handlers_mod
+
+    fx = reel_of_two
+    _cut_all(library, fx)
+    seen = []
+    real = handlers_mod.render_overlay_png
+
+    def spy(dst, *, counter, note, font, scoreboard=None):
+        seen.append(scoreboard)
+        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+
+    monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+    assert seen == [None, None]

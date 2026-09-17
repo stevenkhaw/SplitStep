@@ -8,7 +8,7 @@ from pathlib import Path
 from splitstep import resources
 from splitstep.config import Library
 from splitstep.db import jobs as jobq
-from splitstep.db.rallies import replace_rallies, set_clip_path
+from splitstep.db.rallies import list_rallies, replace_rallies, set_clip_path
 from splitstep.db.reels import get_reel, mark_rendered
 from splitstep.db.schema import connect, migrate
 from splitstep.db.sessions import (
@@ -16,8 +16,10 @@ from splitstep.db.sessions import (
     find_ingesting_sources_by_original_name,
     find_or_create_session_for_date,
     find_sources_by_original_name,
+    get_session,
     get_source,
     get_source_by_original_name,
+    scoring_rules,
     set_session_status,
     set_source_dimensions,
     set_source_status,
@@ -49,6 +51,7 @@ from splitstep.reels import (
     missing_clip_count,
     resolve_items,
 )
+from splitstep.score import rules_from_dict, score_before, scoreboard_rows
 
 log = logging.getLogger(__name__)
 
@@ -540,6 +543,32 @@ def handle_reel(library: Library, payload: dict,
         font = resources.overlay_font()
         tmp_dir = library.reels_dir / f".{reel['slug']}.numbered.{uuid.uuid4().hex[:8]}"
         tmp_dir.mkdir(parents=True)
+
+        # The score entering each clip, replayed per session. Cached per
+        # session because a reel is session-agnostic (items from several
+        # matches can sit in one reel) and re-reading a session's rallies
+        # per item would be N queries for one answer. An orphan item (no
+        # rally) or an untracked session gets no board -- the counter and
+        # note still burn as before.
+        session_cache: dict[str, tuple[list, object] | None] = {}
+
+        def board_for(item) -> list[list[str]] | None:
+            if item.rally is None:
+                return None
+            if item.session_id not in session_cache:
+                rules = scoring_rules(get_session(conn, item.session_id))
+                session_cache[item.session_id] = (
+                    None if rules is None
+                    else ([dict(r) for r in list_rallies(conn, item.session_id)],
+                          rules_from_dict(rules))
+                )
+            cached = session_cache[item.session_id]
+            if cached is None:
+                return None
+            rallies, parsed = cached
+            state, _unscored = score_before(rallies, item.rally["id"], parsed)
+            return scoreboard_rows(state, parsed)
+
         try:
             intermediates: list[Path] = []
             total = len(items)
@@ -547,7 +576,10 @@ def handle_reel(library: Library, payload: dict,
                 png_i = tmp_dir / f"{i:03d}.png"
                 # Spaced like the review queue's own "10 / 122" pill -- the
                 # burn mirrors the counter the reviewer already reads.
-                render_overlay_png(png_i, counter=f"{i} / {total}", note=item.note, font=font)
+                render_overlay_png(
+                    png_i, counter=f"{i} / {total}", note=item.note, font=font,
+                    scoreboard=board_for(item),
+                )
                 dst_i = tmp_dir / f"{i:03d}.mp4"
                 make_numbered_intermediate(
                     src, dst_i,

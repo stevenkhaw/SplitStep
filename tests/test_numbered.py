@@ -51,3 +51,37 @@ def test_special_characters_need_no_escaping(tmp_path):
     render_overlay_png(dst, counter="1/2", note="it's 50%: a,b\\c", font=overlay_font())
 
     assert _ink_pixels(dst) > 0
+
+
+def _ink_in_region(png: Path, box: tuple[int, int, int, int]) -> int:
+    with Image.open(png) as img:
+        return sum(img.crop(box).getchannel("A").histogram()[1:])
+
+
+BOTTOM_LEFT = (0, 1080, 1920, 2160)
+
+
+def test_scoreboard_draws_bottom_left_and_nothing_there_without_one(tmp_path):
+    plain = tmp_path / "plain.png"
+    board = tmp_path / "board.png"
+    render_overlay_png(plain, counter="3/20", note="", font=overlay_font())
+    render_overlay_png(
+        board, counter="3/20", note="", font=overlay_font(),
+        scoreboard=[["Me", "6", "3", "30"], ["Opp", "4", "2", "15"]],
+    )
+    assert _ink_in_region(plain, BOTTOM_LEFT) == 0
+    assert _ink_in_region(board, BOTTOM_LEFT) > 0
+    # The counter is untouched by the board: same ink top-left either way.
+    top_left = (0, 0, 1920, 1080)
+    assert _ink_in_region(plain, top_left) == _ink_in_region(board, top_left)
+
+
+def test_scoreboard_with_uneven_row_lengths_still_renders(tmp_path):
+    # A finished match has a "W" and a "" in the last column; the grid must
+    # size columns from the longest cell and not choke on an empty one.
+    dst = tmp_path / "w.png"
+    render_overlay_png(
+        dst, counter="1/1", note="", font=overlay_font(),
+        scoreboard=[["Me", "6", "6", "W"], ["Opponent", "0", "0", ""]],
+    )
+    assert _ink_in_region(dst, BOTTOM_LEFT) > 0
