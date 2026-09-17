@@ -29,13 +29,15 @@
   {#each rallies as r (r.id)}
     <button
       type="button"
-      class="absolute top-1 bottom-1 rounded-sm {r.starred
-        ? 'bg-star'
-        : 'bg-dim'} {r.id === currentId ? 'ring-2 ring-fg' : 'opacity-60'}"
+      class="absolute top-1 bottom-1 rounded-sm {r.rejected
+        ? 'hatched bg-faint'
+        : r.starred
+          ? 'bg-star'
+          : 'bg-dim'} {r.id === currentId ? 'ring-2 ring-fg' : r.rejected ? 'opacity-40' : 'opacity-60'}"
       style={pos(r)}
-      title={`rally ${r.idx}`}
+      title={r.rejected ? `rally ${r.idx} (rejected)` : `rally ${r.idx}`}
       onclick={() => onpick(r.id)}
-      aria-label={`rally ${r.idx}`}
+      aria-label={r.rejected ? `rally ${r.idx} (rejected)` : `rally ${r.idx}`}
       aria-current={r.id === currentId}
     ></button>
   {/each}
@@ -57,3 +59,16 @@
     }%`}
   ></div>
 </div>
+
+<style>
+  /* A gap in the band used to read as "nothing here"; hatching says
+     "something was here and a human said no". Token colour via var() so
+     the pattern follows the theme. */
+  .hatched {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 3px,
+      var(--color-bg) 3px 5px
+    );
+  }
+</style>

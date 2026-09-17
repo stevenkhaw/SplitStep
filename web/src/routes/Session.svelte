@@ -29,6 +29,12 @@
   // the fetch sites below always resolve this to a real tab id the same
   // tick `detail` lands, via `resolveSelectedSource`.
   let selectedSourceId = $state<string | null>(null)
+  // Whether the queue's current pass includes rejected rallies -- H flips
+  // this. Lives here, not in QueueMode, because QueueController reads it
+  // only at construction (see its one-time `queue` snapshot): changing the
+  // filter needs a fresh controller, which is exactly what bumping
+  // rallyRevision below forces.
+  let showRejected = $state(false)
   // The live-merged rallies QueueMode hands to openTimeline (see
   // QueueController.liveSnapshot) -- threaded through so TimelineMode's
   // OverviewBand can color a rally starred/rejected earlier in this queue
@@ -143,6 +149,17 @@
       cancelled = true
     }
   })
+
+  // H in QueueMode. A fresh QueueController is the only way the includeRejected
+  // filter changes (see the prop's doc comment on QueueMode), so this bumps
+  // rallyRevision like a re-segment or tab switch does -- and reuses
+  // focusedRallyId/startAtRallyId, the same "come back on this rally" trick
+  // closeTimeline uses, so the reviewer does not lose their place.
+  function toggleRejected(rallyId: string | null) {
+    showRejected = !showRejected
+    focusedRallyId = rallyId
+    rallyRevision += 1
+  }
 
   function openTimeline(rallyId: string, liveRallies: Rally[]) {
     focusedRallyId = rallyId
@@ -308,6 +325,8 @@
         onscoring={(rules) => {
           if (detail) detail.session.scoring = rules
         }}
+        {showRejected}
+        ontoggle_rejected={toggleRejected}
       />
     {:else if mode === 'label'}
       <LabelMode

@@ -48,6 +48,12 @@ export interface UndoAction {
  */
 export type QueueAction = PersistableAction | UndoAction
 
+export interface QueueOptions {
+  /** Keep rejected rallies in the pass so one can be brought back. Off by
+   *  default: the ordinary pass is about what is left to judge. */
+  includeRejected?: boolean
+}
+
 interface HistoryEntry {
   index: number
   starred: boolean
@@ -77,11 +83,16 @@ export class QueueController {
   #winners = new Map<string, Winner>()
   #history = new UndoStack<HistoryEntry>()
 
-  constructor(rallies: Rally[]) {
-    this.#rallies = rallies.filter((r) => !r.rejected)
+  constructor(rallies: Rally[], options: QueueOptions = {}) {
+    this.#rallies = options.includeRejected ? [...rallies] : rallies.filter((r) => !r.rejected)
     for (const r of this.#rallies) if (r.starred) this.#starred.add(r.id)
     for (const r of this.#rallies) if (r.point) this.#points.add(r.id)
     for (const r of this.#rallies) this.#winners.set(r.id, r.winner)
+    // Seeded only when they are shown: rejectedCount has always meant
+    // "rejected in this pass" for the default queue (rejected rallies are
+    // filtered out above, so the Set stays empty), and the finish screen's
+    // tally reads from it.
+    if (options.includeRejected) for (const r of this.#rallies) if (r.rejected) this.#rejected.add(r.id)
 
     // seen_at, not reviewed_at: reviewed_at means "a human ruled on this
     // rally" (star/point/reject) and drives session status alone; seen_at
@@ -90,7 +101,18 @@ export class QueueController {
     // case). Resuming on reviewed_at used to mean a rally that was arrowed
     // past but never judged kept reviewed_at NULL forever, so every reopen
     // landed back on it no matter how far the reviewer had actually looked.
-    const firstUnseen = this.#rallies.findIndex((r) => r.seen_at === null)
+    //
+    // A shown-but-rejected rally counts as a resume target too, even once
+    // seen: it was rejected on an earlier pass (necessarily already seen),
+    // and H exists precisely so it can be reconsidered -- landing past the
+    // end of a single-rally rejected pass would read as "nothing to show"
+    // instead of putting the one rally H was pressed for in front of you.
+    // In practice Session.svelte always follows this with jumpTo(current
+    // rally id) on a toggle, so this only matters for a controller built
+    // directly (e.g. a first load with a rejected rally already in it).
+    const firstUnseen = this.#rallies.findIndex(
+      (r) => r.seen_at === null || (options.includeRejected && !!r.rejected),
+    )
     this.#index = firstUnseen === -1 ? this.#rallies.length : firstUnseen
   }
 

@@ -66,6 +66,14 @@
     /** Tracking was switched on/off or its rules changed. Session keeps
      *  `detail.session.scoring` in step so a remount seeds correctly. */
     onscoring?: (rules: ScoreRules | null) => void
+    /** Whether this pass includes rejected rallies (H toggles it). Read only
+     *  at construction -- see the `queue` one-time snapshot below -- so
+     *  flipping it is meaningless without the remount `ontoggle_rejected`
+     *  triggers. */
+    showRejected: boolean
+    /** Flip show-rejected. Session remounts the queue (a fresh controller
+     *  is the only way the filter changes) and comes back on this rally. */
+    ontoggle_rejected: (currentRallyId: string | null) => void
   }
 
   let {
@@ -77,6 +85,8 @@
     onexport,
     sessionRallies,
     onscoring,
+    showRejected,
+    ontoggle_rejected,
   }: Props = $props()
 
   // Deliberately a one-time snapshot, not a reactive read: the queue state
@@ -88,7 +98,9 @@
   // fresh, so a mounted instance can never observe `detail` changing out
   // from under it. `untrack` tells svelte-check this one-time read is
   // intentional rather than an accidental non-reactive reference.
-  const queue = new QueueController(untrack(() => detail.rallies))
+  const queue = new QueueController(untrack(() => detail.rallies), {
+    includeRejected: untrack(() => showRejected),
+  })
   // A fresh controller opens on the first rally whose seen_at is null,
   // which is the right resume point for a new session and the wrong one for
   // a remount. Returning from the timeline forces a remount (Session bumps
@@ -462,10 +474,15 @@
     switch (e.key) {
       case 's':
       case 'S':
+        // Starring or rejecting while the "Who won?" prompt shows means the
+        // reviewer moved on from that rally without answering it -- the
+        // same reasoning the arrows and U already use below.
+        awaitingWinner = false
         apply(queue.star())
         break
       case 'x':
       case 'X':
+        awaitingWinner = false
         apply(queue.reject())
         break
       case 'p':
@@ -545,6 +562,10 @@
         // No `if (current)` guard here, unlike 't' -- see the onopen_label
         // doc comment above for why label mode has no need of one.
         onopen_label(current ? current.id : null)
+        break
+      case 'h':
+      case 'H':
+        ontoggle_rejected(current ? current.id : null)
         break
     }
   }
@@ -637,7 +658,15 @@
       />
       Track score
     </label>
-    <!-- Show-rejected toggle lands here in the next task. -->
+    <label class="flex items-center gap-2">
+      <input
+        type="checkbox"
+        class="accent-fg"
+        checked={showRejected}
+        onchange={() => ontoggle_rejected(current ? current.id : null)}
+      />
+      Show rejected <span class="text-faint">H</span>
+    </label>
   </div>
   {#if settingUp && !rules}
     <div class="mb-2">
@@ -801,7 +830,9 @@
       <!-- Rejected is deliberately not danger-coloured. Detection is
            recall-biased, so rejecting is the most frequent action here; red
            would state "error" about the routine case. It recedes instead. -->
-      {#if currentRejected}<span class="text-faint">rejected</span>{/if}
+      {#if currentRejected}
+        <span class="text-faint">{showRejected ? 'rejected · X brings it back' : 'rejected'}</span>
+      {/if}
     </span>
     <span class="flex shrink-0 items-center gap-3">
       <span class="text-star">★ {stats.starredCount}</span>

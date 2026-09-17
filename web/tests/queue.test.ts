@@ -617,4 +617,31 @@ describe('QueueController.winner', () => {
     // A rally from another source tab: not this controller's to zero out.
     expect(snap[1]).toEqual(other)
   })
+
+  describe('includeRejected', () => {
+    it('keeps rejected rallies in the queue, in order, and counts them', () => {
+      const s = new QueueController([rally(1), rally(2, { rejected: 1 }), rally(3)], { includeRejected: true })
+      expect(s.total).toBe(3)
+      expect(s.rejectedCount).toBe(1)
+      expect(s.isRejected('r2')).toBe(true)
+    })
+
+    it('X on a shown rejected rally un-rejects it', () => {
+      const s = new QueueController([rally(1, { rejected: 1, seen_at: 'x' })], { includeRejected: true })
+      expect(s.currentIsRejected).toBe(true)
+      const a = s.reject()!
+      expect(a.rejected).toBe(false)
+      expect(s.rejectedCount).toBe(0)
+    })
+
+    it('resumes on the first unseen rally even when it is rejected', () => {
+      const s = new QueueController([rally(1, { seen_at: 'x' }), rally(2, { rejected: 1 })], { includeRejected: true })
+      expect(s.current?.id).toBe('r2')
+    })
+
+    it('default still hides rejected rallies', () => {
+      const s = new QueueController([rally(1), rally(2, { rejected: 1 })])
+      expect(s.total).toBe(1)
+    })
+  })
 })
