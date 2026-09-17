@@ -151,14 +151,35 @@
   })
 
   // H in QueueMode. A fresh QueueController is the only way the includeRejected
-  // filter changes (see the prop's doc comment on QueueMode), so this bumps
-  // rallyRevision like a re-segment or tab switch does -- and reuses
+  // filter changes (see the prop's doc comment on QueueMode), and reuses
   // focusedRallyId/startAtRallyId, the same "come back on this rally" trick
   // closeTimeline uses, so the reviewer does not lose their place.
+  //
+  // Refetches first, mirroring closeTimeline's shape: QueueMode never writes
+  // a verdict back into `detail` (see its apply(), and the comment on
+  // `sessionRallies` above), so remounting straight from the existing
+  // snapshot would judge "is this rally rejected" by whatever `detail`
+  // happened to hold at the last full load -- forgetting every reject and
+  // un-reject made during this pass. Concretely: reject a rally, un-reject
+  // it, then press H to hide rejected rallies again -- without this
+  // refetch, the stale snapshot still says rejected and the rally the
+  // server had already restored silently vanishes again. `showRejected`
+  // only flips inside the `.then`, alongside `detail`, so a failed refetch
+  // leaves both exactly as they were rather than remounting the queue
+  // against data that cannot back up the toggle it is about to show.
   function toggleRejected(rallyId: string | null) {
-    showRejected = !showRejected
-    focusedRallyId = rallyId
-    rallyRevision += 1
+    api
+      .getSession(id)
+      .then((d) => {
+        detail = d
+        resolveSelectedSource(d)
+        showRejected = !showRejected
+        focusedRallyId = rallyId
+        rallyRevision += 1
+      })
+      .catch((e) => {
+        console.error('failed to refresh session before toggling show-rejected', e)
+      })
   }
 
   function openTimeline(rallyId: string, liveRallies: Rally[]) {

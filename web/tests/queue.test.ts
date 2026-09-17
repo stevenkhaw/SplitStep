@@ -635,7 +635,13 @@ describe('QueueController.winner', () => {
     })
 
     it('resumes on the first unseen rally even when it is rejected', () => {
-      const s = new QueueController([rally(1, { seen_at: 'x' }), rally(2, { rejected: 1 })], { includeRejected: true })
+      // Both rallies carry seen_at -- without the includeRejected && rejected
+      // disjunct in the resume search, r2's seen_at alone would push the
+      // index past the end (finished) instead of landing back on it.
+      const s = new QueueController(
+        [rally(1, { seen_at: 'x' }), rally(2, { rejected: 1, seen_at: 'x' })],
+        { includeRejected: true },
+      )
       expect(s.current?.id).toBe('r2')
     })
 
