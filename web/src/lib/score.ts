@@ -18,6 +18,11 @@ export interface ScoreRules {
   ad: boolean
   tiebreak: 'at6' | 'none' | 'only'
   tiebreakTo: 7 | 10
+  /** Who served the session's first point, or null when nobody said.
+   *  Never defaulted: every session recorded before this key existed has
+   *  no honest value, and 'a' would be wrong half the time. Absent renders
+   *  no server at all, the way an unassigned preset renders no region. */
+  firstServer: Player | null
 }
 
 export interface ScoreState {
@@ -26,6 +31,12 @@ export interface ScoreState {
   points: [string, string]
   inTiebreak: boolean
   finished: Player | null
+  /** Who serves the point this state is entering, derived from
+   *  rules.firstServer by the same replay and stored nowhere. Null when no
+   *  first server was named, and null once the match is decided -- there is
+   *  no next point, which is why scoreboardRows drops games and points
+   *  there too. */
+  server: Player | null
 }
 
 export const DEFAULT_RULES: ScoreRules = {
@@ -34,6 +45,32 @@ export const DEFAULT_RULES: ScoreRules = {
   ad: true,
   tiebreak: 'at6',
   tiebreakTo: 7,
+  firstServer: null,
+}
+
+/**
+ * Who serves the next point, from how many service units are done.
+ *
+ * Serve alternates every game, so the parity of completed games decides
+ * it. A whole tiebreak counts as one unit, which is not a shortcut: the
+ * player who would have served the next game serves the tiebreak's first
+ * point, and treating the tiebreak as that game makes "whoever served
+ * first in the tiebreak receives first in the next set" (ITF rule 5) fall
+ * out of plain alternation instead of needing a special case.
+ *
+ * Inside a tiebreak the serve changes after the first point and every two
+ * after that -- points 1 / 2,3 / 4,5 -- so the point about to be played,
+ * 1-based, has had floor(p / 2) changes before it.
+ */
+function serverOf(
+  rules: ScoreRules,
+  units: number,
+  inTb: boolean,
+  pts: [number, number],
+): Player | null {
+  if (rules.firstServer === null) return null
+  const flips = units + (inTb ? Math.floor((pts[0] + pts[1] + 1) / 2) : 0)
+  return (['a', 'b'] as const)[(rules.firstServer === 'a' ? 0 : 1) ^ (flips % 2)]
 }
 
 const POINT_LABELS = ['0', '15', '30', '40']
@@ -55,6 +92,7 @@ export function score(winners: Player[], rules: ScoreRules): ScoreState {
   let pts: [number, number] = [0, 0]
   let inTb = rules.tiebreak === 'only'
   let finished: Player | null = null
+  let units = 0 // completed service units: games, plus a whole tiebreak as one
   const setsWonBy = (i: 0 | 1) => sets.filter((s) => s[i] > s[1 - i]).length
 
   for (const w of winners) {
@@ -72,6 +110,7 @@ export function score(winners: Player[], rules: ScoreRules): ScoreState {
           finished = w
         } else {
           games[i] += 1
+          units += 1
           sets.push([games[0], games[1]])
           games = [0, 0]
           pts = [0, 0]
@@ -87,6 +126,7 @@ export function score(winners: Player[], rules: ScoreRules): ScoreState {
     const wonGame = pts[i] >= 4 && (!rules.ad || pts[i] - pts[j] >= 2)
     if (!wonGame) continue
     games[i] += 1
+    units += 1
     pts = [0, 0]
     if (rules.tiebreak === 'at6' && games[0] === 6 && games[1] === 6) {
       inTb = true
@@ -97,7 +137,14 @@ export function score(winners: Player[], rules: ScoreRules): ScoreState {
     }
   }
 
-  return { sets, games, points: pointLabels(pts, inTb, rules.ad), inTiebreak: inTb, finished }
+  return {
+    sets,
+    games,
+    points: pointLabels(pts, inTb, rules.ad),
+    inTiebreak: inTb,
+    finished,
+    server: finished !== null ? null : serverOf(rules, units, inTb, pts),
+  }
 }
 
 /**

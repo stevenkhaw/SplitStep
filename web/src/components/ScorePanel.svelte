@@ -31,6 +31,19 @@
     <tbody>
       {#each rows as row, i (i)}
         <tr data-testid="score-row" class={row[row.length - 1] === 'W' ? 'text-fg' : 'text-dim'}>
+          <!-- The serving marker, and only when a first server was named:
+               an absent one is unknown, not player A, so the column simply
+               isn't there rather than pointing at a guess. Fixed-width and
+               in the table's font-data so the names do not shift sideways
+               when the serve changes. The dot carries no hue -- A and B are
+               one axis, and the panel has no accent to spend (app.css). -->
+          {#if state.server !== null}
+            <td
+              data-testid="serve-marker"
+              class="w-3 pr-1 text-center text-fg"
+              aria-label={state.server === (i === 0 ? 'a' : 'b') ? 'serving' : undefined}
+            >{state.server === (i === 0 ? 'a' : 'b') ? '•' : ''}</td>
+          {/if}
           <td class="pr-3 text-left text-fg">{row[0]}</td>
           {#each row.slice(1) as cell, c (c)}
             <!-- Explicit space mustache, not raw markup whitespace: Svelte

@@ -21,6 +21,11 @@
   let ad = $state(seed.ad)
   let tiebreak = $state<ScoreRules['tiebreak']>(seed.tiebreak)
   let tiebreakTo = $state<ScoreRules['tiebreakTo']>(seed.tiebreakTo)
+  // '' is "not recorded", and it is the honest default: there is no value
+  // to guess for a session whose first serve nobody noted, and half of any
+  // guess would be wrong. Bound as a string because that is what a <select>
+  // carries; null crosses the boundary in submit().
+  let firstServer = $state<'' | 'a' | 'b'>(seed.firstServer ?? '')
   let error = $state<string | null>(null)
 
   function submit(e: SubmitEvent) {
@@ -32,7 +37,7 @@
       return
     }
     error = null
-    onstart({ players: [a, b], sets, ad, tiebreak, tiebreakTo })
+    onstart({ players: [a, b], sets, ad, tiebreak, tiebreakTo, firstServer: firstServer || null })
   }
 
   const FIELD = 'rounded border border-line bg-surface px-2 py-1 font-data text-data text-fg'
@@ -73,6 +78,16 @@
         Deuce / advantage (untick for no-ad)
       </label>
     {/if}
+    <!-- Outside the format branch: who serves first is asked of a tiebreak
+         the same as of a match. Named options rather than A/B so it is
+         answerable at a glance -- it is asked once per session. -->
+    <label class="col-span-2 text-caption text-dim">First serve
+      <select class="{FIELD} mt-1 w-full" name="firstServer" bind:value={firstServer}>
+        <option value="">Not recorded</option>
+        <option value="a">{nameA.trim() || 'Player A'}</option>
+        <option value="b">{nameB.trim() || 'Player B'}</option>
+      </select>
+    </label>
   </div>
   {#if error}
     <p class="mt-2 text-caption text-danger" role="alert">{error}</p>

@@ -1011,3 +1011,24 @@ def test_labels_score_reports_partly_windows_under_their_own_denominator(
     # A pass consisting only of partly windows has still been sampled -- it
     # must not report as though nobody labelled anything.
     assert "no blind windows labelled" not in out
+
+
+def test_score_set_records_a_first_server_and_show_names_them(library, conn, capsys):
+    session_id = _scored_session(conn)
+    conn.close()
+    rc = main(["--library", str(library.root), "score", "set", session_id,
+               "--players", "Ann", "Bob", "--first-server", "a"])
+    assert rc == 0
+    rc = main(["--library", str(library.root), "score", "show", session_id])
+    assert rc == 0
+    assert "Ann serving" in capsys.readouterr().out
+
+
+def test_score_show_says_nothing_about_serving_without_a_first_server(library, conn, capsys):
+    # Absent is unknown, not player A: the board stays silent rather than
+    # naming someone the reviewer never told it about.
+    session_id = _scored_session(conn)
+    conn.close()
+    main(["--library", str(library.root), "score", "set", session_id, "--players", "Ann", "Bob"])
+    main(["--library", str(library.root), "score", "show", session_id])
+    assert "serving" not in capsys.readouterr().out

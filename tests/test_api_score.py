@@ -7,7 +7,8 @@ from splitstep.db.schema import connect, migrate
 from splitstep.db.sessions import add_source, find_or_create_session_for_date, set_session_status
 from splitstep.detect.segment import Interval
 
-RULES = {"players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7}
+RULES = {"players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7,
+         "firstServer": None}
 
 
 @pytest.fixture
@@ -101,3 +102,24 @@ def test_unmarking_the_point_over_the_api_clears_the_winner(client, conn, seeded
     client.post(f"/api/rallies/{rid}/winner", json={"winner": "b"})
     client.post(f"/api/rallies/{rid}/point", json={"point": False})
     assert list_rallies(conn, sid)[0]["winner"] == ""
+
+
+def test_scoring_accepts_a_first_server_and_normalizes_an_absent_one(client, seeded):
+    # The key is optional in the body and always present in the reply, so a
+    # client never has to tell "absent" from "null" -- both mean nobody said.
+    sid = seeded["session_id"]
+    body = {k: v for k, v in RULES.items() if k != "firstServer"}
+    r = client.post(f"/api/sessions/{sid}/scoring", json={"rules": body})
+    assert r.status_code == 200
+    assert r.json()["scoring"]["firstServer"] is None
+
+    r = client.post(f"/api/sessions/{sid}/scoring", json={"rules": {**RULES, "firstServer": "b"}})
+    assert r.status_code == 200
+    assert r.json()["scoring"]["firstServer"] == "b"
+    assert client.get(f"/api/sessions/{sid}").json()["session"]["scoring"]["firstServer"] == "b"
+
+
+def test_scoring_refuses_a_first_server_who_is_not_a_player(client, seeded):
+    sid = seeded["session_id"]
+    r = client.post(f"/api/sessions/{sid}/scoring", json={"rules": {**RULES, "firstServer": "c"}})
+    assert r.status_code == 422

@@ -22,6 +22,12 @@ class ScoreRules:
     ad: bool
     tiebreak: str
     tiebreak_to: int
+    # Who served the session's first point, or None when nobody said. Not
+    # defaulted: every session recorded before this key existed has no
+    # honest value, and 'a' would be wrong half the time. The same choice
+    # preset_assigned_at and sampled_recall make -- absent stays absent, and
+    # the UI renders no server rather than a guess.
+    first_server: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,9 +37,15 @@ class ScoreState:
     points: tuple[str, str]
     in_tiebreak: bool
     finished: str | None
+    # Who serves the point this state is entering, derived from
+    # rules.first_server by the same replay -- stored nowhere, like the rest
+    # of the score. None when no first server was named, and None once the
+    # match is decided, for the reason scoreboard_rows drops games and
+    # points there: there is no next point to serve.
+    server: str | None
 
 
-DEFAULT_RULES = ScoreRules(("Me", "Opp"), 3, True, "at6", 7)
+DEFAULT_RULES = ScoreRules(("Me", "Opp"), 3, True, "at6", 7, None)
 
 
 def rules_from_dict(d: Mapping) -> ScoreRules:
@@ -59,7 +71,10 @@ def rules_from_dict(d: Mapping) -> ScoreRules:
     tiebreak_to = d.get("tiebreakTo")
     if tiebreak_to not in (7, 10):
         raise ValueError("tiebreakTo must be 7 or 10")
-    return ScoreRules(players, sets, ad, tiebreak, tiebreak_to)
+    first_server = d.get("firstServer")
+    if first_server not in (None, "a", "b"):
+        raise ValueError("firstServer must be a, b or absent")
+    return ScoreRules(players, sets, ad, tiebreak, tiebreak_to, first_server)
 
 
 def rules_to_dict(r: ScoreRules) -> dict:
@@ -69,7 +84,30 @@ def rules_to_dict(r: ScoreRules) -> dict:
         "ad": r.ad,
         "tiebreak": r.tiebreak,
         "tiebreakTo": r.tiebreak_to,
+        "firstServer": r.first_server,
     }
+
+
+def _server(rules: ScoreRules, units: int, in_tb: bool, pts: list[int]) -> str | None:
+    """Who serves the next point, from how many service units are done.
+
+    Serve alternates every game, so the parity of completed games decides
+    it. A whole tiebreak counts as one unit, which is not a shortcut: the
+    player who would have served the next game serves the tiebreak's first
+    point, and treating the tiebreak as that game makes "whoever served
+    first in the tiebreak receives first in the next set" (ITF rule 5) fall
+    out of plain alternation instead of needing a special case.
+
+    Inside a tiebreak the serve changes after the first point and every two
+    after that -- points 1 / 2,3 / 4,5 -- so the point about to be played,
+    1-based, has had floor(p / 2) changes before it.
+    """
+    if rules.first_server is None:
+        return None
+    flips = units
+    if in_tb:
+        flips += (pts[0] + pts[1] + 1) // 2
+    return ("a", "b")[(0 if rules.first_server == "a" else 1) ^ (flips % 2)]
 
 
 def _point_labels(pts: list[int], in_tiebreak: bool, ad: bool) -> tuple[str, str]:
@@ -96,6 +134,7 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
     pts = [0, 0]
     in_tb = rules.tiebreak == "only"
     finished: str | None = None
+    units = 0   # completed service units: games, plus a whole tiebreak as one
 
     for w in winners:
         if finished is not None:
@@ -114,6 +153,7 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
                     finished = w
                 else:
                     games[i] += 1
+                    units += 1
                     sets.append((games[0], games[1]))
                     games = [0, 0]
                     pts = [0, 0]
@@ -129,6 +169,7 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
         if not won_game:
             continue
         games[i] += 1
+        units += 1
         pts = [0, 0]
         if rules.tiebreak == "at6" and games == [6, 6]:
             in_tb = True
@@ -144,6 +185,7 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
         points=_point_labels(pts, in_tb, rules.ad),
         in_tiebreak=in_tb,
         finished=finished,
+        server=None if finished is not None else _server(rules, units, in_tb, pts),
     )
 
 

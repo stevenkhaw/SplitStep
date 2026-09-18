@@ -31,11 +31,31 @@ def test_engine_matches_the_shared_cases(case):
     assert list(state.points) == e["points"]
     assert state.in_tiebreak == e["inTiebreak"]
     assert state.finished == e["finished"]
+    assert state.server == e["server"]
 
 
 def test_rules_round_trip_through_the_json_shape():
-    d = {"players": ["Ann", "Bob"], "sets": 5, "ad": False, "tiebreak": "only", "tiebreakTo": 10}
+    d = {"players": ["Ann", "Bob"], "sets": 5, "ad": False, "tiebreak": "only", "tiebreakTo": 10,
+         "firstServer": "b"}
     assert rules_to_dict(rules_from_dict(d)) == d
+
+
+def test_first_server_is_optional_and_never_guessed():
+    # Every session recorded before this existed has no first server, and
+    # there is no honest value to backfill -- defaulting to 'a' would be
+    # wrong half the time. Absent stays absent, and the key round-trips as
+    # null so the column's shape is the same either way.
+    d = {"players": ["Ann", "Bob"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7}
+    assert rules_from_dict(d).first_server is None
+    assert rules_to_dict(rules_from_dict(d)) == {**d, "firstServer": None}
+    assert DEFAULT_RULES.first_server is None
+
+
+def test_rules_from_dict_rejects_a_first_server_that_is_not_a_player():
+    with pytest.raises(ValueError):
+        rules_from_dict({**rules_to_dict(DEFAULT_RULES), "firstServer": "c"})
+    with pytest.raises(ValueError):
+        rules_from_dict({**rules_to_dict(DEFAULT_RULES), "firstServer": ""})
 
 
 def test_rules_from_dict_rejects_bad_values():

@@ -16,7 +16,8 @@ from splitstep.db.sessions import (
 )
 from splitstep.detect.segment import Interval
 
-RULES = {"players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7}
+RULES = {"players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7,
+         "firstServer": None}
 
 
 @pytest.fixture

@@ -68,4 +68,31 @@ describe('ScorePanel', () => {
     const el = render({ rules: DEFAULT_RULES, state: score('a'.repeat(48).split('') as Player[], DEFAULT_RULES), unscored: 0, prompting: false, onwin: () => {} })
     expect(el.textContent).toContain('Me wins')
   })
+
+  it('shows no server at all when the session names no first server', () => {
+    // An absent firstServer is unknown, not 'a'. No column, no marker --
+    // the table is exactly what it was before servers existed.
+    const el = render({ rules: DEFAULT_RULES, state: score([], DEFAULT_RULES), unscored: 0, prompting: false, onwin: () => {} })
+    expect(el.querySelectorAll('[data-testid="serve-marker"]').length).toBe(0)
+    expect(el.querySelector('[data-testid="score-row"]')?.textContent?.replace(/\s+/g, ' ').trim())
+      .toBe('Me 0 0')
+  })
+
+  it('marks the serving player, and only them', () => {
+    const rules: ScoreRules = { ...DEFAULT_RULES, players: ['Ann', 'Bob'], firstServer: 'a' }
+    // One love game to Ann: serve passes to Bob for the second game.
+    const el = render({ rules, state: score('aaaa'.split('') as Player[], rules), unscored: 0, prompting: false, onwin: () => {} })
+    const marks = el.querySelectorAll('[data-testid="serve-marker"]')
+    expect(marks.length).toBe(2)
+    expect(marks[0].getAttribute('aria-label')).toBeNull()
+    expect(marks[1].getAttribute('aria-label')).toBe('serving')
+    expect(marks[0].textContent?.trim()).toBe('')
+    expect(marks[1].textContent?.trim()).not.toBe('')
+  })
+
+  it('drops the server once the match is decided', () => {
+    const rules: ScoreRules = { ...DEFAULT_RULES, firstServer: 'a' }
+    const el = render({ rules, state: score('a'.repeat(48).split('') as Player[], rules), unscored: 0, prompting: false, onwin: () => {} })
+    expect(el.querySelectorAll('[data-testid="serve-marker"]').length).toBe(0)
+  })
 })

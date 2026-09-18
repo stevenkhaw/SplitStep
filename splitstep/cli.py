@@ -511,10 +511,13 @@ def cmd_score_set(args) -> int:
         "ad": not args.no_ad,
         "tiebreak": args.tiebreak,
         "tiebreakTo": args.tiebreak_to,
+        "firstServer": args.first_server,
     }
     set_scoring(conn, args.session_id, rules)
+    served = args.players[0 if args.first_server == "a" else 1] if args.first_server else None
     print(f"tracking {args.players[0]} vs {args.players[1]}: best of {args.sets},"
-          f" {'no-ad' if args.no_ad else 'ad'}, tiebreak {args.tiebreak}")
+          f" {'no-ad' if args.no_ad else 'ad'}, tiebreak {args.tiebreak}"
+          + (f", {served} serves first" if served else ""))
     return 0
 
 
@@ -547,6 +550,9 @@ def cmd_score_show(args) -> int:
     )
     for row in scoreboard_rows(state, parsed):
         print("  ".join(f"{cell:>4}" if i else f"{cell:<12}" for i, cell in enumerate(row)))
+    # Silent when no first server was named -- see ScoreRules.first_server.
+    if state.server is not None:
+        print(f"{parsed.players[0 if state.server == 'a' else 1]} serving")
     if unscored:
         print(f"({unscored} point{'s' if unscored != 1 else ''} with no winner)")
     return 0
@@ -829,6 +835,10 @@ def main(argv: list[str] | None = None) -> int:
     ss.add_argument("--no-ad", action="store_true", help="sudden death at deuce")
     ss.add_argument("--tiebreak", choices=("at6", "none", "only"), default=DEFAULT_RULES.tiebreak)
     ss.add_argument("--tiebreak-to", type=int, choices=(7, 10), default=DEFAULT_RULES.tiebreak_to)
+    # No default: a session whose first serve nobody noted has no honest
+    # value, and "a" would be wrong half the time. Omitted stays unknown.
+    ss.add_argument("--first-server", choices=("a", "b"),
+                    help="who served the first point; omitted means nobody said")
     ss.set_defaults(func=cmd_score_set)
 
     so = score_sub.add_parser("off", help="stop tracking; winners are kept")
