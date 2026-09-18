@@ -1,6 +1,7 @@
 import { mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 import OverviewBand from '../src/components/OverviewBand.svelte'
+import { DEFAULT_RULES } from '../src/lib/score'
 import type { Rally, Source } from '../src/lib/types'
 
 const source: Source = {
@@ -31,5 +32,28 @@ describe('OverviewBand', () => {
     expect(buttons[1].className).toContain('hatched')
     expect(buttons[1].getAttribute('title')).toBe('rally 2 (rejected)')
     expect(buttons[0].className).not.toContain('hatched')
+  })
+
+  it('names the winner in a bar\'s label when the session tracks a score', () => {
+    // No second colour and no glyph: the bars are slivers at session scale
+    // and A/B is not a hue. The label is the channel (lib/timeline.ts).
+    host = document.createElement('div'); document.body.appendChild(host)
+    app = mount(OverviewBand, { target: host, props: {
+      rallies: [rally(1, { winner: 'a' }), rally(2)], sources: [source], currentId: 'r1',
+      windowStartMs: 0, windowEndMs: 20000, onpick: () => {}, rules: DEFAULT_RULES,
+    } })
+    const buttons = host.querySelectorAll('button')
+    expect(buttons[0].getAttribute('title')).toBe('rally 1 \u00b7 won by Me')
+    expect(buttons[0].getAttribute('aria-label')).toBe('rally 1 \u00b7 won by Me')
+    expect(buttons[1].getAttribute('title')).toBe('rally 2')
+  })
+
+  it('says nothing about a winner when the session tracks no score', () => {
+    host = document.createElement('div'); document.body.appendChild(host)
+    app = mount(OverviewBand, { target: host, props: {
+      rallies: [rally(1, { winner: 'a' })], sources: [source], currentId: 'r1',
+      windowStartMs: 0, windowEndMs: 20000, onpick: () => {},
+    } })
+    expect(host.querySelector('button')?.getAttribute('title')).toBe('rally 1')
   })
 })

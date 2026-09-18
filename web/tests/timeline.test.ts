@@ -5,6 +5,7 @@ import {
   fractionToMs,
   msToFraction,
   nearestHandle,
+  rallyBandLabel,
   scoreCurvePoints,
   scoreToY,
   sessionTimeline,
@@ -13,7 +14,8 @@ import {
   toSessionMs,
   zoomWindow,
 } from '../src/lib/timeline'
-import type { Source } from '../src/lib/types'
+import { DEFAULT_RULES } from '../src/lib/score'
+import type { Rally, Source } from '../src/lib/types'
 
 function source(idx: number, offsetMs: number, durationMs: number, recordedAt: string): Source {
   return {
@@ -289,5 +291,31 @@ describe('setInPoint / setOutPoint refuse a collapse (rally 17 destruction, 2026
     const inn = setInPoint(out.startMs, out.endMs, 330000)
     expect(inn.ok).toBe(true)
     if (inn.ok) expect([inn.startMs, inn.endMs]).toEqual([330000, 340000])
+  })
+})
+
+describe('rallyBandLabel', () => {
+  const r = (over: Partial<Rally> = {}): Rally => ({
+    id: 'r1', session_id: 's', source_id: 'src', idx: 7, start_ms: 0, end_ms: 1000,
+    det_start_ms: null, det_end_ms: null, confidence: 0.5, starred: 0, rejected: 0, point: 0,
+    reviewed_at: null, seen_at: null, note: '', winner: '', ...over,
+  })
+
+  it('is the rally number alone by default', () => {
+    expect(rallyBandLabel(r(), null)).toBe('rally 7')
+  })
+
+  it('says a rally was rejected', () => {
+    expect(rallyBandLabel(r({ rejected: 1 }), null)).toBe('rally 7 (rejected)')
+  })
+
+  it('names the winner when the session tracks a score', () => {
+    expect(rallyBandLabel(r({ winner: 'a' }), DEFAULT_RULES)).toBe('rally 7 · won by Me')
+  })
+
+  it('carries both, rejection first', () => {
+    expect(rallyBandLabel(r({ winner: 'b', rejected: 1 }), DEFAULT_RULES)).toBe(
+      'rally 7 (rejected) · won by Opp',
+    )
   })
 })

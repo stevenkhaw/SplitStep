@@ -1,5 +1,7 @@
 import { clamp } from './time'
-import type { Source } from './types'
+import { winnerLabel } from './score'
+import type { ScoreRules } from './score'
+import type { Rally, Source } from './types'
 
 export interface TimelineMark {
   sourceId: string
@@ -208,4 +210,17 @@ export function scoreCurvePoints(
   return slice
     .map((s, i) => `${(i / (slice.length - 1)) * width},${scoreToY(s, height)}`)
     .join(' ')
+}
+
+/**
+ * What an overview-band bar calls itself, in its title and its accessible
+ * name. The band's visual channels are full -- fill carries starred, a
+ * hatch carries rejected -- and its bars are routinely under a pixel wide
+ * at session scale, so a winner cannot be a glyph or a second hue there
+ * (and a hue for A vs B is ruled out regardless; see app.css). The label
+ * is the one honest channel left.
+ */
+export function rallyBandLabel(rally: Rally, rules: ScoreRules | null): string {
+  const won = winnerLabel(rally.winner, rules)
+  return `rally ${rally.idx}${rally.rejected ? ' (rejected)' : ''}${won ? ` \u00b7 ${won}` : ''}`
 }

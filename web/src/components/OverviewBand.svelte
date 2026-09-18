@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { msToFraction, sessionTimeline, toSessionMs } from '../lib/timeline'
+  import { msToFraction, rallyBandLabel, sessionTimeline, toSessionMs } from '../lib/timeline'
   import { formatDuration } from '../lib/time'
+  import type { ScoreRules } from '../lib/score'
   import type { Rally, Source } from '../lib/types'
 
   interface Props {
@@ -10,9 +11,14 @@
     windowStartMs: number
     windowEndMs: number
     onpick: (rallyId: string) => void
+    /** The session's scoring rules, or null when it tracks no score --
+     *  which is also every session recorded before tracking existed, so
+     *  this is optional and silent rather than defaulted. */
+    rules?: ScoreRules | null
   }
 
-  let { rallies, sources, currentId, windowStartMs, windowEndMs, onpick }: Props = $props()
+  let { rallies, sources, currentId, windowStartMs, windowEndMs, onpick, rules = null }: Props =
+    $props()
 
   const timeline = $derived(sessionTimeline(sources))
 
@@ -35,9 +41,9 @@
           ? 'bg-star'
           : 'bg-dim'} {r.id === currentId ? 'ring-2 ring-fg' : r.rejected ? 'opacity-40' : 'opacity-60'}"
       style={pos(r)}
-      title={r.rejected ? `rally ${r.idx} (rejected)` : `rally ${r.idx}`}
+      title={rallyBandLabel(r, rules)}
       onclick={() => onpick(r.id)}
-      aria-label={r.rejected ? `rally ${r.idx} (rejected)` : `rally ${r.idx}`}
+      aria-label={rallyBandLabel(r, rules)}
       aria-current={r.id === currentId}
     ></button>
   {/each}

@@ -11,7 +11,7 @@
   import { QueueController } from '../lib/queue'
   import { navigate } from '../lib/router.svelte'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
-  import { DEFAULT_RULES, playerName, scoreBefore } from '../lib/score'
+  import { DEFAULT_RULES, playerName, scoreBefore, winnerChip } from '../lib/score'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { VerdictFlash } from '../lib/flash'
@@ -225,6 +225,14 @@
   const currentPoint = $derived.by(() => {
     version
     return queue.currentIsPoint
+  })
+  // The winner chip, or null when this session tracks no score. Read from
+  // the controller's live map, not `current.winner`: toggling the point off
+  // clears the winner there (and on the server), and the Rally row the
+  // controller was built from is never mutated.
+  const currentWinnerChip = $derived.by(() => {
+    version
+    return winnerChip(queue.currentWinner, rules)
   })
   // notesVersion is NoteWriter's equivalent of `version` above: a plain
   // class's mutations register no Svelte signal on their own, so the ✎
@@ -827,6 +835,20 @@
             : 'border-transparent bg-surface-2 text-faint'}"
           title={currentPoint ? 'point' : 'not a point'}
         >●</span>
+        <!-- Only when the session tracks a score, and the identity is carried
+             by the glyph, never by colour: A and B are one axis, and a
+             second hue here would state a difference in kind that isn't
+             there (app.css, "There is no accent"). Filled in `point`
+             because a winner is a scored point's verdict. -->
+        {#if currentWinnerChip}
+          <span
+            class="grid h-[22px] w-[22px] place-items-center rounded border font-data text-caption
+                   leading-none {currentWinnerChip.set
+              ? 'border-point/35 bg-point/15 text-point'
+              : 'border-transparent bg-surface-2 text-faint'}"
+            title={currentWinnerChip.title}
+          >{currentWinnerChip.glyph}</span>
+        {/if}
         <span
           class="grid h-[22px] w-[22px] place-items-center rounded border text-caption leading-none
                  {currentHasNote

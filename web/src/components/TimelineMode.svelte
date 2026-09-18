@@ -402,6 +402,7 @@
       windowStartMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.startMs)}
       windowEndMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.endMs)}
       onpick={(id) => (currentId = id)}
+      rules={detail.session.scoring}
     />
   </section>
 

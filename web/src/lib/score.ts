@@ -141,3 +141,53 @@ export function scoreboardRows(state: ScoreState, rules: ScoreRules): string[][]
     return row
   })
 }
+
+/**
+ * One letter per player, for a control too small to hold a name.
+ *
+ * Initials, because "S" beside Sam's rally is read without translation;
+ * positional A/B when they collide, because two players called Alex and
+ * Ana rendering the same letter would be worse than no initials at all.
+ * The fallback is all-or-nothing on purpose -- giving one player their
+ * initial and the other a positional letter would read as one scheme with
+ * a typo in it.
+ */
+export function playerGlyphs(rules: ScoreRules): [string, string] {
+  const [a, b] = rules.players.map((n) => n.trim().charAt(0).toUpperCase())
+  return a === b ? ['A', 'B'] : [a, b]
+}
+
+export interface WinnerChip {
+  /** What the chip draws: the winner's letter, or an en dash for none. */
+  glyph: string
+  /** The same state in words, for the title attribute. */
+  title: string
+  /** Whether a winner is recorded -- the caller fills the chip on true. */
+  set: boolean
+}
+
+/**
+ * What QueueMode's fourth chip should say for a rally, or null when the
+ * session tracks no score. Null rather than an empty chip: an always-there
+ * winner box on an untracked session advertises a control that does
+ * nothing.
+ *
+ * Takes the winner rather than the Rally because the queue controller's
+ * live map is the one that reflects the row -- set_point(false) clears the
+ * winner there and on the server, and the Rally the controller was built
+ * from is deliberately never mutated.
+ */
+export function winnerChip(winner: Player | '', rules: ScoreRules | null): WinnerChip | null {
+  if (!rules) return null
+  const label = winnerLabel(winner, rules)
+  if (label === null) return { glyph: '–', title: 'no winner recorded', set: false }
+  return { glyph: playerGlyphs(rules)[winner === 'a' ? 0 : 1], title: label, set: true }
+}
+
+/** "won by Sam", or null when there is nothing to say -- no rules, or no
+ *  winner recorded. Shared by the queue's chip and the overview band's
+ *  label so the two cannot word the same fact differently. */
+export function winnerLabel(winner: Player | '', rules: ScoreRules | null): string | null {
+  if (!rules || winner === '') return null
+  return `won by ${rules.players[winner === 'a' ? 0 : 1]}`
+}
