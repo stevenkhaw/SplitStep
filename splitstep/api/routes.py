@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import threading
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -344,6 +345,40 @@ def _library(request: Request):
     return request.app.state.library
 
 
+
+def _features_at(library, source: sqlite3.Row) -> str | None:
+    """When this source's cached features were written, or None if it has
+    never been detected.
+
+    The mtime of features.jsonl rather than a column, because the file IS
+    the record -- a column would have to be kept in step with a file the
+    detect handler writes, and the two could then disagree about the one
+    thing the client asks them: are these features older than the play
+    region? Same UTC isoformat the database's own timestamps use, so the
+    client can compare the two with a plain string comparison.
+    """
+    path = library.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        # Missing is the ordinary case (never detected); an unreadable
+        # sessions/ directory lands here too, and "unknown" is the honest
+        # answer for both -- the client's warning stays silent either way.
+        return None
+    return datetime.fromtimestamp(mtime, UTC).isoformat()
+
+
+def _source_json(library, source: sqlite3.Row) -> dict:
+    """A source row plus the one field that is not in it: `features_at`.
+
+    Paired with the row's own `preset_assigned_at`, this is what lets the
+    re-segment panel notice that a play region was assigned after the last
+    detect -- re-segment only replays cached features, so it cannot see that
+    region and would silently produce the same rallies again.
+    """
+    return {**dict(source), "features_at": _features_at(library, source)}
+
+
 def _session_json(row) -> dict:
     d = dict(row)
     d["scoring"] = scoring_rules(row)
@@ -391,9 +426,10 @@ def api_get_session(session_id: str, request: Request):
     session = get_session(conn, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    library = _library(request)
     return {
         "session": _session_json(session),
-        "sources": [dict(r) for r in list_sources(conn, session_id)],
+        "sources": [_source_json(library, r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
     }
 

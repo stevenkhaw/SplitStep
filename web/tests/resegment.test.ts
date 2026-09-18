@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   editedBoundaryCount,
+  regionNewerThanFeatures,
   resegmentConfirmMessage,
   resegmentLossPhrase,
   splitCount,
 } from '../src/lib/resegment'
-import type { Rally } from '../src/lib/types'
+import type { Rally, Source } from '../src/lib/types'
 
 function rally(overrides: Partial<Rally> = {}): Rally {
   return {
@@ -140,5 +141,83 @@ describe('splits versus boundary edits', () => {
 
   it('says nothing about splits when there are none', () => {
     expect(resegmentConfirmMessage(2, 0)).not.toContain('split')
+  })
+})
+
+
+function src(overrides: Partial<Source> = {}): Source {
+  return {
+    id: 'src1',
+    session_id: 's1',
+    idx: 1,
+    recorded_at: '2026-08-19T10:00:00Z',
+    offset_ms: 0,
+    duration_ms: 600000,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    has_original: 1,
+    court_preset_id: null,
+    status: 'ready',
+    rotation_deg: 0,
+    features_at: null,
+    preset_assigned_at: null,
+    ...overrides,
+  }
+}
+
+describe('regionNewerThanFeatures', () => {
+  it('is true when the region was assigned after the features were written', () => {
+    // The case the warning exists for: re-segment replays features built
+    // under the OLD quad, so it cannot see this region at all.
+    expect(
+      regionNewerThanFeatures(
+        src({
+          features_at: '2026-09-01T10:00:00+00:00',
+          preset_assigned_at: '2026-09-02T10:00:00+00:00',
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it('is false when the features were rebuilt after the region was assigned', () => {
+    expect(
+      regionNewerThanFeatures(
+        src({
+          features_at: '2026-09-02T10:00:00+00:00',
+          preset_assigned_at: '2026-09-01T10:00:00+00:00',
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('is false when the two timestamps are equal', () => {
+    // Strictly newer, not "not older": equal means the detect that wrote
+    // these features already had this region.
+    const t = '2026-09-01T10:00:00+00:00'
+    expect(regionNewerThanFeatures(src({ features_at: t, preset_assigned_at: t }))).toBe(false)
+  })
+
+  it('is false when no region has ever been assigned', () => {
+    expect(
+      regionNewerThanFeatures(
+        src({ features_at: '2026-09-01T10:00:00+00:00', preset_assigned_at: null }),
+      ),
+    ).toBe(false)
+  })
+
+  it('is false when the source has never been detected', () => {
+    expect(
+      regionNewerThanFeatures(
+        src({ features_at: null, preset_assigned_at: '2026-09-01T10:00:00+00:00' }),
+      ),
+    ).toBe(false)
+  })
+
+  it('is false when both timestamps are unknown, so an old library never nags', () => {
+    // Every row in a library predating migration 014 has a null
+    // preset_assigned_at, including rows whose region is genuinely older
+    // than their features. Unknown is not a reason to warn.
+    expect(regionNewerThanFeatures(src())).toBe(false)
   })
 })

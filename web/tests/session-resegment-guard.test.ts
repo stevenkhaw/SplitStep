@@ -51,6 +51,8 @@ function source(id: string, idx: number, status: 'needs_setup' | 'ready'): Sourc
     court_preset_id: null,
     status,
     rotation_deg: 0,
+    features_at: null,
+    preset_assigned_at: null,
   }
 }
 

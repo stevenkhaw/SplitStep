@@ -30,6 +30,8 @@ function source(idx: number, offsetMs: number, durationMs: number, recordedAt: s
     court_preset_id: null,
     status: 'ready',
     rotation_deg: 0,
+    features_at: null,
+    preset_assigned_at: null,
   }
 }
 

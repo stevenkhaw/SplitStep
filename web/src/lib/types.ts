@@ -31,6 +31,13 @@ export interface Source {
   court_preset_id: string | null
   status: string
   rotation_deg: number
+  // The mtime of this source's features.jsonl, and when its play region was
+  // assigned. Null on either side means genuinely unknown -- never detected,
+  // never assigned, or a row predating migration 014 -- which is why
+  // `regionNewerThanFeatures` treats a null as "no warning" rather than as
+  // an old timestamp. See splitstep/db/migrations/014_preset_assigned_at.sql.
+  features_at: string | null
+  preset_assigned_at: string | null
 }
 
 export interface Rally {

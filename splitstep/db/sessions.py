@@ -239,9 +239,16 @@ def refresh_session_review_status(conn: sqlite3.Connection, session_id: str) -> 
 def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) -> None:
     """Assign a court preset to a source, so the next `detect` uses it
     instead of `DEFAULT_QUAD` (the whole frame) -- see handlers._quad_for.
+
+    Stamps `preset_assigned_at` so the UI can tell that cached features
+    predate this region and say "re-detect, not re-segment" (migration 014).
+    `set_source_setup` deliberately does not stamp it: that path is the
+    wizard, which enqueues build_proxy -> detect itself, so its region is
+    never newer than the features that follow it.
     """
     conn.execute(
-        "UPDATE sources SET court_preset_id = ? WHERE id = ?", (preset_id, source_id)
+        "UPDATE sources SET court_preset_id = ?, preset_assigned_at = ? WHERE id = ?",
+        (preset_id, _now(), source_id),
     )
     conn.commit()
 

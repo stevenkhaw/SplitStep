@@ -77,6 +77,8 @@ function detailWith(rallies: Rally[]): SessionDetail {
         court_preset_id: null,
         status: 'ready',
         rotation_deg: 0,
+        features_at: null,
+        preset_assigned_at: null,
       },
     ],
     rallies,

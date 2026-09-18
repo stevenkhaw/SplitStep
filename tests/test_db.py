@@ -49,8 +49,8 @@ def test_migrate_creates_all_tables(library):
 
 def test_migrate_is_idempotent(library):
     conn = connect(library.db_path)
-    assert migrate(conn) == 13
-    assert migrate(conn) == 13
+    assert migrate(conn) == 14
+    assert migrate(conn) == 14
 
 
 def test_no_two_migrations_share_a_number():
@@ -159,7 +159,7 @@ def test_migration_004_rebuilds_rally_labels_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 13
+    assert migrate(conn) == 14
 
     row = conn.execute("SELECT * FROM rally_labels").fetchone()
     assert (row["id"], row["verdict"], row["boundary_flags"]) == ("l1", "clean", "end_late")
@@ -219,7 +219,7 @@ def test_migration_005_backfills_point_from_star_and_clears_star(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 13
+    assert migrate(conn) == 14
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     # point equals the old starred, per row.
@@ -277,7 +277,7 @@ def test_migration_008_backfills_seen_at_from_reviewed_at(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 13
+    assert migrate(conn) == 14
 
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM rallies").fetchall()}
     assert rows["r_reviewed"]["seen_at"] == rows["r_reviewed"]["reviewed_at"]
@@ -552,6 +552,29 @@ def test_set_source_preset_assigns_the_preset_to_the_source(conn):
     assert row["court_preset_id"] == preset_id
 
 
+def test_set_source_preset_stamps_when_the_region_was_assigned(conn):
+    # The UI compares this against the mtime of features.jsonl to tell a
+    # reviewer that re-segmenting would replay features built under the old
+    # region. Null before the first assignment: "never assigned" and
+    # "assigned before this column existed" are both genuinely unknown.
+    s = find_or_create_session_for_date(conn, "2026-08-19")
+    src, _ = _add(conn, s, 60_000)
+    preset_id = create_preset(conn, "backyard", SAMPLE_QUAD)
+
+    before = conn.execute(
+        "SELECT preset_assigned_at FROM sources WHERE id = ?", (src,)
+    ).fetchone()
+    assert before["preset_assigned_at"] is None
+
+    set_source_preset(conn, src, preset_id)
+
+    row = conn.execute(
+        "SELECT preset_assigned_at FROM sources WHERE id = ?", (src,)
+    ).fetchone()
+    assert row["preset_assigned_at"] is not None
+    assert row["preset_assigned_at"].startswith("20")
+
+
 # -- rotation -----------------------------------------------------------------
 
 
@@ -670,7 +693,7 @@ def test_migration_009_rebuilds_rallies_without_losing_rows(tmp_path):
     )
     conn.commit()
 
-    assert migrate(conn) == 13
+    assert migrate(conn) == 14
 
     row = conn.execute("SELECT * FROM rallies").fetchone()
     # Every column, not just the two being altered: the whole risk of a

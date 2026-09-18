@@ -1,4 +1,4 @@
-import type { Rally } from './types'
+import type { Rally, Source } from './types'
 
 /**
  * Rallies on `sourceId` whose live boundaries have diverged from what the
@@ -59,4 +59,42 @@ export function resegmentLossPhrase(editedCount: number, splits: number): string
 export function resegmentConfirmMessage(editedCount: number, splits: number): string {
   const what = resegmentLossPhrase(editedCount, splits)
   return `Re-segmenting discards ${what} on this source. Stars and rejections are kept. Continue?`
+}
+
+/**
+ * True when this source's play region was assigned after its cached
+ * features were written -- the one state in which the re-segment slider
+ * lies. `segment()` replays `features.jsonl`, and the quad is applied when
+ * those features are BUILT (it filters boxes before near/far are elected,
+ * see CLAUDE.md "Play region"), so a region newer than the file is invisible
+ * to every threshold in the panel. Only a full re-detect picks it up.
+ *
+ * Both timestamps are ISO-8601 UTC from the server (`_now()` and
+ * features.jsonl's mtime, normalised to the same isoformat), so a plain
+ * string comparison orders them.
+ *
+ * Unknown on either side means no warning. A library predating migration
+ * 014 has a null `preset_assigned_at` on every row, including rows whose
+ * region really is stale; nagging about all of them would train the
+ * reviewer to ignore the one case this exists for.
+ */
+export function regionNewerThanFeatures(source: Source): boolean {
+  const { features_at, preset_assigned_at } = source
+  if (!features_at || !preset_assigned_at) return false
+  return preset_assigned_at > features_at
+}
+
+/**
+ * The confirmation a re-detect asks for, wherever it is offered -- the quad
+ * editor's card after an assignment, and the re-segment panel's stale-region
+ * warning. One string, because the two buttons queue the same job and cost
+ * the same thing; two copies would drift, and a reviewer who learned the
+ * cost in one place would be told something different in the other.
+ */
+export function redetectConfirmMessage(): string {
+  return (
+    'Re-detect this video with the new play region? Starred and rejected ' +
+    'carry over; manual boundary edits and split rallies are lost. ' +
+    'Detection takes a while — the jobs badge tracks it.'
+  )
 }

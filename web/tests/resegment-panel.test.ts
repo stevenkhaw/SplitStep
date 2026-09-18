@@ -17,6 +17,7 @@ const mockApi = {
   listPresets: vi.fn(),
   createPreset: vi.fn(),
   setPreset: vi.fn(),
+  detectSource: vi.fn(),
   jobs: vi.fn(),
   proxyUrl: () => 'about:blank',
   frameUrl: () => 'about:blank',
@@ -29,7 +30,7 @@ vi.mock('../src/lib/api', () => ({ api: mockApi }))
 
 const { default: ResegmentPanel } = await import('../src/components/ResegmentPanel.svelte')
 
-function source(id: string, idx: number): Source {
+function source(id: string, idx: number, overrides: Partial<Source> = {}): Source {
   return {
     id,
     session_id: 's1',
@@ -44,6 +45,9 @@ function source(id: string, idx: number): Source {
     court_preset_id: null,
     status: 'ready',
     rotation_deg: 0,
+    features_at: null,
+    preset_assigned_at: null,
+    ...overrides,
   }
 }
 
@@ -343,5 +347,112 @@ describe('ResegmentPanel', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     expect(mockApi.resegment).not.toHaveBeenCalled()
     expect(onresegmented).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('ResegmentPanel stale-region warning', () => {
+  let target: HTMLDivElement
+  let instance: unknown
+
+  const STALE = {
+    features_at: '2026-09-01T10:00:00+00:00',
+    preset_assigned_at: '2026-09-02T10:00:00+00:00',
+  }
+  const FRESH = {
+    features_at: '2026-09-02T10:00:00+00:00',
+    preset_assigned_at: '2026-09-01T10:00:00+00:00',
+  }
+  const WARNING = "Play region changed after the last detect — re-segment still uses the old one."
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    mockApi.detectSource.mockResolvedValue({ job_id: 'j1', already_running: false })
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+    vi.restoreAllMocks()
+  })
+
+  async function open(sources: Source[]) {
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources, rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+    const details = target.querySelector('details')
+    if (!details) throw new Error('panel details not found')
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
+  }
+
+  function detectButton(): HTMLButtonElement | null {
+    const all = [...target.querySelectorAll('button')] as HTMLButtonElement[]
+    return all.find((b) => b.textContent?.trim() === 'Run detection') ?? null
+  }
+
+  it('warns, and offers a detect, when the region is newer than the features', async () => {
+    await open([source('src1', 1, STALE)])
+    expect(target.textContent).toContain(WARNING)
+    expect(detectButton()).not.toBeNull()
+  })
+
+  it('gives that detect the filled primary treatment', async () => {
+    await open([source('src1', 1, STALE)])
+    expect(detectButton()?.className).toContain('bg-fg')
+    expect(detectButton()?.className).toContain('text-bg')
+  })
+
+  it('stays quiet when the features were rebuilt after the region was assigned', async () => {
+    await open([source('src1', 1, FRESH)])
+    expect(target.textContent).not.toContain('Play region changed')
+    expect(detectButton()).toBeNull()
+  })
+
+  it('stays quiet on a library with no timestamps at all', async () => {
+    // Every row predating migration 014 looks like this. Unknown is not a
+    // reason to nag.
+    await open([source('src1', 1)])
+    expect(target.textContent).not.toContain('Play region changed')
+  })
+
+  it('follows the selected source rather than the first one', async () => {
+    await open([source('src1', 1, FRESH), source('src2', 2, STALE)])
+    expect(target.textContent).not.toContain('Play region changed')
+
+    const select = target.querySelector('select') as HTMLSelectElement
+    select.value = 'src2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+
+    expect(target.textContent).toContain(WARNING)
+  })
+
+  it('queues detection on the selected source, once confirmed', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await open([source('src1', 1, STALE)])
+    detectButton()?.click()
+    flushSync()
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(mockApi.detectSource).toHaveBeenCalledWith('src1')
+  })
+
+  it('does not queue detection when the confirmation is declined', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await open([source('src1', 1, STALE)])
+    detectButton()?.click()
+    flushSync()
+
+    expect(mockApi.detectSource).not.toHaveBeenCalled()
   })
 })

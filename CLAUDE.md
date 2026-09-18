@@ -172,6 +172,11 @@ separation and can push a ground-level source into `pair` mode by mistake.
 
 Changing a quad requires a full re-detect, not `--reuse-features`: the filter
 is applied when features are built, so cached features are already quad-shaped.
+Two places in the UI say that out loud, and they are the only two: the quad
+editor's card after an assignment (a filled **Run detection with this region**
+button, because as a text link it was missed and the reviewer re-segmented
+instead), and the re-segment panel's warning when `preset_assigned_at`
+(migration 014) is newer than `features.jsonl`'s mtime.
 
 ### Jobs
 

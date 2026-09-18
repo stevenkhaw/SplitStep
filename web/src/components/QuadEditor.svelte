@@ -2,6 +2,7 @@
   import { describeApiError } from '../lib/errors'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { redetectConfirmMessage } from '../lib/resegment'
   import { DEFAULT_QUAD_POINTS, assignedPresetLabel, clonePoints, defaultPresetName } from '../lib/quad'
   import { DEFAULT_SCRUB_MS, clamp, formatTs, lastSafeFrameMs } from '../lib/time'
   import type { Preset, Source } from '../lib/types'
@@ -110,15 +111,12 @@
 
   async function redetect() {
     if (!source || busy) return
-    // Same cost warning the re-segment panel gives at click time: a
-    // re-detect rebuilds from detector intervals, so starred/rejected carry
-    // over by overlap but manual boundary edits and hand-made rallies do
-    // not survive it.
-    const sure = window.confirm(
-      'Re-detect this video with the new play region? Starred and rejected ' +
-        'carry over; manual boundary edits and split rallies are lost. ' +
-        'Detection takes a while — the jobs badge tracks it.',
-    )
+    // Same cost warning the re-segment panel gives at click time, and
+    // literally the same sentence -- ResegmentPanel's own stale-region
+    // button shares this copy (see lib/resegment.ts). A re-detect rebuilds
+    // from detector intervals, so starred/rejected carry over by overlap
+    // but manual boundary edits and hand-made rallies do not survive it.
+    const sure = window.confirm(redetectConfirmMessage())
     if (!sure) return
     busy = true
     error = null
@@ -262,17 +260,36 @@
           </div>
         {/if}
 
-        {#if status}
-          <p class="mt-2 font-data text-caption text-fg">{status}</p>
-        {/if}
+        <!-- After an assignment the status sentence and the action it
+             implies are one thing, so they render as one card. They used to
+             be a loose line plus a caption-sized text link, and the link was
+             missed: the reviewer assigned a corrected region, reached for
+             the re-segment slider instead, saw the same rallies come back
+             and concluded re-segment was broken. Re-segment only replays
+             cached features, which were built under the OLD region -- the
+             one thing only a re-detect can fix, so it gets the app's filled
+             primary treatment. -->
         {#if offerDetect}
-          <button
-            class="mt-2 text-caption text-fg hover:underline disabled:opacity-40"
-            onclick={redetect}
-            disabled={busy}
-          >
-            {busy ? 'working…' : 'Run detection now'}
-          </button>
+          <div class="mt-3 rounded-lg border border-line bg-surface-2 p-3">
+            {#if status}
+              <p class="text-body text-fg">{status}</p>
+            {/if}
+            <button
+              class="mt-3 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
+                     hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+              onclick={redetect}
+              disabled={busy}
+            >
+              {busy ? 'working…' : 'Run detection with this region'}
+            </button>
+            <p class="mt-2 text-caption text-dim">
+              Re-segment can't see a new region — detection rebuilds the features.
+            </p>
+          </div>
+        {:else if status}
+          <!-- The other status this panel shows -- "Detection queued" -- has
+               no action left to offer, so it stays a plain line. -->
+          <p class="mt-2 font-data text-caption text-fg">{status}</p>
         {/if}
         {#if error}
           <p class="mt-2 font-data text-data text-danger">{describeApiError(error, 'source').message}</p>

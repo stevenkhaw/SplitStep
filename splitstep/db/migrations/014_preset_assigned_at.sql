@@ -1,0 +1,17 @@
+-- When a play region was attached to a source.
+--
+-- The UI compares this against the mtime of the source's features.jsonl to
+-- answer one question the reviewer cannot otherwise ask: were these cached
+-- features built under *this* region? Re-segmenting only replays them, so a
+-- region assigned after the last detect is invisible to the slider -- the
+-- panel has to say "re-detect, not re-segment" instead of silently
+-- producing the same rallies again.
+--
+-- Nullable, unlike `winner` and `note` which use '' for absence, because
+-- here absence is genuinely unknown rather than a known negative: a row
+-- predating this column may well have a region assigned, and there is no
+-- honest timestamp to backfill it with. A sentinel would have to be either
+-- older than every features file (claiming the region is stale-proof) or
+-- newer (nagging about every source in the library); NULL lets the client
+-- decline to answer, which is the truth.
+ALTER TABLE sources ADD COLUMN preset_assigned_at TEXT;

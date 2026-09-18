@@ -63,6 +63,7 @@ function reviewed(): SessionDetail {
       id: 'src1', session_id: 's1', idx: 1, recorded_at: '2026-08-19T10:00:00Z',
       offset_ms: 0, duration_ms: 600000, width: 1920, height: 1080, fps: 30,
       has_original: 1, court_preset_id: null, status: 'ready', rotation_deg: 0,
+      features_at: null, preset_assigned_at: null,
     }],
     rallies: [
       rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' }),

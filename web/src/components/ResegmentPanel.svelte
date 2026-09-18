@@ -5,6 +5,8 @@
   import { debounce } from '../lib/debounce'
   import {
     editedBoundaryCount,
+    redetectConfirmMessage,
+    regionNewerThanFeatures,
     resegmentConfirmMessage,
     resegmentLossPhrase,
     splitCount,
@@ -52,6 +54,33 @@
   // cost before paying it.
   const editedCount = $derived(editedBoundaryCount(rallies, sourceId))
   const splits = $derived(splitCount(rallies, sourceId))
+
+  // This whole panel replays cached features, and the play region is baked
+  // into those features when they are built -- so a region assigned after
+  // the last detect is invisible to every threshold here. Without this the
+  // slider is silently a no-op with respect to the change the reviewer just
+  // made, which reads as re-segment being broken rather than as the wrong
+  // tool (that is exactly how it was reported).
+  const staleRegion = $derived(source ? regionNewerThanFeatures(source) : false)
+
+  async function redetect() {
+    if (!source || busy) return
+    // The same sentence the quad editor's own re-detect button asks --
+    // shared, because the two queue the same job at the same cost.
+    if (!confirm(redetectConfirmMessage())) return
+    busy = true
+    error = null
+    try {
+      await api.detectSource(source.id)
+      // Not `lastCount`: nothing has been re-segmented. The jobs badge is
+      // what tracks a detect, here as everywhere else.
+      lastCount = null
+    } catch (e) {
+      error = e
+    } finally {
+      busy = false
+    }
+  }
 
   function loadScores(id: string, th: number | null) {
     api
@@ -220,6 +249,22 @@
         <p class="mt-1 font-data text-caption text-faint">
           detector score for the whole source — dashed line is the threshold above
         </p>
+      </div>
+    {/if}
+
+    {#if staleRegion}
+      <div class="mt-3">
+        <p class="text-caption text-dim">
+          Play region changed after the last detect — re-segment still uses the old one.
+        </p>
+        <button
+          class="mt-2 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
+                 hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+          onclick={redetect}
+          disabled={busy || !source}
+        >
+          {busy ? 'working…' : 'Run detection'}
+        </button>
       </div>
     {/if}
 

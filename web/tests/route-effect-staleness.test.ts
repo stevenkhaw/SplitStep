@@ -84,6 +84,8 @@ function detailWith(rallies: Rally[]): SessionDetail {
         court_preset_id: null,
         status: 'ready',
         rotation_deg: 0,
+        features_at: null,
+        preset_assigned_at: null,
       },
     ],
     rallies,
@@ -244,6 +246,8 @@ function sourceWith(id: string, idx: number) {
     court_preset_id: null,
     status: 'needs_setup',
     rotation_deg: 90,
+    features_at: null,
+    preset_assigned_at: null,
   }
 }
 

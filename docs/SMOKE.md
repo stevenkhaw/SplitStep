@@ -70,6 +70,29 @@ library or a second Mac — the external drive was not mounted this session:
 - [ ] Migration `013_score_tracking.sql` applied to the live library — the
       external drive was not mounted this session
 
+## Re-detect call to action (2026-09-18)
+
+Exercised in the browser against the synthetic scratch library on :8421, not
+the real library — the same scratch library the 2026-09-17 rows used, with a
+200-line `features.jsonl` copied in from `tests/fixtures/` so the re-segment
+panel had something to score:
+
+- [x] Assigning a region in the quad editor renders the status sentence and
+      **Run detection with this region** as one filled-button card, not a
+      caption-sized text link. This is the bug it exists for: the link was
+      missed, the reviewer re-segmented instead, nothing changed, and
+      re-segment looked broken
+- [x] The re-segment panel warns *"Play region changed after the last detect
+      — re-segment still uses the old one"* with its own **Run detection**
+      button, driven by `preset_assigned_at` (migration 014) against the
+      mtime of `features.jsonl`
+- [ ] Either button actually queueing a detect, end to end — the scratch
+      library's proxy is synthetic and YOLO is never run here, and the
+      sandboxed browser suppresses `confirm()`, so only the render was
+      exercised. The click path is covered by vitest
+- [ ] Migration `014_preset_assigned_at.sql` applied to the live library —
+      the external drive was not mounted this session
+
 ## Still open
 
 ## First run
