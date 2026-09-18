@@ -230,3 +230,73 @@ def test_a_sampled_window_still_counts_toward_precision():
         [Interval(90_000, 98_000, 0.6)], [sampled(90_000, 98_000, verdict="not_play")]
     )
     assert (s.matched_play, s.matched_not_play) == (0, 1)
+
+
+# -- partly-play windows, and why recall needs two denominators --------------
+#
+# A blind window's edges come from a seeded tiling, so they cut wherever the
+# tiling put them -- routinely through a serve wind-up, which is what the
+# 2026-08-20 set's own 0.221 case was. A reviewer marks that `partly`: there
+# is real play in the window and also footage that is not play.
+#
+# Whether a detector that proposed nothing there "missed a rally" genuinely
+# has two defensible answers, so the scorer reports both rather than picking
+# one and calling it recall.
+
+
+def test_a_partly_window_is_excluded_from_strict_recall():
+    # Strict: the denominator is windows the human called wholly play. A
+    # detector is not penalised for skipping a window that is mostly the
+    # player walking back to the baseline.
+    s = score_against_labels([], [sampled(25_000, 33_000, verdict="partly")])
+    assert s.sampled_clean == 0
+    assert s.sampled_recall is None
+
+
+def test_a_partly_window_no_candidate_covers_is_a_miss_by_the_inclusive_count():
+    # Inclusive: the denominator is windows holding ANY play. A serve the
+    # window cut in half is still a serve the detector did not propose --
+    # which is the whole reason this pass exists.
+    s = score_against_labels([], [sampled(25_000, 33_000, verdict="partly")])
+    assert s.sampled_play == 1
+    assert s.missed_sampled_play == 1
+    assert s.sampled_play_recall == 0.0
+
+
+def test_a_covered_partly_window_is_not_a_miss_either_way():
+    s = score_against_labels(
+        [Interval(25_000, 33_000, 0.6)], [sampled(25_000, 33_000, verdict="partly")]
+    )
+    assert s.missed_sampled_play == 0
+    assert s.sampled_play_recall == 1.0
+
+
+def test_the_inclusive_count_holds_clean_windows_too():
+    s = score_against_labels(
+        [],
+        [sampled(25_000, 33_000), sampled(90_000, 98_000, verdict="partly")],
+    )
+    assert (s.sampled_clean, s.sampled_play) == (1, 2)
+    assert s.sampled_recall == 0.0
+    assert s.sampled_play_recall == 0.0
+
+
+def test_neither_count_admits_not_play_or_unsure():
+    # 'unsure' stays out for the reason it has always stayed out: two of six
+    # clips in the 2026-08-20 pass could not be settled from stills, and
+    # forcing them into either column injects noise that looks like data.
+    s = score_against_labels(
+        [],
+        [
+            sampled(25_000, 33_000, verdict="not_play"),
+            sampled(90_000, 98_000, verdict="unsure"),
+        ],
+    )
+    assert (s.sampled_clean, s.sampled_play) == (0, 0)
+    assert s.sampled_recall is None
+    assert s.sampled_play_recall is None
+
+
+def test_the_inclusive_recall_is_none_when_nothing_was_sampled():
+    s = score_against_labels([Interval(1000, 5000, 0.8)], [label(1000, 5000)])
+    assert s.sampled_play_recall is None

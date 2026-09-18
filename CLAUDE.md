@@ -576,7 +576,12 @@ four had to be retargeted during the migration and would again.
   2026-08-20 pass hand-labelled a clip wrong and only the tool's blindness
   exposed it. The reviewer walks them at `#/audit/<source_id>` (or inspects
   a sample with `splitstep labels sample`), and `labels score` then reports
-  `sampled recall (blind windows)` beside the old figure. It is `None`, and
+  `sampled recall (blind windows)` beside the old figure — **twice, under two
+  denominators**, because a fixed window size makes the question ambiguous.
+  The tiling cuts wherever it cuts, routinely mid-serve, and a reviewer marks
+  that `partly`. Strict counts only whole-window play; `including partly
+  windows` counts any play at all. Picking one and calling it recall would
+  hide the ambiguity inside a number. It is `None`, and
   printed as such, when nothing has been sampled — an older corpus has no
   blind windows, and reporting 100% for zero of them would state coverage
   nobody measured. The sample is recomputed from its seed rather than

@@ -422,13 +422,20 @@ def cmd_labels_score(args) -> int:
     # the whole source, not from what the detector happened to flag. Printed
     # even when it is empty, and saying plainly that it is empty: silence
     # would read as "nothing to report here" rather than "nobody measured".
-    if score.sampled_clean == 0:
+    # Gated on the WIDER count, not on sampled_clean: a pass whose windows
+    # all came out `partly` -- entirely possible, since the tiling cuts
+    # serves -- has still been sampled, and reporting it as "nobody labelled
+    # anything" would be false.
+    if score.sampled_play == 0:
         print("  sampled recall (blind windows)    —"
               "       (no blind windows labelled yet)")
     else:
         print(f"  sampled recall (blind windows)   {_fmt_pct(score.sampled_recall)}"
               f"  ({score.sampled_clean - score.missed_sampled_clean}"
               f" of {score.sampled_clean} clean)")
+        print(f"    including partly windows       {_fmt_pct(score.sampled_play_recall)}"
+              f"  ({score.sampled_play - score.missed_sampled_play}"
+              f" of {score.sampled_play} clean+partly)")
     print(f"  unknown                          {score.unknown}"
           "  (candidates matching no label)")
     print(f"  start bias / MAE                 {_fmt_ms(score.start_bias_ms)}"

@@ -64,6 +64,8 @@ class LabelScore:
     labelled_clean: int
     missed_sampled_clean: int
     sampled_clean: int
+    missed_sampled_play: int
+    sampled_play: int
     boundary_n: int
     start_bias_ms: float | None
     end_bias_ms: float | None
@@ -112,6 +114,36 @@ class LabelScore:
         if self.sampled_clean == 0:
             return None
         return (self.sampled_clean - self.missed_sampled_clean) / self.sampled_clean
+
+    @property
+    def sampled_play_recall(self) -> float | None:
+        """The same recall over every blind window holding ANY play, `partly`
+        included.
+
+        Reported beside `sampled_recall` rather than instead of it, because
+        the two answer a question a fixed window size makes genuinely
+        ambiguous. A blind window's edges come from a seeded tiling, so they
+        land wherever the tiling put them -- routinely mid-serve, which is
+        the 2026-08-20 set's own 0.221 case ("a serve wind-up falling at the
+        very edge of an arbitrary 8 s window"). A reviewer marks that
+        `partly`: real play, and also footage that is not play.
+
+        Whether a detector that proposed nothing there missed a rally has
+        two defensible answers. Strict says no -- the window is mostly a
+        walk back to the baseline and penalising that is penalising the
+        tiling. Inclusive says yes -- a serve is a serve however the window
+        cut it, and that is precisely the kind of miss this pass exists to
+        find. Picking one and calling it "recall" would hide the ambiguity
+        inside a number, which is the failure mode this file is written
+        against; naming both costs one line of output.
+
+        `unsure` is in neither, unchanged: two of six clips in the 2026-08-20
+        pass could not be settled from stills, and forcing them into a column
+        injects noise that looks like data.
+        """
+        if self.sampled_play == 0:
+            return None
+        return (self.sampled_play - self.missed_sampled_play) / self.sampled_play
 
 
 def _best_match(iv: Interval, labels: list[LabelRow]) -> int | None:
@@ -184,6 +216,13 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
     # decided.
     sampled_clean = [i for i in clean if labels[i].sampled]
     missed_sampled_clean = sum(1 for i in sampled_clean if i not in hit)
+    # The wider denominator: PLAY_VERDICTS rather than 'clean' alone, so a
+    # window whose play the tiling cut in half still counts. Same `hit` set,
+    # same overlap rule -- only the set of spans being asked about differs.
+    sampled_play = [
+        i for i, lab in enumerate(labels) if lab.sampled and lab.verdict in PLAY_VERDICTS
+    ]
+    missed_sampled_play = sum(1 for i in sampled_play if i not in hit)
 
     return LabelScore(
         matched_play=matched_play,
@@ -193,6 +232,8 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
         labelled_clean=len(clean),
         missed_sampled_clean=missed_sampled_clean,
         sampled_clean=len(sampled_clean),
+        missed_sampled_play=missed_sampled_play,
+        sampled_play=len(sampled_play),
         boundary_n=len(start_errs),
         start_bias_ms=median(start_errs) if start_errs else None,
         end_bias_ms=median(end_errs) if end_errs else None,

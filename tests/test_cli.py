@@ -987,3 +987,27 @@ def test_labels_sample_on_an_unknown_source_fails(library, conn, capsys):
     rc = main(["--library", str(library.root), "labels", "sample", "nope"])
     assert rc == 1
     assert "not found" in capsys.readouterr().err.lower()
+
+
+def test_labels_score_reports_partly_windows_under_their_own_denominator(
+    library, conn, capsys, ground_features
+):
+    # A blind window cut mid-serve is marked `partly`. Under the strict
+    # denominator it is not a miss; under the inclusive one it is. Both are
+    # printed, because a fixed window size makes the question genuinely
+    # ambiguous and hiding that inside one number is the failure this output
+    # is written against.
+    from splitstep.db.labels import add_label
+
+    source_id = _labelled_source(library, conn, ground_features)
+    add_label(conn, source_id=source_id, span_start_ms=25_000, span_end_ms=33_000,
+              verdict="partly")
+    conn.close()
+
+    assert main(["--library", str(library.root), "labels", "score", source_id]) == 0
+    out = capsys.readouterr().out
+    assert "including partly" in out
+    assert "of 1 clean+partly" in out
+    # A pass consisting only of partly windows has still been sampled -- it
+    # must not report as though nobody labelled anything.
+    assert "no blind windows labelled" not in out
