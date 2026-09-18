@@ -251,6 +251,10 @@ def split_rally(conn: sqlite3.Connection, rally_id: str, at_ms: int) -> str:
     intervals, since overlap_fraction divides by the shorter span and each
     half sits fully inside the parent at a flat 1.0. A split rally therefore
     behaves exactly as it would had the detector proposed both intervals.
+    `winner` follows the same inheritance, with the same consequence the
+    other flags don't carry: a split of an already-scored point counts
+    twice in the score replay (both halves carry `point`/`winner`) until
+    the reviewer clears one half.
 
     clip_path is the one exception, for the same reason _carried_clip_path
     demands an exact span match rather than an overlap: the file on disk was

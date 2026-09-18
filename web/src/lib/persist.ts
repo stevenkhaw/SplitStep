@@ -73,9 +73,11 @@ export async function persistAction(action: QueueAction, api: PersistApi): Promi
         // set_winner('a') re-marks the point, so point-then-winner is the
         // order that leaves the two columns agreeing. Sent even when the
         // restored winner is '' -- a point that keeps its flag but loses its
-        // winner is only expressible this way. A 409 here can only mean
-        // tracking was switched off in another tab; it surfaces through
-        // the same toast as any other failed undo.
+        // winner is only expressible this way. POST /api/rallies/{id}/winner
+        // accepts the write regardless of whether the session is tracked
+        // (56e60c5), so a failure here is a transport failure like any
+        // other -- it surfaces through the same toast as any other failed
+        // undo.
         await api.winner(action.rallyId, action.winner)
         break
     }

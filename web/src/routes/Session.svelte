@@ -92,12 +92,46 @@
   // a re-segment causes -- so it resets the same fields closeTimeline/openLabel
   // reset on a mode change, plus bumps rallyRevision (see its comment above)
   // to force the remount.
+  //
+  // Refetches first, mirroring toggleRejected's shape -- and for the same
+  // underlying reason: the score board replays `scoreBefore` over
+  // `sessionRallies={detail.rallies}` (the whole session), and QueueMode
+  // never writes a verdict back into `detail` (see its apply()). Score a
+  // point on tab A, switch to tab B without a refetch, and the fresh
+  // QueueMode for B remounts against tab A's load-time snapshot -- the
+  // board replays a session missing every point just recorded there.
+  // `detail`/`selectedSourceId` only flip inside the `.then`, alongside
+  // mode/focus/timelineRallies, so a failed refetch leaves the current tab
+  // exactly as it was rather than switching against data that cannot back
+  // up the score it is about to show.
+  //
+  // Plain `let`, not `$state`: nothing renders it, it only gates
+  // re-entrancy against a rapid double-click firing a second `getSession`
+  // before the first resolves -- the same race toggleRejected's
+  // `togglingRejected` guards against, and for the same reason: two
+  // in-flight requests would let whichever response lands last, not
+  // whichever was fired last, decide the final tab and `detail`.
+  let switchingTab = false
+
   function selectTab(sourceId: string): void {
-    selectedSourceId = sourceId
-    mode = 'queue'
-    focusedRallyId = null
-    timelineRallies = null
-    rallyRevision += 1
+    if (switchingTab) return
+    switchingTab = true
+    api
+      .getSession(id)
+      .then((d) => {
+        detail = d
+        selectedSourceId = sourceId
+        mode = 'queue'
+        focusedRallyId = null
+        timelineRallies = null
+        rallyRevision += 1
+      })
+      .catch((e) => {
+        console.error('failed to refresh session before switching tabs', e)
+      })
+      .finally(() => {
+        switchingTab = false
+      })
   }
 
   function openSetupWizard(source: Source) {
