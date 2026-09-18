@@ -621,7 +621,15 @@ four had to be retargeted during the migration and would again.
   fail every undo in a session that never tracked a score; a winner
   outlives tracking being turned off regardless. A finished match's board
   drops the games and points columns for a single `W` beside the winner's
-  name — sets, then `W`, nothing that would read as still in play.
+  name — sets, then `W`, nothing that would read as still in play. Who serves is
+  replayed the same way: `firstServer` is an optional key in that same
+  rules JSON — no migration behind it — and an absent one renders no server
+  at all rather than a default, because every session recorded before it
+  existed has no honest value and `'a'` would be wrong half the time. The
+  server is then derived per point by counting completed service units,
+  with a whole tiebreak counting as one, which is what makes "the player
+  who served first in the tiebreak receives first in the next set" fall out
+  of plain alternation.
 
 ## Distribution status
 

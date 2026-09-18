@@ -70,6 +70,39 @@ library or a second Mac — the external drive was not mounted this session:
 - [ ] Migration `013_score_tracking.sql` applied to the live library — the
       external drive was not mounted this session
 
+## Winner chip and first server (2026-09-18)
+
+Exercised in the browser against the same synthetic scratch library on
+:8421, not the real library — the external drive was not mounted this
+session. The rallies were reset to unseen and unscored first, since every
+real session is reviewed and QueueMode would otherwise not render:
+
+- [x] **Track score** with a first server: the setup card's *First serve*
+      select offers each player by name, relabels live as a name is typed,
+      and defaults to *Not recorded*
+- [x] `A` records the winner; navigating back with `←` shows a fourth chip
+      reading `S` / *won by Sam* beside the `★ ● ✎` group. This is the bug
+      it exists for: the 700 ms flash was previously the only thing that
+      ever named the player
+- [x] The chip is absent entirely with tracking off (three chips, not an
+      empty fourth) and unfilled, reading `–` / *no winner recorded*, on a
+      point nobody scored
+- [x] The score panel marks the serving player's row, and the dot crosses a
+      game boundary: four points to Sam took the first game and the marker
+      moved to Opp
+- [x] `splitstep score set --first-server` writes it from the terminal, and
+      `score show` prints `Opp serving`; dropping the key removes the
+      panel's marker column entirely on the next load, and `score show`
+      goes silent about serving
+- [x] Timeline mode's overview band names the winner in each bar's title
+      and accessible name (`rally 1 · won by Sam`), and says nothing about
+      a winner when the session tracks no score
+- [ ] A tiebreak's two-point rotation, and the serve after a set — 8
+      synthetic rallies cannot reach 6–6, so both are covered only by
+      `tests/fixtures/score_cases.json` and the two engines that read it
+- [ ] Any of this against real footage, or a `firstServer` on the live
+      library — the external drive was not mounted this session
+
 ## Re-detect call to action (2026-09-18)
 
 Exercised in the browser against the synthetic scratch library on :8421, not
