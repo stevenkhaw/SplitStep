@@ -30,6 +30,7 @@ from splitstep.db.presets import create_preset, get_preset, list_presets
 from splitstep.db.rallies import (
     NOTE_MAX_CHARS,
     list_rallies,
+    list_rallies_for_source,
     merge_into_previous,
     replace_rallies,
     set_bounds,
@@ -70,6 +71,7 @@ from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
 from splitstep.export import SETS, column_for, plan_export, walk_clip_files
+from splitstep.label_sample import DEFAULT_WINDOW_MS, sample_windows
 from splitstep.media.clips import parse_clip_name
 from splitstep.media.files import find_original
 from splitstep.media.frames import extract_frame
@@ -155,6 +157,43 @@ class BoundsBody(BaseModel):
 
 class SplitBody(BaseModel):
     at_ms: int
+
+
+class SpanLabelBody(BaseModel):
+    """A judgement about a span of a source, with no rally behind it.
+
+    The sampled half of the corpus (see
+    `docs/superpowers/plans/2026-09-18-unflagged-window-sampling.md`): a
+    window the detector never proposed has no rally to address, so the span
+    arrives in the body instead of being resolved server-side from immutable
+    det_* columns. That is a real difference in trust -- these two integers
+    are the client's word -- which is why they are validated here rather than
+    left to `add_label`.
+    """
+
+    span_start_ms: int = Field(ge=0)
+    span_end_ms: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def check_span(self):
+        # A zero-length (or inverted) span judges no footage, and
+        # `latest_labels` resolves per exact span -- such a row would sit in
+        # the corpus forever matching nothing that could supersede it.
+        if self.span_end_ms <= self.span_start_ms:
+            raise ValueError("span_end_ms must be greater than span_start_ms")
+        return self
+
+
+class SpanVerdictBody(SpanLabelBody):
+    verdict: str
+    boundary_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("verdict")
+    @classmethod
+    def check_verdict(cls, v: str) -> str:
+        if v not in VERDICTS:
+            raise ValueError(f"verdict must be one of {list(VERDICTS)}")
+        return v
 
 
 class LabelBody(BaseModel):
@@ -841,6 +880,117 @@ def api_label_retract(rally_id: str, request: Request):
     )
     # No session_status refresh, same as api_label: a label is a note about
     # the detector, not a review decision.
+    return {"ok": True, "id": label_id}
+
+
+@router.get("/api/sources/{source_id}/label-sample")
+def api_label_sample(
+    source_id: str,
+    request: Request,
+    n: int = Query(default=20, ge=1, le=200),
+    seed: int = Query(default=0),
+    window_ms: int = Query(default=DEFAULT_WINDOW_MS, ge=1000, le=60_000),
+):
+    """Windows for a blind labelling pass: half flagged, half ignored.
+
+    Recomputed per request from the source's duration and its rallies'
+    detector spans rather than stored. A seed is all the state there is, so
+    a reviewer who reloads mid-sitting gets the same list back without a
+    table, a migration, or anything to go stale when the source is
+    re-segmented under them.
+
+    The response says nothing about which windows the detector flagged. That
+    omission is the feature -- see `label_sample.Window`.
+    """
+    conn = _conn(request)
+    source = get_source(conn, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    intervals = [
+        (r["det_start_ms"], r["det_end_ms"])
+        for r in list_rallies_for_source(conn, source_id)
+        if r["det_start_ms"] is not None
+    ]
+    windows = sample_windows(
+        duration_ms=source["duration_ms"],
+        intervals=intervals,
+        n=n,
+        seed=seed,
+        window_ms=window_ms,
+    )
+    return {
+        "seed": seed,
+        "window_ms": window_ms,
+        "windows": [{"start_ms": w.start_ms, "end_ms": w.end_ms} for w in windows],
+    }
+
+
+@router.post("/api/sources/{source_id}/label")
+def api_span_label(source_id: str, body: SpanVerdictBody, request: Request):
+    """Judge a span directly, with no rally in the way.
+
+    The rally-addressed route (`/api/rallies/{id}/label`) is the one a review
+    pass uses; this is the one a sampling pass uses. Both end in `add_label`
+    against the same table with the same resolution rule, so a sampled
+    judgement and a rally-anchored one are the same kind of row -- which is
+    what lets `labels score` read them together.
+    """
+    conn = _conn(request)
+    if get_source(conn, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Same carry-forward the rally route performs, and for the same reason:
+    # this route always writes true_*=NULL, so an existing boundary
+    # correction on this exact span would be silently erased by the newer
+    # row. A sampled window rarely coincides with a dragged rally's det span
+    # -- but "rarely" is not "never", and the two writers agreeing by
+    # construction is cheaper than reasoning about when they collide.
+    prior = latest_label_for_span(conn, source_id, body.span_start_ms, body.span_end_ms)
+    true_start_ms = prior["true_start_ms"] if prior is not None else None
+    true_end_ms = prior["true_end_ms"] if prior is not None else None
+    if true_start_ms is not None and true_end_ms is not None:
+        boundary_flags = derive_boundary_flags(
+            body.span_start_ms, body.span_end_ms, true_start_ms, true_end_ms
+        )
+    else:
+        boundary_flags = body.boundary_flags
+
+    label_id = add_label(
+        conn,
+        source_id=source_id,
+        span_start_ms=body.span_start_ms,
+        span_end_ms=body.span_end_ms,
+        verdict=body.verdict,
+        boundary_flags=boundary_flags,
+        true_start_ms=true_start_ms,
+        true_end_ms=true_end_ms,
+        # No rally to name. rally_id is provenance only and carries no
+        # foreign key, so NULL here is the honest value, not a gap.
+        rally_id=None,
+    )
+    return {"ok": True, "id": label_id}
+
+
+@router.post("/api/sources/{source_id}/label/retract")
+def api_span_label_retract(source_id: str, body: SpanLabelBody, request: Request):
+    """Withdraw the current verdict for a sampled span.
+
+    Its own route rather than a null verdict on the one above, mirroring the
+    rally pair exactly: a verdict-less row is what a boundary drag writes,
+    and overloading one body with both meanings is what that split exists to
+    prevent.
+    """
+    conn = _conn(request)
+    if get_source(conn, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    label_id = retract_label(
+        conn,
+        source_id=source_id,
+        span_start_ms=body.span_start_ms,
+        span_end_ms=body.span_end_ms,
+        rally_id=None,
+    )
     return {"ok": True, "id": label_id}
 
 

@@ -27,6 +27,14 @@ class LabelRow:
     true_start_ms: int | None
     true_end_ms: int | None
 
+    # True when this judgement came from a blind sample rather than from a
+    # rally the detector proposed -- i.e. the row carries no rally_id. It is
+    # the only thing separating a recall figure that means what the word
+    # means from `span_recall`, which cannot see play the detector never
+    # flagged. Defaults False so a corpus predating the sampler reads as
+    # "recall not measured" rather than as recall of zero.
+    sampled: bool = False
+
 
 def rows_to_labels(rows: Iterable[sqlite3.Row]) -> list[LabelRow]:
     return [
@@ -36,6 +44,12 @@ def rows_to_labels(rows: Iterable[sqlite3.Row]) -> list[LabelRow]:
             verdict=r["verdict"],
             true_start_ms=r["true_start_ms"],
             true_end_ms=r["true_end_ms"],
+            # rally_id is provenance only and its one NULL writer is the
+            # span-addressed label route (`POST /api/sources/{id}/label`),
+            # which exists precisely for windows no rally backs.
+            # record_boundary_correction requires a rally_id, so a drag row
+            # can never land here by accident.
+            sampled=r["rally_id"] is None,
         )
         for r in rows
     ]
@@ -48,6 +62,8 @@ class LabelScore:
     unknown: int
     missed_clean: int
     labelled_clean: int
+    missed_sampled_clean: int
+    sampled_clean: int
     boundary_n: int
     start_bias_ms: float | None
     end_bias_ms: float | None
@@ -74,6 +90,28 @@ class LabelScore:
         if self.labelled_clean == 0:
             return None
         return (self.labelled_clean - self.missed_clean) / self.labelled_clean
+
+    @property
+    def sampled_recall(self) -> float | None:
+        """Recall over blind-sampled windows, which is recall in the ordinary
+        sense.
+
+        `span_recall` above is biased by construction: the detector chose
+        every span it scores, so play the detector never proposed is invisible
+        to it. A sampled window was chosen by `label_sample.sample_windows`
+        from the whole source -- flagged stretches and ignored ones alike --
+        so a `clean` verdict on one that no candidate overlaps is a genuine
+        miss, and the ratio is a genuine recall.
+
+        None when nothing has been sampled, and that None is load-bearing:
+        an older corpus has no sampled rows, and reporting 1.0 for "no misses
+        among zero sampled windows" would state coverage that was never
+        measured. Letting a metric imply coverage it lacks is the error that
+        cost the 2026-08-20 round.
+        """
+        if self.sampled_clean == 0:
+            return None
+        return (self.sampled_clean - self.missed_sampled_clean) / self.sampled_clean
 
 
 def _best_match(iv: Interval, labels: list[LabelRow]) -> int | None:
@@ -140,6 +178,12 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
 
     clean = [i for i, lab in enumerate(labels) if lab.verdict == "clean"]
     missed_clean = sum(1 for i in clean if i not in hit)
+    # A subset of `clean`, not a separate pass: a sampled window is scored by
+    # exactly the same overlap rule as any other span, so the two figures
+    # differ only in which spans they are over -- never in how a hit is
+    # decided.
+    sampled_clean = [i for i in clean if labels[i].sampled]
+    missed_sampled_clean = sum(1 for i in sampled_clean if i not in hit)
 
     return LabelScore(
         matched_play=matched_play,
@@ -147,6 +191,8 @@ def score_against_labels(intervals: list[Interval], labels: list[LabelRow]) -> L
         unknown=unknown,
         missed_clean=missed_clean,
         labelled_clean=len(clean),
+        missed_sampled_clean=missed_sampled_clean,
+        sampled_clean=len(sampled_clean),
         boundary_n=len(start_errs),
         start_bias_ms=median(start_errs) if start_errs else None,
         end_bias_ms=median(end_errs) if end_errs else None,

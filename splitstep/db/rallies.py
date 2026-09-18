@@ -391,6 +391,18 @@ def list_rallies(conn: sqlite3.Connection, session_id: str) -> list[sqlite3.Row]
     ).fetchall()
 
 
+def list_rallies_for_source(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
+    """Every rally on one source, in idx order.
+
+    `list_rallies` is scoped to a session, which spans sources; the label
+    sampler needs one source's own timeline, because a window it draws is a
+    span of that source's proxy and nothing else.
+    """
+    return conn.execute(
+        "SELECT * FROM rallies WHERE source_id = ? ORDER BY idx", (source_id,)
+    ).fetchall()
+
+
 def set_star(conn: sqlite3.Connection, rally_id: str, starred: bool) -> None:
     # seen_at is stamped alongside reviewed_at, not just reviewed_at alone:
     # a starred rally was necessarily looked at, and without this a rally

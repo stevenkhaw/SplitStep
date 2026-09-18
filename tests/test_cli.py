@@ -907,3 +907,83 @@ def test_score_on_an_unknown_session_fails(library, conn, capsys):
     rc = main(["--library", str(library.root), "score", "show", "nope"])
     assert rc == 1
     assert "not found" in capsys.readouterr().err.lower()
+
+
+def _labelled_source(library, conn, ground_features):
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T10:00:00Z", duration_ms=600_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_9100.MOV",
+    )
+    src_dir = library.source_dir(session_id, idx)
+    src_dir.mkdir(parents=True, exist_ok=True)
+    write_features(src_dir / "features.jsonl", ground_features)
+    return source_id
+
+
+def test_labels_score_says_recall_was_not_measured_when_nothing_was_sampled(
+    library, conn, capsys, ground_features
+):
+    # The default state of every corpus that predates the sampler. Reporting
+    # 100% for "no misses among zero blind windows" would state coverage
+    # nobody measured -- the exact class of error the caveat line exists for.
+    source_id = _labelled_source(library, conn, ground_features)
+    conn.close()
+
+    assert main(["--library", str(library.root), "labels", "score", source_id]) == 0
+    out = capsys.readouterr().out
+    assert "sampled recall" in out
+    assert "no blind windows labelled" in out
+
+
+def test_labels_score_reports_recall_over_blind_windows_once_some_exist(
+    library, conn, capsys, ground_features
+):
+    from splitstep.db.labels import add_label
+
+    source_id = _labelled_source(library, conn, ground_features)
+    # rally_id omitted: a window drawn by the sampler has no rally behind it,
+    # which is exactly what makes this recall figure unbiased.
+    add_label(conn, source_id=source_id, span_start_ms=25_000, span_end_ms=33_000,
+              verdict="clean")
+    conn.close()
+
+    assert main(["--library", str(library.root), "labels", "score", source_id]) == 0
+    out = capsys.readouterr().out
+    assert "sampled recall" in out
+    assert "of 1 clean" in out
+    assert "no blind windows labelled" not in out
+
+
+def test_labels_sample_prints_the_requested_number_of_windows(
+    library, conn, capsys, ground_features
+):
+    source_id = _labelled_source(library, conn, ground_features)
+    conn.close()
+
+    rc = main(["--library", str(library.root), "labels", "sample", source_id,
+               "--n", "5", "--seed", "3"])
+    assert rc == 0
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if "-->" in ln]
+    assert len(lines) == 5
+
+
+def test_labels_sample_is_reproducible_from_its_seed(
+    library, conn, capsys, ground_features
+):
+    source_id = _labelled_source(library, conn, ground_features)
+    conn.close()
+
+    args = ["--library", str(library.root), "labels", "sample", source_id,
+            "--n", "5", "--seed", "3"]
+    main(args)
+    first = capsys.readouterr().out
+    main(args)
+    assert capsys.readouterr().out == first
+
+
+def test_labels_sample_on_an_unknown_source_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "labels", "sample", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()

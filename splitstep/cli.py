@@ -11,7 +11,7 @@ from splitstep.config import Library, LibraryAlreadyInitialized, LibraryNotMount
 from splitstep.db import jobs as jobq
 from splitstep.db.labels import latest_labels, parse_flags
 from splitstep.db.presets import create_preset, get_preset, list_presets
-from splitstep.db.rallies import list_rallies, replace_rallies
+from splitstep.db.rallies import list_rallies, list_rallies_for_source, replace_rallies
 from splitstep.db.schema import connect, migrate
 from splitstep.db.sessions import (
     get_session,
@@ -33,6 +33,7 @@ from splitstep.export import (
 )
 from splitstep.jobs.handlers import HANDLERS
 from splitstep.jobs.worker import Worker
+from splitstep.label_sample import DEFAULT_WINDOW_MS, sample_windows
 from splitstep.label_score import rows_to_labels, score_against_labels
 from splitstep.score import DEFAULT_RULES, rules_from_dict, score_before, scoreboard_rows
 from splitstep.setup import queue_setup
@@ -416,6 +417,18 @@ def cmd_labels_score(args) -> int:
           f"  ({score.matched_play} play / {score.matched_play + score.matched_not_play} decided)")
     print(f"  span recall (labelled spans only) {_fmt_pct(score.span_recall)}"
           f"  ({score.labelled_clean - score.missed_clean} of {score.labelled_clean} clean)")
+    # The unbiased figure, and the only one on this page that means what the
+    # word recall ordinarily means -- blind-sampled windows were chosen from
+    # the whole source, not from what the detector happened to flag. Printed
+    # even when it is empty, and saying plainly that it is empty: silence
+    # would read as "nothing to report here" rather than "nobody measured".
+    if score.sampled_clean == 0:
+        print("  sampled recall (blind windows)    —"
+              "       (no blind windows labelled yet)")
+    else:
+        print(f"  sampled recall (blind windows)   {_fmt_pct(score.sampled_recall)}"
+              f"  ({score.sampled_clean - score.missed_sampled_clean}"
+              f" of {score.sampled_clean} clean)")
     print(f"  unknown                          {score.unknown}"
           "  (candidates matching no label)")
     print(f"  start bias / MAE                 {_fmt_ms(score.start_bias_ms)}"
@@ -429,6 +442,44 @@ def cmd_labels_score(args) -> int:
     # clustering stand in as ground truth.
     print("\n  span recall cannot see play the detector never proposed:"
           " every label sits on a span it did.")
+    if score.sampled_clean == 0:
+        print("  `splitstep labels sample` draws windows it did not, which is"
+              " what sampled recall measures.")
+    return 0
+
+
+def cmd_labels_sample(args) -> int:
+    """Print a blind set of windows to judge, half flagged and half ignored.
+
+    The terminal view of what the audit route in the app walks through. It
+    exists mostly so a sample can be eyeballed (or diffed across seeds)
+    without opening the app, and deliberately prints the windows in the same
+    shuffled order the API serves them: sorting here would leak, by position,
+    which ones the detector flagged.
+    """
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    source = _source_or_fail(conn, args.source_id)
+    if source is None:
+        return 1
+
+    intervals = [
+        (r["det_start_ms"], r["det_end_ms"])
+        for r in list_rallies_for_source(conn, args.source_id)
+        if r["det_start_ms"] is not None
+    ]
+    windows = sample_windows(
+        duration_ms=source["duration_ms"],
+        intervals=intervals,
+        n=args.n,
+        seed=args.seed,
+        window_ms=args.window_ms,
+    )
+    print(f"{len(windows)} windows of {args.window_ms} ms, seed {args.seed}"
+          f" ({len(intervals)} detector intervals on this source)")
+    for i, w in enumerate(windows, start=1):
+        print(f"  {i:>3}.  {_format_ts(w.start_ms):>9} --> {_format_ts(w.end_ms):>9}")
     return 0
 
 
@@ -748,6 +799,17 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--threshold", type=float, default=None,
                     help="override the profile's default score threshold")
     ls.set_defaults(func=cmd_labels_score)
+
+    lsa = labels_sub.add_parser(
+        "sample", help="draw blind windows to label, including ones the detector ignored"
+    )
+    lsa.add_argument("source_id")
+    lsa.add_argument("--n", type=int, default=20, help="how many windows to draw")
+    lsa.add_argument("--seed", type=int, default=0,
+                     help="the same seed redraws the same sample")
+    lsa.add_argument("--window-ms", type=int, default=DEFAULT_WINDOW_MS,
+                     dest="window_ms", help="length of each window")
+    lsa.set_defaults(func=cmd_labels_sample)
 
     p = sub.add_parser("score", help="match-score tracking for a session")
     score_sub = p.add_subparsers(dest="score_cmd", required=True)

@@ -155,3 +155,78 @@ def test_neighbouring_verdicts_still_contribute_boundary_stats():
         ],
     )
     assert s.boundary_n == 3
+
+
+# -- recall over a blind sample ---------------------------------------------
+#
+# `span_recall` is named "labelled spans only" because every label used to
+# attach to a span the detector proposed, so it could never see play the
+# detector missed. A sampled window carries no rally: it was drawn blind (see
+# splitstep/label_sample.py), including from footage the detector ignored, so
+# recall over *those* windows is recall in the ordinary sense.
+
+
+def sampled(start, end, verdict="clean"):
+    return LabelRow(span_start_ms=start, span_end_ms=end, verdict=verdict,
+                    true_start_ms=None, true_end_ms=None, sampled=True)
+
+
+def test_a_rally_anchored_label_is_not_sampled_by_default():
+    assert label(0, 8000).sampled is False
+
+
+def test_sampled_recall_is_none_when_nothing_was_sampled():
+    # An old corpus, or a source labelled only through the review queue: the
+    # honest answer is that recall was not measured, not that it was perfect.
+    s = score_against_labels([Interval(1000, 5000, 0.8)], [label(1000, 5000)])
+    assert s.sampled_recall is None
+    assert s.sampled_clean == 0
+
+
+def test_a_sampled_clean_window_no_candidate_covers_is_a_miss():
+    # The 2026-09-16 case: play at 0:25 that the detector scored 0.000, so no
+    # interval exists to overlap it at any threshold.
+    s = score_against_labels([Interval(200_000, 210_000, 0.6)], [sampled(25_000, 33_000)])
+    assert s.sampled_clean == 1
+    assert s.missed_sampled_clean == 1
+    assert s.sampled_recall == 0.0
+
+
+def test_a_sampled_clean_window_a_candidate_covers_is_not_a_miss():
+    s = score_against_labels([Interval(25_000, 33_000, 0.6)], [sampled(25_000, 33_000)])
+    assert s.missed_sampled_clean == 0
+    assert s.sampled_recall == 1.0
+
+
+def test_sampled_recall_ignores_windows_the_human_said_hold_no_play():
+    # A not_play window nobody flagged is the detector being right. Counting
+    # it as a recall miss would punish correct silence.
+    s = score_against_labels(
+        [],
+        [sampled(25_000, 33_000), sampled(90_000, 98_000, verdict="not_play")],
+    )
+    assert s.sampled_clean == 1
+    assert s.sampled_recall == 0.0
+
+
+def test_sampled_and_rally_anchored_labels_are_counted_separately():
+    # Both figures are reported, and they measure different things: one is
+    # biased by construction (the detector chose the spans), the other is not.
+    s = score_against_labels(
+        [Interval(1000, 5000, 0.8)],
+        [label(1000, 5000), sampled(25_000, 33_000)],
+    )
+    assert (s.labelled_clean, s.missed_clean) == (2, 1)
+    assert (s.sampled_clean, s.missed_sampled_clean) == (1, 1)
+    assert s.span_recall == 0.5
+    assert s.sampled_recall == 0.0
+
+
+def test_a_sampled_window_still_counts_toward_precision():
+    # A candidate overlapping a sampled not_play window is a false positive
+    # like any other -- where the span came from does not change what the
+    # human said about it.
+    s = score_against_labels(
+        [Interval(90_000, 98_000, 0.6)], [sampled(90_000, 98_000, verdict="not_play")]
+    )
+    assert (s.matched_play, s.matched_not_play) == (0, 1)
