@@ -105,3 +105,66 @@ corrected span. At n=2 they mean nothing and should not be quoted.
    classified per-window rather than per-source. Both are model changes, both
    want more labelled windows first, and neither should be attempted against
    audio-impact clusters.
+
+---
+
+## Correction (2026-09-18, second pass): the inverted-confidence claim does not replicate
+
+A second blind pass was run the same evening at seed 1 — 15 of its 20 windows
+labelled (7 not_play, 5 partly, 3 clean). It was run precisely because the
+section above named inverted confidence as the finding most likely to soften
+on a second pass. It softened.
+
+| | seed 0 | seed 1 | pooled |
+|---|---|---|---|
+| windows labelled | 20 | 15 | 35 |
+| precision | 25% (2/8) | 100% (2/2) | **40% (4/10)** |
+| recall, strict | 25% (1/4) | 33% (1/3) | **29% (2/7)** |
+| recall, incl. `partly` | 29% (2/7) | 25% (2/8) | **27% (4/15)** |
+| play windows scoring 0.000 | 4 of 7 | 2 of 8 | **6 of 15** |
+
+### What is withdrawn
+
+> Every false positive scores **higher** than every true positive. The two
+> distributions do not overlap at all.
+
+That was true of seed 0 and is **not true pooled.** Seed 1 produced no false
+positives at all, and its two true positives score 0.565 and 0.568 — inside
+seed 0's not-play range.
+
+```
+PLAY      0.480  0.516  0.565  0.568
+NOT PLAY  0.553  0.569  0.592  0.593  0.640  0.703
+```
+
+Overlapping. The medians still lean the wrong way (play 0.54 against not-play
+0.59) and nothing here rehabilitates confidence as a signal — but "cleanly
+separated, therefore no threshold can help" was a ten-window claim dressed as a
+structural one, and it is withdrawn as stated. The weaker reading that survives
+is 2026-08-20's original: confidence is uninformative. That has now failed to
+separate on three independent occasions and can be treated as settled.
+
+Precision is the other casualty of small n: 25% against 100% between two passes
+of the same source, on denominators of 8 and 2. The pooled 40% is the only one
+worth quoting, and it agrees with 2026-08-21's 44% (4 of 9) rather than
+contradicting it.
+
+### What replicated, and is now the finding
+
+**Six of the fifteen windows holding play score a hard 0.000 throughout** — 4
+of 7 in the first pass, 2 of 8 in the second. Recall sits at 27–29% pooled and
+was within four points of that in each pass independently.
+
+This is the one that was never a counting argument. `_raw_score` zeroes every
+term and subtracts `w_outside` when `far is None`; the passes only establish
+how often that state occurs on real footage, which is roughly **four play
+windows in ten.**
+
+### What this changes about what to do next
+
+Nothing in the ordering, but one of the reasons is gone. "No threshold helps"
+now rests on the 0.000 windows alone — which is enough, since no threshold
+reaches a score of zero — rather than on a separation that turned out to be
+noise. Thresholds are still not the lever. The two structural questions at the
+end of the previous section are unchanged, and now have 35 labelled windows
+behind them instead of 20.
