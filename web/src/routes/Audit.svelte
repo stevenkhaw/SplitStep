@@ -237,6 +237,51 @@
     </span>
   </div>
 
+  <!--
+    The rules, on the page rather than in someone's head. Two of these cost
+    real data when they are guessed at: `unsure` sits in no denominator, so
+    spending it on a window the reviewer could actually call throws the row
+    away, and pre-serve bouncing IS callable. The other is the window's own
+    edges -- they came from a seeded tiling, not from the detector, so a
+    window that cuts a serve in half is not a defect to be recorded, it is
+    the `partly` case.
+
+    A <dl>, not a table: four term/definition pairs with no second axis.
+  -->
+  <dl class="mt-4 max-w-3xl space-y-1 text-caption">
+    <div class="flex gap-2">
+      <dt class="w-28 shrink-0 font-data text-faint">1 clean</dt>
+      <dd class="text-dim">Serve and rally, filling the window.</dd>
+    </div>
+    <div class="flex gap-2">
+      <dt class="w-28 shrink-0 font-data text-faint">2 not play</dt>
+      <dd class="text-dim">
+        Bouncing before the last bounce, walking, ball retrieval, standing around. This is
+        a judgement you can make — do not reach for <em>unsure</em>.
+      </dd>
+    </div>
+    <div class="flex gap-2">
+      <dt class="w-28 shrink-0 font-data text-faint">3 partly</dt>
+      <dd class="text-dim">
+        Real play and dead time together — the window cut the serve, or the point ends and
+        you walk off.
+      </dd>
+    </div>
+    <div class="flex gap-2">
+      <dt class="w-28 shrink-0 font-data text-faint">4 unsure</dt>
+      <dd class="text-dim">
+        You genuinely can't tell: too small, occluded, or a bounce with the window ending
+        before the toss, so there is no telling whether it was the last one.
+      </dd>
+    </div>
+  </dl>
+
+  <p class="mt-2 max-w-3xl text-caption text-faint">
+    A rally starts at the last bounce or the toss. The window's own edges came from a
+    seeded tiling, not the detector, so a window that cuts a serve in half is not a defect
+    — that is what <em>partly</em> records. Boundaries are label mode's job.
+  </p>
+
   {#if stats.done}
     <!--
       The sample is exhausted, not the question. A second pass on a fresh

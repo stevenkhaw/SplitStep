@@ -459,3 +459,45 @@ describe('Audit.svelte load effect does not carry state across an id change', ()
     expect(target.textContent).not.toMatch(/Something went wrong/)
   })
 })
+
+
+describe('Audit.svelte verdict legend', () => {
+  let target: HTMLDivElement
+  let instance: { setId: (id: string) => void } | undefined
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.sourceLabels.mockResolvedValue([])
+    mockApi.getSource.mockResolvedValue(sourceWith('src1', 1))
+    mockApi.labelSample.mockResolvedValue({
+      seed: 0,
+      window_ms: 8000,
+      windows: [{ start_ms: 25_000, end_ms: 33_000 }],
+    })
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+  })
+
+  it('states the rule for each verdict, including the two that are easy to confuse', async () => {
+    // The distinction that costs data: bouncing before the last bounce is a
+    // judgement the reviewer can make, so it is not_play -- while `unsure`
+    // sits in no denominator and throws the row away. Without this on the
+    // page the rule lived only in a conversation.
+    instance = mount(AuditHarness, { target }) as unknown as { setId: (id: string) => void }
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/1 \/ 1/))
+
+    const text = target.textContent ?? ''
+    expect(text).toMatch(/last bounce/)
+    expect(text).toMatch(/can.t tell/i)
+    // The window's own edges are never the thing being judged -- they came
+    // from a seeded tiling, not from the detector.
+    expect(text).toMatch(/edges .* the tiling|tiling|not a defect/i)
+  })
+})
