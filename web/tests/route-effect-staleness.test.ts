@@ -24,6 +24,10 @@ const mockApi = {
   setup: vi.fn(),
   previewUrl: () => 'about:blank',
   getSessionClips: vi.fn().mockResolvedValue([]),
+  labelSample: vi.fn(),
+  sourceLabels: vi.fn().mockResolvedValue([]),
+  spanLabel: vi.fn().mockResolvedValue({ ok: true }),
+  spanRetract: vi.fn().mockResolvedValue({ ok: true }),
   revealClip: vi.fn().mockResolvedValue({ ok: true }),
 }
 
@@ -38,6 +42,7 @@ HTMLMediaElement.prototype.load = vi.fn()
 
 const { default: SessionHarness } = await import('./support/SessionHarness.svelte')
 const { default: SetupHarness } = await import('./support/SetupHarness.svelte')
+const { default: AuditHarness } = await import('./support/AuditHarness.svelte')
 
 function rally(id: string, idx: number): Rally {
   return {
@@ -380,5 +385,77 @@ describe('Setup.svelte load effect does not carry state across an id change', ()
 
     expect(target.textContent).not.toMatch(/500/)
     expect(target.textContent).toMatch(/Set up source 2/)
+  })
+})
+
+
+describe('Audit.svelte load effect does not carry state across an id change', () => {
+  let target: HTMLDivElement
+  let instance: { setId: (id: string) => void } | undefined
+
+  function sample(startMs: number) {
+    return { seed: 0, window_ms: 8000, windows: [{ start_ms: startMs, end_ms: startMs + 8000 }] }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.sourceLabels.mockResolvedValue([])
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+  })
+
+  it('ignores a superseded id’s sample that resolves late', async () => {
+    // The worst staleness in the app. Every verdict typed here is written
+    // against (source_id, span) -- so one source's windows rendered over
+    // another source's footage does not merely mislead the reviewer, it
+    // writes their judgement of footage A onto a span of source B, in a
+    // corpus whose entire value is that a human looked at each row.
+    const slow = deferred<ReturnType<typeof sample>>()
+    mockApi.getSource
+      .mockResolvedValueOnce(sourceWith('src1', 1))
+      .mockResolvedValueOnce(sourceWith('src2', 2))
+    mockApi.labelSample
+      .mockReturnValueOnce(slow.promise)
+      .mockResolvedValueOnce(sample(400_000))
+
+    instance = mount(AuditHarness, { target }) as unknown as { setId: (id: string) => void }
+    flushSync()
+    instance.setId('src2')
+    flushSync()
+
+    await vi.waitFor(() => expect(target.textContent).toMatch(/1 \/ 1/))
+    const after = target.textContent ?? ''
+
+    slow.resolve(sample(25_000))
+    await Promise.resolve()
+    flushSync()
+    expect(target.textContent).toBe(after)
+  })
+
+  it('clears a previous error once a later id loads successfully', async () => {
+    mockApi.getSource
+      .mockRejectedValueOnce(new Error('GET /api/sources/src1 -> 404'))
+      .mockResolvedValueOnce(sourceWith('src2', 2))
+    mockApi.labelSample
+      .mockRejectedValueOnce(new Error('GET /api/sources/src1 -> 404'))
+      .mockResolvedValueOnce(sample(400_000))
+
+    instance = mount(AuditHarness, { target }) as unknown as { setId: (id: string) => void }
+    flushSync()
+    // describeApiError turns a bare Error into "Something went wrong." --
+    // the point of this test is that the message clears, not which message
+    // it was.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Something went wrong/))
+
+    instance.setId('src2')
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/1 \/ 1/))
+    expect(target.textContent).not.toMatch(/Something went wrong/)
   })
 })

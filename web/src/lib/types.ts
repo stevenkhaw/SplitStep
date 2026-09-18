@@ -244,3 +244,19 @@ export interface RenderResult {
   job_id: string
   already_running: boolean
 }
+
+/**
+ * One window of a blind labelling pass. Two fields, and that is the whole
+ * contract: the server deliberately does not say which windows the detector
+ * flagged (see `splitstep/label_sample.py::Window`).
+ */
+export interface SampleWindow {
+  start_ms: number
+  end_ms: number
+}
+
+export interface LabelSample {
+  seed: number
+  window_ms: number
+  windows: SampleWindow[]
+}

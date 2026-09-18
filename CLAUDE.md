@@ -300,8 +300,11 @@ alone.
 
 ### Frontend
 
-Hash router (`lib/router.svelte.ts`) → five routes: Library, Setup, Session,
-Reels, Reel.
+Hash router (`lib/router.svelte.ts`) → six routes: Library, Setup, Session,
+Reels, Reel, Audit. Audit (`#/audit/<source_id>`) is the blind labelling
+pass, and it is its own route rather than a mode inside Session on purpose:
+the session page renders a rally list, an overview band and a score board,
+every one of which tells the reviewer what the detector thought.
 Session hosts QueueMode (autoplay + star/reject/undo) and TimelineMode
 (boundary editing, score curve, re-segment panel).
 
@@ -510,9 +513,13 @@ four had to be retargeted during the migration and would again.
   is what catches anyone adding one back. The table is append-only —
   re-labelling appends and `latest_labels` resolves the current row, so a
   corrected judgement never erases the one it corrected.
-  Two writers: label mode in the UI (verdict + boundary flags) and
+  Three writers: label mode in the UI (verdict + boundary flags),
   `POST /api/rallies/{id}/bounds`, which turns every manual drag into a signed
-  millisecond correction for free.
+  millisecond correction for free, and the span-addressed
+  `POST /api/sources/{id}/label`, which is the only one that can reach a span
+  no rally backs. `rally_id IS NULL` marks exactly those rows, and that is
+  what `sampled_recall` keys on — `record_boundary_correction` requires a
+  rally_id, so a drag row can never be mistaken for a sampled one.
 - **A rally with `det_start_ms IS NULL` was made by a human, not proposed by
   the detector.** Timeline mode's `C` cuts one rally in two; the second half
   carries no detector span, because `rally_labels` anchors on
@@ -561,6 +568,19 @@ four had to be retargeted during the migration and would again.
   letting a metric imply coverage it lacks is what cost the last round.
   `splitstep labels export <source_id>` writes the corpus as JSON for
   `tests/fixtures/`.
+- **Recall over play the detector missed comes from the blind pass, and
+  nowhere else.** `splitstep/label_sample.py` draws windows across the whole
+  source — half centred on detector intervals, half from the gaps between
+  them — seeded, non-overlapping and shuffled, and the `Window` it returns
+  carries nothing but its span. That omission is load-bearing: the
+  2026-08-20 pass hand-labelled a clip wrong and only the tool's blindness
+  exposed it. The reviewer walks them at `#/audit/<source_id>` (or inspects
+  a sample with `splitstep labels sample`), and `labels score` then reports
+  `sampled recall (blind windows)` beside the old figure. It is `None`, and
+  printed as such, when nothing has been sampled — an older corpus has no
+  blind windows, and reporting 100% for zero of them would state coverage
+  nobody measured. The sample is recomputed from its seed rather than
+  stored, so a reload resumes the same pass with no table to go stale.
 - **`features.jsonl` floats are quantized to 4dp** so read/write cycles are
   byte-stable. Round-tripping is exact only for already-quantized values.
 - **A route `$effect` keyed on a reactive `id` must clear its state and guard

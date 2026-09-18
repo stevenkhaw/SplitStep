@@ -40,7 +40,7 @@ describe('isHelpKey', () => {
 
 describe('shortcutGroups', () => {
   it('covers all three keyboard modes', () => {
-    expect(MODES).toEqual(['queue', 'timeline', 'label'])
+    expect(MODES).toEqual(['queue', 'timeline', 'label', 'audit'])
     for (const m of MODES) expect(shortcutGroups(m, 'dev').length).toBeGreaterThan(0)
   })
 

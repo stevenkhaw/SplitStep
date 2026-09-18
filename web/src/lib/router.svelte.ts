@@ -4,6 +4,7 @@ export type Route =
   | { name: 'setup'; id: string }
   | { name: 'reels' }
   | { name: 'reel'; slug: string }
+  | { name: 'audit'; id: string }
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '')
@@ -22,6 +23,12 @@ export function parseHash(hash: string): Route {
   }
   if (parts.length === 2 && parts[0] === 's') {
     return { name: 'session', id: parts[1] }
+  }
+  // Keyed on a source, not a session: a blind labelling pass walks one
+  // source's own timeline, because every window it draws is a span of that
+  // source's proxy.
+  if (parts.length === 2 && parts[0] === 'audit') {
+    return { name: 'audit', id: parts[1] }
   }
   return { name: 'library' }
 }

@@ -458,6 +458,39 @@
   {/if}
 
   <!--
+    The way into the blind pass, and dev-only for the same reason the panel
+    above is: it is a measurement tool, not a review one. One link per ready
+    source because a sample is drawn over one source's own timeline -- every
+    window it holds is a span of that source's proxy.
+
+    An <a href> rather than a button calling navigate(): the audit route is a
+    real place, and a reviewer mid-pass should be able to reopen it from
+    history or a second tab.
+  -->
+  {#if appmode.current === 'dev' && readySources.length > 0}
+    <section class="mt-6 rounded-lg border border-line p-4">
+      <h2 class="text-body font-semibold">Blind pass</h2>
+      <p class="mt-1 max-w-3xl text-caption text-dim">
+        Judge a sample of windows drawn across the whole source, including ones the
+        detector ignored. Label mode can only reach spans it proposed, so this is the only
+        pass that measures recall — score it with <code class="font-data">splitstep labels
+        score</code>.
+      </p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {#each readySources as s (s.id)}
+          <a
+            href="#/audit/{s.id}"
+            class="rounded border border-line px-2 py-0.5 text-caption
+                   hover:bg-surface-2 motion-safe:transition-colors"
+          >
+            source {s.idx}
+          </a>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <!--
     Not gated on readySources/tabs the way QuadEditor/ResegmentPanel are --
     clips already cut are a fact about the session's clips/ folder, not
     about any one source's detection state, so this stays visible even for

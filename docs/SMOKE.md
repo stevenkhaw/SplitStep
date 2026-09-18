@@ -93,6 +93,31 @@ panel had something to score:
 - [ ] Migration `014_preset_assigned_at.sql` applied to the live library —
       the external drive was not mounted this session
 
+## Blind labelling pass (2026-09-18)
+
+Exercised against the synthetic scratch library on :8421. The Browser pane
+would not composite this session, so the clicks and keystrokes below were
+dispatched into the live page rather than made with a mouse — the handlers
+and the writes are real, the pointer was not:
+
+- [x] `GET /api/sources/{id}/label-sample` and `splitstep labels sample`
+      return the same windows for the same seed
+- [x] `#/audit/<source_id>` renders a window, advances on a verdict, and
+      shows `k / n · j judged`
+- [x] A verdict lands in `rally_labels` with `rally_id` NULL
+- [x] `U` retracts: an append-only retraction row, the counter drops, and the
+      pass returns to the window it was on
+- [x] Re-labelling appends rather than overwriting — five rows for three
+      windows after one undo and one correction
+- [x] The all-judged card offers **Draw another sample**
+- [x] `splitstep labels score` prints `sampled recall (blind windows)` beside
+      the old figure
+- [ ] A pass over real footage. The scratch library's proxy is synthetic and
+      its features are a fixture slice, so every figure above is arithmetic,
+      not a judgement about tennis
+- [ ] Playback keys (`Space`, `R`) — VideoDeck has no `<video>` under jsdom
+      and the pane would not composite, so neither was exercised
+
 ## Still open
 
 ## First run

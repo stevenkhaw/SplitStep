@@ -15,9 +15,9 @@ import type { AppMode } from './types'
  * Keys are written the way they are printed on a key, not the way
  * KeyboardEvent.key reports them: `S`, not `s`/`S`.
  */
-export type ShortcutMode = 'queue' | 'timeline' | 'label'
+export type ShortcutMode = 'queue' | 'timeline' | 'label' | 'audit'
 
-export const MODES: ShortcutMode[] = ['queue', 'timeline', 'label']
+export const MODES: ShortcutMode[] = ['queue', 'timeline', 'label', 'audit']
 
 export interface Shortcut {
   /** One entry per key that does the same thing, e.g. the four speed keys. */
@@ -156,10 +156,50 @@ const LABEL: ShortcutGroup[] = [
   },
 ]
 
+// The blind pass (#/audit/<source>). Verdict keys are LABEL's, deliberately
+// -- the two modes ask the same question about a span, and a reviewer moving
+// between them must not have to remember which `2` means what. What is
+// absent is the boundary row: a sampled window's edges came from a seeded
+// tiling, so there is no detector edge here to call early or late.
+const AUDIT: ShortcutGroup[] = [
+  {
+    title: 'Verdict',
+    items: [
+      { keys: ['1'], label: 'Clean rally' },
+      { keys: ['2'], label: 'Not play' },
+      { keys: ['3'], label: 'Partly play' },
+      { keys: ['4'], label: 'Unsure' },
+    ],
+  },
+  {
+    title: 'Playback',
+    items: [
+      { keys: ['Space'], label: 'Play or pause' },
+      { keys: ['R'], label: 'Replay from the start' },
+    ],
+  },
+  {
+    title: 'Move',
+    items: [
+      { keys: ['←'], label: 'Previous window' },
+      { keys: ['→'], label: 'Next window' },
+      { keys: ['U'], label: 'Retract this judgement' },
+    ],
+  },
+  {
+    title: 'Leave',
+    items: [
+      { keys: ['Esc'], label: 'Back to the session' },
+      { keys: ['?'], label: 'This list' },
+    ],
+  },
+]
+
 const BY_MODE: Record<ShortcutMode, ShortcutGroup[]> = {
   queue: QUEUE,
   timeline: TIMELINE,
   label: LABEL,
+  audit: AUDIT,
 }
 
 /** Friend mode drops the devOnly entries and any group that leaves empty.
@@ -198,6 +238,8 @@ const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
              TIMELINE[1].items[1], TIMELINE[3].items[0], TIMELINE[3].items[1]],
   label: [LABEL[0].items[0], LABEL[0].items[1], LABEL[3].items[1], LABEL[3].items[2],
           LABEL[4].items[0], LABEL[4].items[1]],
+  audit: [AUDIT[0].items[0], AUDIT[0].items[1], AUDIT[0].items[2], AUDIT[2].items[2],
+          AUDIT[3].items[0], AUDIT[1].items[0]],
 }
 
 /** The handful that stay visible under the video. */

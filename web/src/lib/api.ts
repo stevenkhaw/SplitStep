@@ -6,6 +6,7 @@ import type {
   ExportResult,
   Job,
   LabelRecord,
+  LabelSample,
   Preset,
   Reel,
   ReelDeleteResult,
@@ -176,6 +177,35 @@ export const api = {
   // opposite things -- see api_label_retract in splitstep/api/routes.py.
   retractLabel: (id: string) => post(`/api/rallies/${id}/label/retract`),
   sourceLabels: (sourceId: string) => req<LabelRecord[]>(`/api/sources/${sourceId}/labels`),
+
+  // The blind half of the corpus. The sample is recomputed from `seed`
+  // rather than stored, so asking again with the same seed returns the same
+  // windows -- that is what lets a pass survive a reload with no table
+  // behind it. The response deliberately does not say which windows the
+  // detector flagged.
+  labelSample: (sourceId: string, n: number, seed: number) =>
+    req<LabelSample>(`/api/sources/${sourceId}/label-sample?n=${n}&seed=${seed}`),
+  // Span-addressed, because a sampled window has no rally to address. Same
+  // table, same resolution rule as `label` above -- the difference is only
+  // which spans can be reached.
+  spanLabel: (
+    sourceId: string,
+    start_ms: number,
+    end_ms: number,
+    verdict: string,
+    boundary_flags: string[],
+  ) =>
+    post(`/api/sources/${sourceId}/label`, {
+      span_start_ms: start_ms,
+      span_end_ms: end_ms,
+      verdict,
+      boundary_flags,
+    }),
+  spanRetract: (sourceId: string, start_ms: number, end_ms: number) =>
+    post(`/api/sources/${sourceId}/label/retract`, {
+      span_start_ms: start_ms,
+      span_end_ms: end_ms,
+    }),
 
   resegment: (sourceId: string, threshold: number) =>
     post(`/api/sources/${sourceId}/resegment`, { threshold }),

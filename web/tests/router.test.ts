@@ -82,3 +82,17 @@ describe('parseHash - reel routes', () => {
     expect(parseHash('#/reels/a/b')).toEqual({ name: 'library' })
   })
 })
+
+describe('the audit route', () => {
+  it('parses #/audit/<source id>', () => {
+    // Its own route rather than a mode inside Session: the session route
+    // renders a rally list, an overview band and a score board, every one of
+    // which tells the reviewer what the detector thought. A blind pass has
+    // to be blind.
+    expect(parseHash('#/audit/src1')).toEqual({ name: 'audit', id: 'src1' })
+  })
+
+  it('falls back to the library for a bare #/audit', () => {
+    expect(parseHash('#/audit')).toEqual({ name: 'library' })
+  })
+})

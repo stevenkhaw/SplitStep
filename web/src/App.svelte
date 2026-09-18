@@ -2,6 +2,7 @@
   import AppBar from './components/AppBar.svelte'
   import CourtGround from './components/CourtGround.svelte'
   import Library from './routes/Library.svelte'
+  import Audit from './routes/Audit.svelte'
   import Reel from './routes/Reel.svelte'
   import Reels from './routes/Reels.svelte'
   import Session from './routes/Session.svelte'
@@ -44,6 +45,8 @@
     <Reels />
   {:else if router.current.name === 'reel'}
     <Reel slug={router.current.slug} />
+  {:else if router.current.name === 'audit'}
+    <Audit id={router.current.id} />
   {:else}
     <Session id={router.current.id} />
   {/if}
