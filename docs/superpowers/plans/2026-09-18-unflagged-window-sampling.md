@@ -94,3 +94,39 @@ not much better — the doc's own warning that "anything that separates cleanly
 on it should be re-checked against a second labelling pass" applies to every
 number this produces. What changes is only that recall becomes measurable at
 all, which it currently is not.
+
+---
+
+## What a rally's start means (2026-09-18, Steven)
+
+Stated during the first blind pass, and recorded here because nothing in the
+code carries it yet: **a clip should start at the last bounce or the toss.**
+Not the first bounce — a server may bounce the ball five times, and the four
+before the last are lead-in, not play.
+
+`pad_start_s` is 0.3 s today, which is a fixed pad off a detector edge and
+knows nothing about bounces. Closing that gap is tuning, so it waits on
+Gate 0 and on the reading list at the top of this file.
+
+### How that definition cashes out in a verdict
+
+The blind pass judges footage, never edges — a window's edges came from this
+file's tiling, which is why audit mode has no boundary keys at all.
+
+| the window shows | verdict |
+|---|---|
+| serve and rally, filling the window | `clean` |
+| real play plus dead time (the tiling cut the serve; the point ends mid-window) | `partly` |
+| bouncing before the last bounce, walking, ball retrieval, standing | `not_play` |
+| a bounce, then the window ends before the toss, and it cannot be told whether that was the last bounce | `unsure` |
+
+Bouncing is `not_play`, not `unsure`: it is a judgement the reviewer can
+actually make, and `unsure` sits in no denominator, so spending it on a
+decidable case discards the row.
+
+Boundary flags remain label mode's, on rallies whose edges the detector
+actually chose (`derive_boundary_flags`): a clip opening on pre-serve
+bouncing is `start_early`, one opening after the toss is `start_late`, one
+cutting the point short is `end_early`, one running on is `end_late`. A drag
+in timeline mode is better than any of them -- it records the signed
+millisecond correction rather than only its direction.
