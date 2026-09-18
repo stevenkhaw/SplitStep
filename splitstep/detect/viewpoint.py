@@ -31,6 +31,33 @@ MIN_FRAMES_FOR_CONFIDENCE = 50
 # dominate a handful of noisy frames.
 MIN_PAIRS_FOR_CONFIDENCE = 20
 
+# Fraction of frames carrying a near-player box that must ALSO carry a far
+# box before `pair` is allowed, however deep the separation in those frames
+# looks.
+#
+# Pair mode assumes two players rallying across the net, and in that state
+# both are visible essentially always: the three genuinely two-player sources
+# in the library measure 100%, 99% and 90%. A vertical phone framing breaks
+# the assumption without touching the separation -- whenever both players ARE
+# in shot they are at different depths, so the paired frames look like
+# textbook pair footage, but they are a third of the frames carrying anyone.
+# 2026-09-16 source 01 measures 34% and was classified pair on the strength
+# of that third, which left it scoring a hard 0.000 across four of the seven
+# windows a human said held play.
+#
+# 0.5 states something meaningful rather than splitting an observed gap: a
+# source where a pair is present less often than not is not two-player
+# footage in any sense the profile can use. It happens to sit in a wide empty
+# band (34% against 100%), but that band is two data points and should not be
+# mistaken for a fitted boundary -- see
+# docs/superpowers/plans/2026-09-18-first-measured-recall.md.
+#
+# The denominator is frames carrying a near box, not every frame. An empty
+# court between points is not evidence against pairing, and pair mode scores
+# those frames zero correctly. The frames that matter are the ones where a
+# player IS visible and unpaired -- exactly where the profile drops a rally.
+MIN_PAIR_RATE = 0.5
+
 SUBJECT_H_FRACTION = 0.5
 MIN_SUBJECT_H = 0.02
 
@@ -45,6 +72,10 @@ class ViewGeometry:
     frames_measured: int
     pairs_measured: int
     low_confidence: bool
+    # pairs_measured / frames_measured: how often a far player is there at
+    # all, as opposed to how far away they are when they are. Carried so the
+    # detect log can say which of the two reasons decided the profile.
+    pair_rate: float = 0.0
 
 
 def analyze_view(frames: list[FeatureFrame]) -> ViewGeometry:
@@ -75,16 +106,32 @@ def analyze_view(frames: list[FeatureFrame]) -> ViewGeometry:
         # frames is the line between "genuinely absent" and "haven't looked
         # long enough to say."
         return ViewGeometry(
-            "subject", 0.0, subject_min_h, measured, 0, measured < MIN_FRAMES_FOR_CONFIDENCE
+            "subject", 0.0, subject_min_h, measured, 0,
+            measured < MIN_FRAMES_FOR_CONFIDENCE, 0.0
         )
+
+    pair_rate = len(pairs) / measured if measured else 0.0
 
     if len(pairs) < MIN_PAIRS_FOR_CONFIDENCE:
         # Pairs exist but too few to trust their median -- distinct from the
         # no-pairs case above, which is a confident reading in its own right.
-        return ViewGeometry("subject", 0.0, subject_min_h, measured, len(pairs), True)
+        return ViewGeometry(
+            "subject", 0.0, subject_min_h, measured, len(pairs), True, pair_rate
+        )
 
     separation = statistics.median(abs(n.foot - f.foot) for n, f in pairs)
-    profile: Profile = "subject" if separation < GROUND_FOOT_SEPARATION else "pair"
+    # Two independent conditions, and the rate is a veto rather than a vote:
+    # it can only take `pair` away, never grant it. A ground-level camera
+    # pairs constantly -- both players share one horizon line -- and must
+    # still classify subject, so separation remains what decides and the rate
+    # only asks whether that decision describes enough of the footage to
+    # apply to all of it.
+    deep_enough = separation >= GROUND_FOOT_SEPARATION
+    paired_often_enough = pair_rate >= MIN_PAIR_RATE
+    profile: Profile = "pair" if (deep_enough and paired_often_enough) else "subject"
+    # Not low_confidence: there is plenty of observation here and it says
+    # something definite -- this is not two-player footage. low_confidence
+    # means "not enough observation to say", which is a different state.
     return ViewGeometry(
-        profile, round(separation, 4), subject_min_h, measured, len(pairs), False
+        profile, round(separation, 4), subject_min_h, measured, len(pairs), False, pair_rate
     )

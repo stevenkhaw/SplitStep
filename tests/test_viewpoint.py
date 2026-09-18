@@ -103,3 +103,72 @@ def test_a_short_but_unambiguous_pair_stream_is_confident():
     view = analyze_view(_stream(40, near_foot=0.90, far_foot=0.55))
     assert view.profile == "pair"
     assert view.low_confidence is False
+
+
+# -- pairing rate ------------------------------------------------------------
+#
+# `pair` assumes two players rallying across the net, and in that state both
+# are visible essentially always -- measured 100%, 99% and 90% on the three
+# genuinely two-player sources in the library. A vertical phone framing
+# breaks that: the partner is at a different depth whenever both are in
+# shot, so the paired frames look like textbook pair footage, but they are a
+# third of the frames carrying anyone at all. Deciding on that third and
+# applying it to the whole source is what left 2026-09-16 source 01 scoring
+# a hard 0.000 across four of the seven windows a human said held play
+# (docs/superpowers/plans/2026-09-18-first-measured-recall.md).
+
+
+def _mixed(paired: int, near_only: int) -> list[FeatureFrame]:
+    """A stream whose paired frames show unambiguous pair-mode depth, mixed
+    with frames carrying only a near player -- the vertical-framing shape."""
+    return (_stream(paired, near_foot=0.75, far_foot=0.35)
+            + _stream(near_only, near_foot=0.75, far_foot=None))
+
+
+def test_deep_separation_still_classifies_as_pair_when_pairing_is_the_norm():
+    v = analyze_view(_mixed(paired=95, near_only=5))
+    assert v.profile == "pair"
+    assert v.foot_separation > 0.05
+
+
+def test_deep_separation_does_not_classify_as_pair_when_pairing_is_rare():
+    # 34% is 2026-09-16 source 01's measured rate. The median separation over
+    # those frames is a perfectly good measurement of a camera's height; it
+    # is just not a description of the footage it is about to be applied to.
+    v = analyze_view(_mixed(paired=34, near_only=66))
+    assert v.profile == "subject"
+
+
+def test_the_pairing_rate_is_reported_so_a_log_line_can_say_why():
+    v = analyze_view(_mixed(paired=40, near_only=60))
+    assert v.pair_rate == pytest.approx(0.4)
+
+
+def test_the_rate_is_over_frames_carrying_anyone_not_over_every_frame():
+    # Frames with nobody in them are not evidence against pairing -- the
+    # court is empty between points, and pair mode scores those zero
+    # correctly. The frames that matter are the ones where a player IS
+    # visible and unpaired, which is where the profile silently drops a
+    # rally.
+    empty = [FeatureFrame(0, 0, None, None, hits=0, hit_reg=0.0)] * 400
+    v = analyze_view(_mixed(paired=90, near_only=10) + empty)
+    assert v.pair_rate == pytest.approx(0.9)
+    assert v.profile == "pair"
+
+
+def test_the_rate_gate_only_demotes_and_never_promotes():
+    # A ground-level source pairs constantly -- both players sit on the same
+    # horizon line. A high rate must not drag it into pair mode; foot
+    # separation remains the thing that decides, and the rate is a veto over
+    # its "pair" answer, never a vote for it.
+    v = analyze_view(_stream(100, near_foot=0.50, far_foot=0.494))
+    assert v.pair_rate == pytest.approx(1.0)
+    assert v.profile == "subject"
+
+
+def test_a_rate_demotion_is_a_confident_reading_not_a_low_confidence_one():
+    # Distinct from the two low_confidence cases, which mean "not enough
+    # observation to say". Here there is plenty of observation and it says
+    # something definite: this is not two-player footage.
+    v = analyze_view(_mixed(paired=34, near_only=66))
+    assert v.low_confidence is False

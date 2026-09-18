@@ -327,9 +327,14 @@ def params_for_frames(
     # subject decision turns on; subject_min_h is the derived gate that only
     # matters when the decision comes out "subject".
     log.info(
-        "segmenting with profile=%s foot_separation=%.4f subject_min_h=%.4f",
+        "segmenting with profile=%s foot_separation=%.4f pair_rate=%.2f subject_min_h=%.4f",
         params.profile,
         view.foot_separation,
+        # Both numbers, because either can be the one that decided: a shallow
+        # separation says the camera is low, a low pair rate says the framing
+        # loses a player. They fail in opposite-looking ways and the log is
+        # the only place that distinction is visible after the fact.
+        view.pair_rate,
         params.subject_min_h,
     )
     if threshold is not None:

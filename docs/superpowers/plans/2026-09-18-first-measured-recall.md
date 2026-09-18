@@ -168,3 +168,68 @@ reaches a score of zero — rather than on a separation that turned out to be
 noise. Thresholds are still not the lever. The two structural questions at the
 end of the previous section are unchanged, and now have 35 labelled windows
 behind them instead of 20.
+
+---
+
+## The pairing-rate gate (2026-09-18)
+
+Steven's observation: the trouble is vertical framing — he records in portrait
+and walks out of shot. Checked against the library, the intuition is right and
+orientation is the wrong way to express it.
+
+| session | # | orientation | profile (before) | foot sep | pair rate |
+|---|---|---|---|---|---|
+| 2026-08-18 | 1 | landscape | subject | 0.0060 | 59% |
+| 2026-08-18 | 2 | landscape | subject | 0.0165 | 90% |
+| 2026-08-25 | 1 | landscape | **pair** | 0.1284 | **100%** |
+| 2026-08-25 | 2 | landscape | subject | 0.0499 | 99% |
+| 2026-08-28 | 1–5 | **portrait** | subject | ~0.000 | 1–12% |
+| 2026-09-07 | 1 | landscape | subject | 0.0050 | 26% |
+| 2026-09-16 | 1 | **portrait** | **pair** | 0.0951 | **34%** |
+
+All five portrait sources from 08-28 already classified `subject` correctly,
+from foot separation alone — orientation would have added nothing there. And
+a landscape source loses a player the moment he stands wide enough. Portrait
+is the cause; it is not the measurement.
+
+The measurement was already in the feature stream and unused. `analyze_view`
+takes the median separation **over paired frames only** and never asks how
+rare pairing is, gating only on an absolute floor of 20 pairs — which 2298
+clears comfortably. So 2026-09-16's profile was decided on 34% of the frames
+carrying anyone, and applied to all of them.
+
+`MIN_PAIR_RATE = 0.5` is a veto, never a vote: it can take `pair` away, never
+grant it, so a ground-level camera (which pairs constantly, both players on one
+horizon) still classifies subject on separation as before. The denominator is
+frames carrying a near box, not every frame — an empty court between points is
+not evidence against pairing, and pair mode scores those zero correctly.
+
+**It reclassifies exactly one source in the library: 2026-09-16 source 01.**
+Everything else lands where it already was.
+
+### Scored against the 35 labelled windows
+
+| | candidates | precision | recall strict | recall incl. `partly` |
+|---|---|---|---|---|
+| pair @ 0.45 (before) | 44 | 50% | 29% (2/7) | 27% (4/15) |
+| subject @ 0.25 (after) | 98 | 47% | 29% (2/7) | **53% (8/15)** |
+
+Inclusive recall doubles at roughly unchanged precision, for 2.2× the
+candidates. By the repo's own stated bias — rejecting a false rally is one
+keystroke, a missed rally means rescrubbing an hour — that is the favourable
+direction. Strict recall does not move: neither profile is finding the
+whole-window rallies it misses.
+
+### What this is not
+
+It is not a validation of subject mode, which 2026-08-20 found has no working
+discriminator on ground-level footage; it is a statement that on *this* source
+subject beats pair against a human corpus. It is also a threshold chosen to
+mean something ("a pair is present more often than not") rather than fitted,
+sitting in a gap between two data points — 34% and 100%. A third genuinely
+two-player source, or a portrait source that should stay pair, is what would
+actually test it.
+
+Nothing was re-detected. The classification runs in `params_for_frames` at
+segment time, so a plain re-segment picks it up without touching features or
+the GPU — and `rally_labels` survives one, being anchored to detector spans.
