@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  inheritedDriftPhrase,
   isDetected,
   LabelController,
   LabelWriter,
@@ -866,5 +867,64 @@ describe('LabelWriter', () => {
     await tick()
 
     expect(net.settled).toEqual(['r1:clean:', 'r1:retract'])
+  })
+})
+
+describe('inheritedDriftPhrase', () => {
+  // The phrase is the whole point of the badge: "this verdict is inherited"
+  // alone does not tell a reviewer what moved, and a reviewer who cannot see
+  // how far the judged span sits from the one on screen cannot tell a
+  // rounding-width drift from half a rally.
+
+  it('reads each edge as a signed offset from the span on screen', () => {
+    expect(inheritedDriftPhrase(10000, 18000, 10200, 18000)).toBe(
+      'judged span start +0.2s · end 0.0s',
+    )
+  })
+
+  it('signs an earlier edge negative and a later one positive', () => {
+    expect(inheritedDriftPhrase(10000, 18000, 9500, 18400)).toBe(
+      'judged span start -0.5s · end +0.4s',
+    )
+  })
+
+  it('leaves an unmoved edge unsigned', () => {
+    // A zero offset has no direction, and "+0.0s" would read as a drift too
+    // small to print rather than as no drift at all.
+    expect(inheritedDriftPhrase(10000, 18000, 10000, 17250)).toBe(
+      'judged span start 0.0s · end -0.8s',
+    )
+  })
+})
+
+describe('where an inherited verdict came from', () => {
+  it('reports the labelled span the verdict was resolved from', () => {
+    const seeded = new LabelController(
+      [rally(1)], // 10000 - 18000
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    expect(seeded.currentInheritedFrom).toEqual({ startMs: 10200, endMs: 18000 })
+  })
+
+  it('reports nothing for an exact match or for an unjudged rally', () => {
+    const exact = new LabelController([rally(1), rally(2)], [record({ verdict: 'clean' })])
+    expect(exact.currentInheritedFrom).toBeNull()
+    exact.next()
+    expect(exact.currentInheritedFrom).toBeNull()
+  })
+
+  it('follows the inherited mark through a confirmation and its undo', () => {
+    // Same state, one getter richer: once the reviewer asserts a verdict
+    // against this rally's own span there is no longer a different span to
+    // name, and undoing that keystroke puts the reviewer back in front of
+    // the second-hand judgement it replaced.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    seeded.setVerdict('clean')
+    expect(seeded.currentInheritedFrom).toBeNull()
+    seeded.undo()
+    expect(seeded.currentInheritedFrom).toEqual({ startMs: 10200, endMs: 18000 })
   })
 })

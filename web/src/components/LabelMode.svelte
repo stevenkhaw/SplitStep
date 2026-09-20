@@ -2,7 +2,12 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { isEditableTarget } from '../lib/keyboard'
-  import { FLAG_ORDER, LabelController, LabelWriter } from '../lib/labels'
+  import {
+    FLAG_ORDER,
+    inheritedDriftPhrase,
+    LabelController,
+    LabelWriter,
+  } from '../lib/labels'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
@@ -103,6 +108,15 @@
   const flagsEnabled = $derived.by(() => {
     version
     return controller?.flagsEnabled ?? false
+  })
+  // Null unless the verdict on screen was resolved from a span that moved.
+  // The whole decision lives in the controller (which record won, and
+  // whether the reviewer has since confirmed it) and the whole wording in
+  // lib/labels -- this is the read, so the template carries one `{#if}` and
+  // no judgement of its own.
+  const inheritedFrom = $derived.by(() => {
+    version
+    return controller?.currentInheritedFrom ?? null
   })
   const stats = $derived.by(() => {
     version
@@ -333,6 +347,46 @@
     {formatDuration(current.det_end_ms - current.det_start_ms)} ·
     <span bind:this={elapsedEl}>{formatTs(0)}</span> / {formatTs(current.det_end_ms - current.det_start_ms)}
   </div>
+
+  <!--
+    An inherited verdict is the one thing on this screen the reviewer did not
+    say about the clip in front of them: it was resolved by overlap from a
+    judgement of a span the detector has since re-cut. Rendering it silently
+    alongside the buttons would read as their own past judgement of THIS
+    clip, and the pass would carry a stale verdict forward untouched -- the
+    corpus only ever records spans a human looked at, so an inherited verdict
+    nobody confirms is never written and the work quietly evaporates at the
+    next re-segment.
+
+    Sits above the verdict row, not beside the counter, because it is about
+    the highlighted button directly beneath it. Card, not bare text: `dim`
+    measures 2.09:1 over exposed court and secondary text has to sit on a
+    `surface` ground. No colour -- there is no accent, and nothing here has
+    failed; weight and the border carry it.
+  -->
+  {#if inheritedFrom}
+    <div
+      data-testid="inherited-badge"
+      class="mt-3 rounded border border-line bg-surface px-3 py-2"
+    >
+      <p class="text-body text-fg">
+        <span class="font-semibold">Inherited verdict.</span>
+        This span moved when the source was last re-segmented, so the judgement
+        below was made on a slightly different clip.
+      </p>
+      <p class="mt-1 text-body text-dim">
+        <span class="font-data text-data"
+          >{inheritedDriftPhrase(
+            current.det_start_ms,
+            current.det_end_ms,
+            inheritedFrom.startMs,
+            inheritedFrom.endMs,
+          )}</span
+        >, against the rally playing now. Confirm it with a verdict key, or
+        correct it — nothing is written until you do.
+      </p>
+    </div>
+  {/if}
 
   <div class="mt-3 flex flex-wrap gap-2">
     {#each Object.entries(VERDICT_KEYS) as [key, v] (v)}

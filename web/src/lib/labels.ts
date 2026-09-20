@@ -101,6 +101,58 @@ export function overlapFraction(
 /** Mirrors STAR_OVERLAP_MIN in splitstep/db/rallies.py. */
 const SPAN_OVERLAP_MIN = 0.5
 
+/** The labelled span an inherited verdict was resolved from. */
+export interface InheritedSpan {
+  startMs: number
+  endMs: number
+}
+
+/**
+ * One edge's offset, signed.
+ *
+ * Not `formatDuration` from lib/time: that one clamps at zero
+ * (`Math.max(0, ms)`), so every edge the reviewer's old span sat *before*
+ * would print as `0.0s` -- the drift half of this badge, silently erased in
+ * exactly the direction a re-segment moves a start edge most often.
+ *
+ * Zero prints unsigned. A `+0.0s` reads as a drift too small to render
+ * rather than as an edge that did not move at all, and the difference
+ * between those two is the whole reason the number is here.
+ */
+function signedSeconds(ms: number): string {
+  const s = ms / 1000
+  // Rounded before the sign is chosen, so an offset under half a
+  // millisecond's tenth cannot print as `-0.0s`.
+  const rounded = Number(s.toFixed(1))
+  if (rounded === 0) return '0.0s'
+  return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded).toFixed(1)}s`
+}
+
+/**
+ * How the span a verdict was judged on sits against the span on screen.
+ *
+ * Both edges, always, because a re-segment moves them independently and the
+ * two cases a reviewer has to tell apart -- a boundary nudged by a frame,
+ * and a rally the detector re-cut around a different point -- differ only in
+ * these numbers. "Inherited" alone would state that something moved while
+ * withholding the one fact that decides whether to confirm it or watch the
+ * clip again.
+ *
+ * Signed against the rally on screen: positive is later than what is
+ * playing. The badge names the direction in words beside it, since a bare
+ * sign is ambiguous about which span is the reference.
+ */
+export function inheritedDriftPhrase(
+  rallyStartMs: number,
+  rallyEndMs: number,
+  labelStartMs: number,
+  labelEndMs: number,
+): string {
+  const start = signedSeconds(labelStartMs - rallyStartMs)
+  const end = signedSeconds(labelEndMs - rallyEndMs)
+  return `judged span start ${start} · end ${end}`
+}
+
 /**
  * The labelled span that best represents `startMs`-`endMs`, or undefined.
  *
@@ -186,6 +238,13 @@ export class LabelController {
   // a row written against their own span. Derived state, never persisted --
   // the corpus has no column for it and must not grow one.
   #inherited = new Set<string>()
+  // Where each of those seeds came from. Written once at construction and
+  // never removed -- #inherited alone decides whether a rally counts as
+  // inherited *now*, so a confirmation and its undo flip that set while this
+  // map keeps answering "and it came from here", with no second thing to
+  // keep in step. Derived state like #inherited: the corpus records spans a
+  // human looked at, and this is a note about which one that was.
+  #inheritedFrom = new Map<string, InheritedSpan>()
   #index = 0
   #history = new UndoStack<HistoryEntry>()
 
@@ -267,7 +326,13 @@ export class LabelController {
       if (!rec || rec.verdict === null) continue
       this.#verdicts.set(r.id, rec.verdict)
       this.#flags.set(r.id, [...rec.boundary_flags])
-      if (!exact) this.#inherited.add(r.id)
+      if (!exact) {
+        this.#inherited.add(r.id)
+        this.#inheritedFrom.set(r.id, {
+          startMs: rec.span_start_ms,
+          endMs: rec.span_end_ms,
+        })
+      }
     }
   }
 
@@ -316,6 +381,24 @@ export class LabelController {
   get currentInherited(): boolean {
     const r = this.current
     return r ? this.#inherited.has(r.id) : false
+  }
+
+  /**
+   * The labelled span the verdict on screen was resolved from, or null when
+   * it was not inherited.
+   *
+   * Gated on `#inherited` rather than on `#inheritedFrom` alone, so it goes
+   * quiet the instant a reviewer confirms -- the two can never disagree
+   * about whether there is a different span to name, which a component
+   * reading one getter and rendering the other would otherwise allow.
+   *
+   * Label mode only, for the reason `currentInherited` documents: the audit
+   * pass is blind and must stay that way.
+   */
+  get currentInheritedFrom(): InheritedSpan | null {
+    const r = this.current
+    if (!r || !this.#inherited.has(r.id)) return null
+    return this.#inheritedFrom.get(r.id) ?? null
   }
 
   get flagsEnabled(): boolean {
