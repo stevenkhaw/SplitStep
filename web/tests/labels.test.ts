@@ -291,6 +291,28 @@ describe('LabelController', () => {
     expect(new LabelController([rally1], [far, near]).currentVerdict).toBe('clean')
   })
 
+  it('breaks a start-edge tie on the tighter span, whatever the input order', () => {
+    // The last symmetry the three earlier clauses leave standing. The
+    // corpus is append-only ACROSS re-segments -- rows are never rewritten
+    // and never deleted -- so one source accumulates spans from several
+    // detector runs, and two of those sharing a start edge is ordinary, not
+    // contrived: `segment()` places every edge on a fixed sample grid.
+    //
+    // Both records below score a flat 1.0 (overlapFraction divides by the
+    // shorter span, and the rally IS the shorter span), both have drift 0,
+    // and both start at 12000 -- so score, drift and start edge are all
+    // exhausted and only the end edge is left to decide. `latest_labels`
+    // orders by span_start_ms alone, so without a fourth clause the answer
+    // is whichever row sqlite happened to emit first: two contradictory
+    // verdicts, one of them rendered at random.
+    const rally1 = rally(1, { det_start_ms: 12000, det_end_ms: 18000 })
+    const tighter = record({ span_start_ms: 12000, span_end_ms: 20000, verdict: 'clean' })
+    const looser = record({ span_start_ms: 12000, span_end_ms: 24000, verdict: 'not_play' })
+
+    expect(new LabelController([rally1], [tighter, looser]).currentVerdict).toBe('clean')
+    expect(new LabelController([rally1], [looser, tighter]).currentVerdict).toBe('clean')
+  })
+
   it('does not resurrect a hand-made rally through the overlap fallback', () => {
     // A rally with no detector span is filtered out at construction and the
     // fallback must not be a second door back in: rally_labels anchors on
@@ -428,6 +450,60 @@ describe('LabelController', () => {
     expect(c.index).toBe(1)
     c.back()
     expect(c.currentVerdict).toBeNull()
+  })
+
+  it('brings the inherited badge back when the confirming write fails', () => {
+    // The mirror of 'brings the inherited badge back when the confirming
+    // keystroke is undone', reached by the other door. #confirm drops the
+    // mark optimistically the instant the key is pressed; if the POST then
+    // fails, the corpus holds nothing at all for this rally's own span and
+    // the verdict on screen is once again second-hand. Leaving the badge
+    // off would present an inherited judgement as first-hand -- and it
+    // would then evaporate at the next re-segment, which is precisely the
+    // loss this feature exists to make visible.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    const action = seeded.setVerdict('clean')!
+    expect(seeded.currentInherited).toBe(false)
+
+    seeded.restore(action.rallyId, {
+      verdict: action.previousVerdict,
+      flags: action.previousFlags,
+    })
+
+    expect(seeded.currentVerdict).toBe('not_play')
+    expect(seeded.currentInherited).toBe(true)
+    expect(seeded.currentInheritedFrom).toEqual({ startMs: 10200, endMs: 18000 })
+  })
+
+  it('does not re-badge a verdict the server actually accepted', () => {
+    // restore falls back to the last state the SERVER holds, which after a
+    // landed write is a judgement made against this rally's own span. Only
+    // a restore that lands back on the seeded state is second-hand again;
+    // anything else is first-hand and must not wear the badge.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    seeded.setVerdict('clean')
+    seeded.restore('r1', { verdict: 'clean', flags: [] })
+    expect(seeded.currentInherited).toBe(false)
+  })
+
+  it('does not re-badge when only the flags differ from the seeded state', () => {
+    // A flag toggle is a write of its own and it confirms too, so a
+    // restore to {seeded verdict, different flags} is a state the reviewer
+    // reached by asserting something against this span -- the verdict
+    // matching the seed is a coincidence, not an inheritance.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'clean' })],
+    )
+    seeded.toggleFlag('start_early')
+    seeded.restore('r1', { verdict: 'clean', flags: ['start_early'] })
+    expect(seeded.currentInherited).toBe(false)
   })
 
   it('mutating the array returned by currentFlags does not change controller state', () => {
@@ -867,6 +943,35 @@ describe('LabelWriter', () => {
     await tick()
 
     expect(net.settled).toEqual(['r1:clean:', 'r1:retract'])
+  })
+
+  it('a failed confirmation of an inherited verdict leaves it reading as inherited', async () => {
+    // The two halves of this feature, wired together the way LabelMode
+    // wires them (applyLike IS LabelMode.apply minus the Svelte parts).
+    // Every other case in this block seeds an empty corpus, so nothing
+    // here has ever exercised a failure against a seed that arrived
+    // through the overlap fallback -- the one shape where restore has a
+    // second thing to put back besides the verdict.
+    const net = controllableApi()
+    const c = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    const w = new LabelWriter(net.api)
+
+    const pending = applyLike(c, w, c.setVerdict('clean'))
+    await tick()
+    expect(c.currentInherited).toBe(false)
+
+    net.release(0, 'fail')
+    await pending
+
+    // Nothing reached the corpus, so the span is exactly as unjudged as it
+    // was before the keystroke and the verdict on screen is second-hand
+    // again -- badge and all.
+    expect(c.currentVerdict).toBe('not_play')
+    expect(c.currentInherited).toBe(true)
+    expect(c.currentInheritedFrom).toEqual({ startMs: 10200, endMs: 18000 })
   })
 })
 

@@ -7,16 +7,16 @@
   import { formatTs, frameStep } from '../lib/time'
   import {
     clampMinGap,
-    draftSpanAt,
     msToFraction,
     setDraftIn,
     setDraftOut,
     setInPoint,
     setOutPoint,
+    startAddDraft,
     toSessionMs,
     zoomWindow,
   } from '../lib/timeline'
-  import type { BoundsEdit, DraftSpan } from '../lib/timeline'
+  import type { AddDraft, BoundsEdit } from '../lib/timeline'
   import { applyAdd, applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../lib/split'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
@@ -58,17 +58,18 @@
   let sourceScrub = $state<SourceScrub>()
 
   /**
-   * The span `N` is drawing, or null when no add is open. Null is the
-   * *mode* flag; the span inside it is never null, because draftSpanAt
-   * seeds one at the playhead -- see its comment for why there is no
-   * empty-draft case to model.
-   */
-  let draft = $state<DraftSpan | null>(null)
-
-  /**
-   * Where the playhead stood when `N` was pressed, and the only thing the
-   * deck's in-point becomes for the duration of the add.
+   * The add `N` opened, or null when none is. Null is the *mode* flag; the
+   * span inside it is never null, because startAddDraft seeds one at the
+   * playhead -- see draftSpanAt's comment for why there is no empty-draft
+   * case to model.
    *
+   * It carries its own `sourceId`, and every source-shaped thing the add
+   * touches reads that rather than the derived `source` below: see
+   * AddDraft's comment, and pickRally for the gate that keeps the two from
+   * diverging in the first place.
+   *
+   * `draft.anchorMs` is where the playhead stood when `N` was pressed, and
+   * the only thing the deck's in-point becomes for the duration of the add.
    * The deck has to span the rest of the file while adding -- its out-point
    * is what pauses playback, so with the current rally's end still in place
    * the reviewer could scrub to a gap and then not play it, which is the
@@ -78,7 +79,14 @@
    * land exactly where the playhead already was: no jump, and no `tick()`
    * race to undo one.
    */
-  let addAnchorMs = $state(0)
+  let draft = $state<AddDraft | null>(null)
+
+  /**
+   * One commit at a time. Plain bookkeeping, not $state: nothing renders
+   * from it, so making it reactive would just be a signal with no
+   * subscriber (same reasoning as `scoredSourceId` below).
+   */
+  let addCommitting = false
   let scores = $state<number[]>([])
   let scoreStepMs = $state(200)
   // Null until the first /scores response supplies it. The two camera
@@ -94,6 +102,15 @@
   // and crash on a `.find()!`.
   const rally = $derived(rallies.find((r) => r.id === currentId) ?? rallies[0])
   const source = $derived(detail.sources.find((s) => s.id === rally?.source_id))
+  // The source an open add was measured against, which is the draft's own
+  // and never the focused rally's. Under pickRally's gate these are the
+  // same source; reading it from the draft anyway is what makes the scrub
+  // bar's geometry and the commit's POST key on one id rather than two
+  // that merely happen to agree.
+  const addSource = $derived.by(() => {
+    const d = draft
+    return d ? detail.sources.find((s) => s.id === d.sourceId) : undefined
+  })
   const win = $derived(
     rally && source
       ? zoomWindow((rally.start_ms + rally.end_ms) / 2, ZOOM_SPAN_MS, source.duration_ms)
@@ -224,8 +241,12 @@
     // The scrub bar only exists while an add is open, so this is a no-op
     // the rest of the time. It is written the same imperative way and from
     // the same call, so the two bars cannot disagree about where the
-    // playhead is.
-    if (source) sourceScrub?.setPlayheadFraction(msToFraction(ms, source.duration_ms))
+    // playhead is. Against the ADD's source, matching the duration the bar
+    // itself is drawn at -- a fraction taken over one file and rendered
+    // over another puts the playhead somewhere the reviewer never was.
+    if (addSource) {
+      sourceScrub?.setPlayheadFraction(msToFraction(ms, addSource.duration_ms))
+    }
     if (!rally) return
     zoomBand?.setPlayheadFraction(
       msToFraction(ms - effectiveWin.startMs, Math.max(1, effectiveWin.endMs - effectiveWin.startMs)),
@@ -380,8 +401,7 @@
       return
     }
     const at = deck?.currentMs() ?? rally?.start_ms ?? 0
-    addAnchorMs = Math.round(at)
-    draft = draftSpanAt(at, source.duration_ms)
+    draft = startAddDraft(source.id, at, source.duration_ms)
   }
 
   function cancelAdd(): void {
@@ -397,7 +417,10 @@
       toaster.push(edit.reason)
       return
     }
-    draft = { startMs: edit.startMs, endMs: edit.endMs }
+    // Spread rather than rebuilt, so `sourceId` and `anchorMs` survive
+    // every `[` and `]`. An edit moves the span; it does not re-open the
+    // add somewhere else.
+    if (draft) draft = { ...draft, startMs: edit.startMs, endMs: edit.endMs }
   }
 
   /**
@@ -414,16 +437,31 @@
    * span never starts an encode; cutting stays the explicit button.
    */
   async function commitAdd(): Promise<void> {
-    if (!draft || !source) return
+    if (!draft) return
+    // Key repeat. Holding Enter fires one keydown per repeat interval, and
+    // `draft` is cleared only after the POST returns -- so every repeat
+    // that lands during the round trip still sees an open draft and posts
+    // the same span again. D8 removed the server's collision check on
+    // purpose (two rallies may overlap; `clip_relpath` is span-derived so
+    // even identical spans name one file per rally), which means none of
+    // those duplicates is refused: the source just gains a pile of
+    // identical rows. `startAdd` already refuses a second `N`; this is the
+    // same thought applied to the key that actually writes.
+    //
+    // Cleared in `finally`, not on the success path: the failure path
+    // deliberately keeps the draft open so the reviewer can retry, and a
+    // guard that outlived the failure would leave them unable to.
+    if (addCommitting) return
     const span = draft
+    addCommitting = true
     try {
-      const id = await api.createRally(source.id, span.startMs, span.endMs)
+      const id = await api.createRally(span.sourceId, span.startMs, span.endMs)
       rallies = applyAdd(
         rallies,
         {
           id,
           sessionId: detail.session.id,
-          sourceId: source.id,
+          sourceId: span.sourceId,
           startMs: span.startMs,
           endMs: span.endMs,
         },
@@ -440,7 +478,32 @@
       // the reviewer picked by eye, and clearing it on a failed write would
       // make them find it again.
       toaster.push('Could not add this rally — check that the server is running.')
+    } finally {
+      addCommitting = false
     }
+  }
+
+  /**
+   * OverviewBand's pick, gated the way `C` and `U` are gated.
+   *
+   * The band spans the whole SESSION, so one click can land on a rally
+   * belonging to another source -- and `rally`, `source` and everything
+   * derived from them follow it. Doing that underneath an open draft would
+   * re-point the add at a file its span was never measured against.
+   *
+   * Refusing rather than cancelling, and refusing rather than silently
+   * ignoring: the draft is the only copy of a span the reviewer picked by
+   * eye (the failed-write path above keeps it for exactly that reason), so
+   * discarding it on a stray click is the wrong trade, and a click that
+   * does nothing at all reads as a broken app. Same sentence `C` and `U`
+   * already use, because it is the same refusal.
+   */
+  function pickRally(id: string): void {
+    if (draft) {
+      toaster.push('Finish the add first — Enter to keep it, Esc to discard.')
+      return
+    }
+    currentId = id
   }
 
   function onKey(e: KeyboardEvent) {
@@ -524,7 +587,7 @@
     <VideoDeck
       bind:this={deck}
       src={api.proxyUrl(detail.session.id, source.idx)}
-      startMs={draft ? addAnchorMs : rally.start_ms}
+      startMs={draft ? draft.anchorMs : rally.start_ms}
       endMs={draft ? source.duration_ms : rally.end_ms}
       onended={() => writePlayhead(draft ? source.duration_ms : rally.end_ms)}
       onprogress={() => writePlayhead(deck?.currentMs() ?? 0)}
@@ -535,7 +598,7 @@
     rally {rally.idx} · {formatTs(rally.start_ms)} → {formatTs(rally.end_ms)}
   </p>
 
-  {#if draft}
+  {#if draft && addSource}
     <!-- The one surface in the app that says a rally is being made rather
          than edited. It is an outlined card, not a coloured one: there is
          no accent, and state is carried by fill, outline and weight. -->
@@ -549,9 +612,9 @@
       </div>
       <SourceScrub
         bind:this={sourceScrub}
-        durationMs={source.duration_ms}
+        durationMs={addSource.duration_ms}
         draft={draft}
-        rallies={rallies.filter((r) => r.source_id === source.id)}
+        rallies={rallies.filter((r) => r.source_id === addSource.id)}
         onscrub={(ms) => {
           deck?.seekTo(ms)
           writePlayhead(ms)
@@ -572,7 +635,7 @@
       currentId={rally.id}
       windowStartMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.startMs)}
       windowEndMs={toSessionMs(detail.sources, rally.source_id, effectiveWin.endMs)}
-      onpick={(id) => (currentId = id)}
+      onpick={pickRally}
       rules={detail.session.scoring}
     />
   </section>

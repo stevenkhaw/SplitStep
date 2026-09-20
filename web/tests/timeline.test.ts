@@ -17,6 +17,7 @@ import {
   setDraftOut,
   setInPoint,
   setOutPoint,
+  startAddDraft,
   toSessionMs,
   zoomWindow,
 } from '../src/lib/timeline'
@@ -439,6 +440,36 @@ describe('the add-a-rally draft', () => {
 
   it('hands back the whole file when it is shorter than one rally', () => {
     expect(draftSpanAt(30, 60)).toEqual({ startMs: 0, endMs: 60 })
+  })
+
+  it('binds the draft to the source it was measured against', () => {
+    // The span is milliseconds against one file's timeline, and nothing in
+    // it says which file. TimelineMode's focused rally can move to another
+    // source while the add is open (OverviewBand spans the whole session),
+    // so the commit has to read the source off the draft rather than off
+    // whatever is focused when Enter is pressed -- otherwise it writes a
+    // span with no meaning on a file it was never drawn against, and D8
+    // removed the only server-side check that could have caught it.
+    const d = startAddDraft('src1', 120000, DURATION)
+    expect(d).toEqual({
+      sourceId: 'src1',
+      anchorMs: 120000,
+      startMs: 120000,
+      endMs: 120000 + MIN_RALLY_MS,
+    })
+  })
+
+  it('anchors on the rounded playhead even where the span gets clamped away from it', () => {
+    // anchorMs is the deck's in-point for the duration of the add, and it
+    // is the playhead, not the span's start: those differ at the end of a
+    // file, where the seed is pulled back inside but the reviewer is still
+    // watching from where they were.
+    expect(startAddDraft('src1', DURATION, DURATION)).toEqual({
+      sourceId: 'src1',
+      anchorMs: DURATION,
+      startMs: DURATION - MIN_RALLY_MS,
+      endMs: DURATION,
+    })
   })
 
   it('moves the draft in-point and keeps it inside the source', () => {

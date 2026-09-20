@@ -83,9 +83,15 @@ function spanKey(sourceId: string, startMs: number, endMs: number): string {
  * judgement wholly inside a longer new rally score a flat 1.0.
  *
  * The `Math.max(1, ...)` on the denominator mirrors Python's `max(1, ...)`
- * and matters more here than there: a zero-length span would raise in Python
- * but silently yield Infinity or NaN in JS, and Infinity clears the >= 0.5
- * gate -- a span of no duration at all would inherit a verdict.
+ * and is unreachable in both, which is the reason to keep it rather than a
+ * reason to drop it. A zero-length span cannot get past the `overlap <= 0`
+ * return above -- the intersection of a zero-length interval with anything
+ * has length zero or less -- so the division never sees a zero divisor
+ * here any more than it does in Python. It stays because this function's
+ * whole contract is being the same function as
+ * `splitstep/db/rallies.py::overlap_fraction`; a port that drops a clause
+ * on the grounds that it is currently unreachable is one edit away from
+ * the two disagreeing about a case neither author was thinking about.
  */
 export function overlapFraction(
   aStart: number,
@@ -105,6 +111,34 @@ const SPAN_OVERLAP_MIN = 0.5
 export interface InheritedSpan {
   startMs: number
   endMs: number
+}
+
+/**
+ * The whole seeded state, not just where it came from.
+ *
+ * `restore` has to decide whether the state it is putting back is the
+ * inherited one, and the span alone cannot answer that -- see the comment
+ * there. Kept internal: `currentInheritedFrom` projects the span back out,
+ * because the span is the only part a component has any business
+ * rendering.
+ */
+interface InheritedSeed extends InheritedSpan {
+  verdict: Verdict
+  flags: readonly BoundaryFlag[]
+}
+
+/**
+ * Whether two flag sets are the same set.
+ *
+ * Order-insensitive on purpose. Every writer in this file keeps FLAG_ORDER,
+ * and the server re-orders on write besides, so a positional compare would
+ * work today -- but this is a correctness test standing between an
+ * inherited badge and a first-hand one, and it should not be the thing that
+ * quietly starts lying if some future path builds a flag array in the order
+ * the reviewer pressed the keys.
+ */
+function sameFlags(a: readonly BoundaryFlag[], b: readonly BoundaryFlag[]): boolean {
+  return FLAG_ORDER.every((f) => a.includes(f) === b.includes(f))
 }
 
 /**
@@ -158,12 +192,30 @@ export function inheritedDriftPhrase(
  *
  * Only reached when no row carries this exact span (see the constructor).
  * Ranking must be a total order, not "the first one over the line": the rows
- * arrive in whatever order the API returned them, and an order-dependent
- * answer would render two different verdicts on the same corpus across two
- * reloads. Three stages -- highest overlap, then the nearest start edge, then
- * the earlier span -- and the last one exists only to break the remaining
- * symmetry, since overlapFraction divides by the shorter span and so cannot
- * separate two candidates that both cover the rally equally.
+ * arrive in whatever order the API returned them -- `latest_labels` orders by
+ * `span_start_ms` alone, so beyond that it is sqlite's row order -- and an
+ * order-dependent answer would render two different verdicts on the same
+ * corpus across two reloads.
+ *
+ * Four clauses, expressed as one lexicographic key so the claim is
+ * checkable rather than asserted: highest overlap, then the nearest start
+ * edge, then the earlier start, then the tighter span. The last two exist
+ * only to break symmetry overlapFraction cannot, since it divides by the
+ * shorter span and so scores a flat 1.0 for every candidate that wholly
+ * contains the rally, however much longer one of them is.
+ *
+ * That fourth clause is not hypothetical. `rally_labels` is append-only
+ * ACROSS re-segments -- rows are never rewritten and never deleted, which
+ * is the property that makes the corpus survive a threshold sweep -- so one
+ * source accumulates spans from several detector runs, and `segment()`
+ * places every edge on a fixed sample grid, so two of those runs sharing a
+ * start edge is ordinary. Without it, a corpus holding (12000, 20000,
+ * 'clean') and (12000, 24000, 'not_play') answers a new rally at
+ * (12000, 18000) with whichever row sqlite happened to emit first.
+ *
+ * Total over DISTINCT spans, which is the input: `latest_labels` resolves
+ * one row per (source_id, span_start_ms, span_end_ms), so two candidates
+ * cannot share all four components.
  *
  * Verdict-less rows are not candidates. Such a row is a boundary correction
  * written by a drag, not a judgement, so it has nothing to inherit -- and
@@ -176,26 +228,33 @@ function bestOverlapping(
   endMs: number,
 ): LabelRecord | undefined {
   let best: LabelRecord | undefined
-  let bestScore = 0
-  let bestDrift = 0
+  let bestKey: readonly number[] = []
 
   for (const rec of records) {
     if (rec.verdict === null) continue
     const score = overlapFraction(startMs, endMs, rec.span_start_ms, rec.span_end_ms)
     if (score < SPAN_OVERLAP_MIN) continue
-    const drift = Math.abs(rec.span_start_ms - startMs)
-    const better =
-      best === undefined ||
-      score > bestScore ||
-      (score === bestScore &&
-        (drift < bestDrift || (drift === bestDrift && rec.span_start_ms < best.span_start_ms)))
-    if (better) {
+    // Lowest key wins, so overlap is negated -- more of it sorts first.
+    const key = [
+      -score,
+      Math.abs(rec.span_start_ms - startMs),
+      rec.span_start_ms,
+      rec.span_end_ms,
+    ]
+    if (best === undefined || lexLess(key, bestKey)) {
       best = rec
-      bestScore = score
-      bestDrift = drift
+      bestKey = key
     }
   }
   return best
+}
+
+/** Compares two ranking keys component by component; ties read as false. */
+function lexLess(a: readonly number[], b: readonly number[]): boolean {
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return a[i] < b[i]
+  }
+  return false
 }
 
 /**
@@ -238,13 +297,14 @@ export class LabelController {
   // a row written against their own span. Derived state, never persisted --
   // the corpus has no column for it and must not grow one.
   #inherited = new Set<string>()
-  // Where each of those seeds came from. Written once at construction and
-  // never removed -- #inherited alone decides whether a rally counts as
-  // inherited *now*, so a confirmation and its undo flip that set while this
-  // map keeps answering "and it came from here", with no second thing to
-  // keep in step. Derived state like #inherited: the corpus records spans a
-  // human looked at, and this is a note about which one that was.
-  #inheritedFrom = new Map<string, InheritedSpan>()
+  // What each of those seeds was, and where it came from. Written once at
+  // construction and never removed -- #inherited alone decides whether a
+  // rally counts as inherited *now*, so a confirmation and its undo flip
+  // that set while this map keeps answering "and it was this, from here",
+  // with no second thing to keep in step. Derived state like #inherited:
+  // the corpus records spans a human looked at, and this is a note about
+  // which one that was.
+  #inheritedFrom = new Map<string, InheritedSeed>()
   #index = 0
   #history = new UndoStack<HistoryEntry>()
 
@@ -331,6 +391,8 @@ export class LabelController {
         this.#inheritedFrom.set(r.id, {
           startMs: rec.span_start_ms,
           endMs: rec.span_end_ms,
+          verdict: rec.verdict,
+          flags: [...rec.boundary_flags],
         })
       }
     }
@@ -398,7 +460,12 @@ export class LabelController {
   get currentInheritedFrom(): InheritedSpan | null {
     const r = this.current
     if (!r || !this.#inherited.has(r.id)) return null
-    return this.#inheritedFrom.get(r.id) ?? null
+    const seed = this.#inheritedFrom.get(r.id)
+    // Projected rather than handed out whole: the verdict and flags on the
+    // seed exist for restore's benefit, and a component rendering them
+    // would be rendering a judgement the corpus does not hold for this
+    // rally as though it did.
+    return seed ? { startMs: seed.startMs, endMs: seed.endMs } : null
   }
 
   get flagsEnabled(): boolean {
@@ -563,6 +630,30 @@ export class LabelController {
     if (state.verdict === null) this.#verdicts.delete(rallyId)
     else this.#verdicts.set(rallyId, state.verdict)
     this.#flags.set(rallyId, [...state.flags])
+
+    // The badge follows the state, the same way it does through undo.
+    // #confirm dropped it optimistically the instant the key was pressed;
+    // a restore means that write never landed, so if the state being put
+    // back IS the seeded one then the corpus holds nothing at all for this
+    // rally's own span and the verdict on screen is second-hand again.
+    // Leaving the badge off there presents an inherited judgement as
+    // first-hand -- and it then evaporates at the next re-segment, which
+    // is exactly the loss this feature exists to make visible.
+    //
+    // Compared against the seed rather than tracked as a counter, because
+    // restore falls back to the last state the SERVER accepted and that
+    // may be several writes behind the failed one -- there is no "one
+    // step" to undo. Flags are compared too, not just the verdict: a flag
+    // toggle is its own write and confirms too, so a restore to {seeded
+    // verdict, other flags} is a state the reviewer reached by asserting
+    // something against this very span, and the matching verdict is a
+    // coincidence.
+    const seed = this.#inheritedFrom.get(rallyId)
+    if (seed && state.verdict === seed.verdict && sameFlags(state.flags, seed.flags)) {
+      this.#inherited.add(rallyId)
+    } else {
+      this.#inherited.delete(rallyId)
+    }
   }
 }
 

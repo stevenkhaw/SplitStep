@@ -73,8 +73,15 @@
   let scrubbing = false
 
   // One fetch per source, merged. Labels are per-source and a session can
-  // hold several; the controller matches them to rallies by exact detector
-  // span, so a flat list is all it needs.
+  // hold several, and a flat list is still all the controller needs --
+  // but no longer because matching is exact. It falls back to the best
+  // OVERLAPPING span when a re-segment has moved the anchor, and that scan
+  // would happily reach across sources: two sources are independent clips
+  // whose timelines each start at 0, so their spans routinely coincide.
+  // What makes flattening safe is that LabelController buckets `existing`
+  // by `source_id` before it scans (see the `bySource` map in its
+  // constructor), and keys its exact lookup on the source too. Flatten
+  // freely; do not hand the fallback an unscoped list.
   $effect(() => {
     const sources = untrack(() => detail.sources)
     const rallies = untrack(() => detail.rallies)

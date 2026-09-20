@@ -66,11 +66,16 @@ export function fractionToMs(fraction: number, totalMs: number): number {
  *
  * The zero-width guard is not defensive padding: a bar measured before
  * layout (a `$effect` racing the first paint, a hidden panel) reports
- * `width: 0`, and `fractionToMs` cannot absorb the resulting Infinity/NaN
- * -- `clamp`'s comparisons are both false for NaN, so it passes straight
+ * `width: 0`, and `0/0` is NaN, which `fractionToMs` cannot absorb --
+ * `clamp`'s comparisons are both false for NaN, so it passes straight
  * through to `Math.round` and a NaN reaches the commit as a rally span.
- * Out-of-range x needs no guard here; `fractionToMs` already clamps, which
- * is what makes a click past either end of the bar land on the end.
+ * A nonzero x over a zero width gives Infinity instead, and that one
+ * `clamp` does absorb (to 1, i.e. the end of the bar) -- but it would be
+ * absorbing a measurement taken before the bar existed, so the guard
+ * answers 0 for both rather than letting half the degenerate cases look
+ * like a deliberate click on the last frame. Out-of-range x over a real
+ * width needs no guard; `fractionToMs` already clamps, which is what makes
+ * a click past either end of the bar land on the end.
  */
 export function scrubMsAt(xPx: number, widthPx: number, durationMs: number): number {
   if (widthPx <= 0) return 0
@@ -202,6 +207,51 @@ export function draftSpanAt(
 ): DraftSpan {
   const at = Math.round(playheadMs)
   return clampSpanToSource(at, at + minMs, durationMs, minMs)
+}
+
+/**
+ * An open add: the span, plus the two facts about it that are NOT the span.
+ *
+ * `sourceId` is the load-bearing one. TimelineMode's focused rally can move
+ * while a draft is open -- OverviewBand spans the whole SESSION, so one
+ * click reaches a rally on another source -- and `source` is derived from
+ * that rally. Everything downstream of the derivation then re-points at the
+ * new file: the scrub bar's duration, the deck, and the id the commit POSTs
+ * to. The span itself does not move, because it was measured in
+ * milliseconds against a different timeline, so the commit writes a span
+ * with no meaning on the source it lands on. D8 removed the server's
+ * collision check on purpose, and the length check is the only thing left
+ * -- so a longer target accepts it silently.
+ *
+ * Carrying the id on the draft is what makes that unrepresentable rather
+ * than merely guarded against: the write and the geometry both read the
+ * source out of the draft, so they cannot disagree with each other even
+ * for the one frame between a state change and the effect that would
+ * notice it. Same shape as the route `$effect`s CLAUDE.md pins with
+ * `tests/route-effect-staleness.test.ts` -- capture what the work was
+ * started against, then never re-derive it from live state.
+ *
+ * `anchorMs` is where the playhead stood when `N` was pressed; see
+ * TimelineMode's VideoDeck for why the deck's in-point becomes that rather
+ * than 0.
+ */
+export interface AddDraft extends DraftSpan {
+  sourceId: string
+  anchorMs: number
+}
+
+/** `draftSpanAt`, bound to the source it was measured against. */
+export function startAddDraft(
+  sourceId: string,
+  playheadMs: number,
+  durationMs: number,
+  minMs: number = MIN_RALLY_MS,
+): AddDraft {
+  return {
+    sourceId,
+    anchorMs: Math.round(playheadMs),
+    ...draftSpanAt(playheadMs, durationMs, minMs),
+  }
 }
 
 /**
