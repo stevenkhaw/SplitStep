@@ -5,7 +5,7 @@
   import Mark from '../components/Mark.svelte'
   import QueueMode from '../components/QueueMode.svelte'
   import QuadEditor from '../components/QuadEditor.svelte'
-  import ResegmentPanel from '../components/ResegmentPanel.svelte'
+  import DetectionPanel from '../components/DetectionPanel.svelte'
   import TimelineMode from '../components/TimelineMode.svelte'
   import { api } from '../lib/api'
   import { appmode } from '../lib/appmode.svelte'
@@ -436,25 +436,41 @@
   {/if}
 
   <!--
-    Only render ResegmentPanel for sources that have features cached (ready
-    sources). Passing needs_setup sources would attempt to call api.scores()
-    on a source with no features file, a guaranteed failure.
+    One Detection panel per ready source, and one primary button inside
+    each: the play region and the threshold are two halves of one decision
+    ("every time i run detection, i should be able to select both vals"),
+    and splitting them across a quad editor and a re-segment slider is what
+    let a fifteen-minute detect silently reset a threshold the reviewer had
+    just tuned to 0.15. Per source rather than one panel with a selector,
+    because a selector is what made the stale-region warning speak about
+    only whichever video happened to be picked.
 
-    And only in dev mode: re-segmenting destroys manual edits and hand-made
-    rallies, which makes it a tuning tool, not a review tool -- friend mode
-    keeps it behind the Advanced toggle (spec 2026-08-26, "friend mode hides
-    tuning tools").
+    Ready sources only: a needs_setup source has no proxy and no features,
+    so there is nothing to show a region against and nothing to re-cut.
+
+    Dev mode only, for the reason the re-segment slider always was: both of
+    this panel's actions destroy manual edits and hand-made rallies, which
+    makes it a tuning tool, not a review tool (spec 2026-08-26, "friend mode
+    hides tuning tools").
+
+    Outside `{#key rallyRevision}` like QuadEditor above, and keyed on the
+    source id instead: each panel holds its own slider position and its
+    own last-result line, which the re-segment it just triggered must not
+    reset by remounting it. Props still update reactively when `detail` is
+    replaced, which is how the freshly recorded threshold reaches it.
   -->
-  {#if appmode.current === 'dev' && readySources.length > 0}
-    <ResegmentPanel
-      sources={readySources}
-      rallies={detail.rallies}
-      onresegmented={() =>
-        api.getSession(id).then((d) => {
-          detail = d
-          rallyRevision += 1
-        })}
-    />
+  {#if appmode.current === 'dev'}
+    {#each readySources as s (s.id)}
+      <DetectionPanel
+        source={s}
+        rallies={detail.rallies}
+        onresegmented={() =>
+          api.getSession(id).then((d) => {
+            detail = d
+            rallyRevision += 1
+          })}
+      />
+    {/each}
   {/if}
 
   <!--
@@ -491,7 +507,7 @@
   {/if}
 
   <!--
-    Not gated on readySources/tabs the way QuadEditor/ResegmentPanel are --
+    Not gated on readySources/tabs the way QuadEditor/DetectionPanel are --
     clips already cut are a fact about the session's clips/ folder, not
     about any one source's detection state, so this stays visible even for
     a needs_setup-only session (which can still hold clips from before a

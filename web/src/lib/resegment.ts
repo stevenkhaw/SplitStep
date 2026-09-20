@@ -38,7 +38,7 @@ export function splitCount(rallies: Rally[], sourceId: string): number {
  * counts zero) "nothing hand-edited".
  *
  * Shared by `resegmentConfirmMessage` (the click-time confirm dialog) and
- * `ResegmentPanel`'s persistent warning (the decision-time paragraph the
+ * `DetectionPanel`'s persistent warning (the decision-time paragraph the
  * reviewer reads before clicking at all) so the two cannot say different
  * things about the same cost -- that disagreement would be a worse bug than
  * either one going silent.
@@ -226,37 +226,6 @@ export function cutAtPhrase(source: Source | undefined): string {
 }
 
 /**
- * True when this source's play region was assigned after its cached
- * features were written -- the one state in which the re-segment slider
- * lies.
- *
- * **Superseded by `planDetection`'s `regionChanged`, and kept only until the
- * panel that calls it is replaced.** This asks "was a region assigned since
- * the features were built?", which is not the question: the wizard stamps
- * `preset_assigned_at` on every save, so re-confirming an unchanged region
- * answers yes. Migration 016 records the corners the features were actually
- * built under; compare those (`sameRegion`) and the false alarm cannot
- * happen. `segment()` replays `features.jsonl`, and the quad is applied when
- * those features are BUILT (it filters boxes before near/far are elected,
- * see CLAUDE.md "Play region"), so a region newer than the file is invisible
- * to every threshold in the panel. Only a full re-detect picks it up.
- *
- * Both timestamps are ISO-8601 UTC from the server (`_now()` and
- * features.jsonl's mtime, normalised to the same isoformat), so a plain
- * string comparison orders them.
- *
- * Unknown on either side means no warning. A library predating migration
- * 014 has a null `preset_assigned_at` on every row, including rows whose
- * region really is stale; nagging about all of them would train the
- * reviewer to ignore the one case this exists for.
- */
-export function regionNewerThanFeatures(source: Source): boolean {
-  const { features_at, preset_assigned_at } = source
-  if (!features_at || !preset_assigned_at) return false
-  return preset_assigned_at > features_at
-}
-
-/**
  * The confirmation a re-detect asks for, wherever it is offered -- the quad
  * editor's card after an assignment, and the re-segment panel's stale-region
  * warning. One string, because the two buttons queue the same job and cost
@@ -269,42 +238,6 @@ export function redetectConfirmMessage(): string {
     'carry over; manual boundary edits and split rallies are lost. ' +
     'Detection takes a while — the jobs badge tracks it.'
   )
-}
-
-/**
- * The sentence naming the one state in which the re-segment slider lies.
- *
- * Constant, and here rather than inline in the component, for the reason
- * CLAUDE.md gives it weight at all: this is one of exactly two places the
- * app says that a play-region change needs a full re-detect and not a
- * re-segment (the other is the quad editor's card after an assignment).
- * A string a test can pin is a string that cannot quietly lose the half
- * that carries the instruction.
- */
-export const STALE_REGION_WARNING =
-  'Play region changed after the last detect — re-segment still uses the old one.'
-
-/**
- * Every source in `sources` whose play region is newer than its cached
- * features, in the order given.
- *
- * All of them, deliberately, and not just whichever source the panel has
- * selected. The warning this feeds is rendered OUTSIDE the panel's
- * `<details>`, because inside it -- collapsed by default -- it was invisible
- * to the reviewer it exists for (the reported bug: a region assigned
- * fourteen hours after the features were built, a re-segment that changed
- * nothing, and no explanation anywhere on screen). But the source selector
- * is itself inside that collapse, so scoping this to the selection would
- * restore the same silence for every source nobody has picked yet: a stale
- * source 2 would say nothing until someone opened the tuning panel and
- * chose it, which is exactly the act this warning exists to pre-empt.
- *
- * Cheap on purpose -- it reads two timestamps off the prop and nothing
- * else. Rendering the warning must not cost the /scores fetch the collapse
- * was put there to avoid.
- */
-export function staleRegionSources(sources: Source[]): Source[] {
-  return sources.filter(regionNewerThanFeatures)
 }
 
 /**
@@ -366,3 +299,143 @@ export function recordedThresholdNote(
   }
   return { lead: 'These rallies were cut at', value: threshold.toFixed(2) }
 }
+
+/**
+ * The primary button's label, stating what the click costs.
+ *
+ * The cost belongs *in the label* and not in a caption beside it, because
+ * the reported failure was a click made without knowing: the reviewer
+ * re-segmented to 0.15, pressed a button called "Run detection", and
+ * fifteen minutes later had rallies cut at 0.25. "Run detection" and
+ * "Re-segment" are two words apart and three orders of magnitude apart,
+ * and only one of those facts was on screen.
+ *
+ * `none` gets words too rather than an empty disabled button -- a button
+ * reading "Re-segment" that cannot be pressed looks broken, while one
+ * reading "Nothing to apply" has said why.
+ */
+export function detectionActionLabel(action: DetectionActionKind): string {
+  switch (action) {
+    case 'redetect':
+      return 'Run detection · ~15 min'
+    case 'resegment':
+      return 'Re-segment · instant'
+    case 'none':
+      return 'Nothing to apply'
+  }
+}
+
+/**
+ * One sentence saying why the button does what it does.
+ *
+ * Derived from the same `DetectionPlan` the label is, so the two cannot
+ * disagree -- the panel resolves one plan and renders both from it. The
+ * branches are in `planDetection`'s own precedence order, which is what
+ * keeps the sentence describing the action actually planned: a region
+ * change outranks a threshold change (the detect re-segments at the end
+ * anyway), so when both moved this says "region" and the button says
+ * "detection".
+ */
+export function detectionActionNote(plan: DetectionPlan): string {
+  if (plan.action === 'none') {
+    return 'The play region and the threshold both match what produced the rallies below.'
+  }
+  if (plan.regionChanged) {
+    return (
+      'The play region is applied when features are built, not when they are ' +
+      'scored — only a full detection picks it up.'
+    )
+  }
+  if (!plan.curveAvailable) {
+    return 'This video has no cached features to re-cut, so the full run builds them first.'
+  }
+  return 'Re-cuts the rallies from this video’s cached features — no GPU, no re-encode.'
+}
+
+/**
+ * What a panel can honestly say about one play region.
+ *
+ * Four states and not a nullable quad, because the three non-quad answers
+ * mean genuinely different things to a reviewer deciding whether to spend
+ * fifteen minutes. "Whole frame" is a real configuration detection runs in;
+ * "not recorded" is the app admitting it cannot tell; "nothing detected
+ * yet" is a run that never happened. Collapsing them would put the app
+ * back to making claims it cannot support, which is the class of bug this
+ * whole change is about.
+ */
+export type RegionState =
+  | { kind: 'quad'; points: [number, number][] }
+  | { kind: 'whole-frame' }
+  | { kind: 'unknown' }
+  | { kind: 'unrun' }
+
+/**
+ * The region the cached features were built under -- the one detection is
+ * actually using, which had no answer anywhere in the UI before this.
+ *
+ * `unrun` before any features exist: there is no region "in effect"
+ * because no run is in effect, and saying "whole frame" would describe a
+ * detection that never happened.
+ *
+ * `unknown` and never `whole-frame` when features exist with no recorded
+ * region. Three states produce that (a server predating migration 016, a
+ * detect that genuinely ran with no preset, a preset row since deleted) and
+ * only some of them are the whole frame -- see the `Source` type's comment
+ * on `features_preset_points`.
+ */
+export function regionInEffect(source: Source | undefined): RegionState {
+  if (!source) return { kind: 'unknown' }
+  if (!hasFeatures(source)) return { kind: 'unrun' }
+  const points = source.features_preset_points
+  return points ? { kind: 'quad', points } : { kind: 'unknown' }
+}
+
+/**
+ * The region assigned to the source right now -- what the next detection
+ * would use, rendered beside the one above so the difference is visible
+ * rather than inferred from a timestamp.
+ *
+ * Here `whole-frame` IS assertable, and the asymmetry with `regionInEffect`
+ * is the point: no assigned preset means detection runs whole-frame, which
+ * is a fact about the source row, not a gap in what the server served. The
+ * gap case is separate -- an id with no corners, which a pre-016 server
+ * does serve -- and stays `unknown`.
+ */
+export function regionAssignedNow(source: Source | undefined): RegionState {
+  if (!source) return { kind: 'unknown' }
+  const points = source.court_preset_points
+  if (points) return { kind: 'quad', points }
+  return source.court_preset_id ? { kind: 'unknown' } : { kind: 'whole-frame' }
+}
+
+/** Words for a `RegionState`, so no state renders as an empty cell. */
+export function regionStateLabel(state: RegionState): string {
+  switch (state.kind) {
+    case 'quad':
+      return 'four corners'
+    case 'whole-frame':
+      return 'whole frame'
+    case 'unknown':
+      return 'not recorded'
+    case 'unrun':
+      return 'nothing detected yet'
+  }
+}
+
+/**
+ * What the threshold section says in place of a score curve, before the
+ * first detect.
+ *
+ * Not an empty chart: a flat line at zero reads as "the detector found no
+ * play here", which is a claim, and a false one -- nothing has looked. And
+ * not a slider either, which is the less obvious half. The two camera
+ * profiles put the threshold on different scales (0.45 pair, 0.25 subject)
+ * and `analyze_view` picks between them by measuring the features that do
+ * not exist yet, so there is no position this slider could open at that
+ * would mean anything. Naming a number before the profile is known is the
+ * original bug wearing a different hat.
+ */
+export const NO_CURVE_NOTE =
+  'No score curve yet — this video has not been detected. The threshold scale ' +
+  'depends on the camera profile detection works out from the features, so the ' +
+  'first run picks it.'

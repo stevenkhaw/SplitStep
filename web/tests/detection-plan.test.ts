@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { cutAtPhrase, planDetection, sameRegion } from '../src/lib/resegment'
+import {
+  NO_CURVE_NOTE,
+  cutAtPhrase,
+  detectionActionLabel,
+  detectionActionNote,
+  planDetection,
+  regionAssignedNow,
+  regionInEffect,
+  regionStateLabel,
+  sameRegion,
+} from '../src/lib/resegment'
 import type { Source } from '../src/lib/types'
 
 /**
@@ -248,5 +258,151 @@ describe('float comparison', () => {
     // that round-trip is exact in both languages.
     const round_tripped = JSON.parse(JSON.stringify(CORNERS)) as [number, number][]
     expect(sameRegion(CORNERS, round_tripped)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The copy the one-button panel renders. Pure functions rather than markup
+// for the reason CLAUDE.md gives: a `.svelte` file is unreachable from
+// vitest in any way that proves a sentence, and these sentences are the
+// whole feature -- a button whose label does not state its cost is the bug
+// this change exists to remove.
+// ---------------------------------------------------------------------------
+
+describe('detectionActionLabel', () => {
+  it('states the cost of the expensive run in the label itself', () => {
+    // The reviewer re-segmented to 0.15, then ran a detect, and the
+    // fifteen-minute run reset them to 0.25. A button that does not say
+    // "~15 min" invites that click without warning.
+    const label = detectionActionLabel('redetect')
+    expect(label).toContain('Run detection')
+    expect(label).toContain('15 min')
+  })
+
+  it('states that the cheap one is instant, so the two never read alike', () => {
+    const label = detectionActionLabel('resegment')
+    expect(label).toContain('Re-segment')
+    expect(label).toContain('instant')
+    expect(label).not.toContain('15 min')
+  })
+
+  it('names the disabled state rather than leaving a live-looking button', () => {
+    expect(detectionActionLabel('none')).toBe('Nothing to apply')
+  })
+})
+
+describe('detectionActionNote', () => {
+  it('explains a region change in terms of when the quad is applied', () => {
+    const note = detectionActionNote(planDetection(detected({ court_preset_points: MOVED_CORNERS }), {
+      region: MOVED_CORNERS,
+      threshold: 0.15,
+    }))
+    expect(note).toContain('play region')
+    expect(note).toContain('features are built')
+  })
+
+  it('explains a threshold-only change as a replay of cached features', () => {
+    const note = detectionActionNote(planDetection(detected(), { region: SAME_CORNERS, threshold: 0.3 }))
+    expect(note).toContain('cached features')
+    expect(note).toContain('no GPU')
+  })
+
+  it('says a full run is the only option when there are no features to replay', () => {
+    // An `ingested` source: proxy built, never detected. Session hands this
+    // panel every non-needs_setup source, so this is a real state, not a
+    // hypothetical.
+    const note = detectionActionNote(
+      planDetection(detected({ features_at: null }), { region: SAME_CORNERS, threshold: 0.3 }),
+    )
+    expect(note).toContain('no cached features')
+  })
+
+  it('says plainly that nothing has changed, rather than going silent', () => {
+    const note = detectionActionNote(planDetection(detected(), { region: SAME_CORNERS, threshold: 0.15 }))
+    expect(note).toContain('match')
+  })
+
+  it('leads with the region when both moved, matching which action is planned', () => {
+    // planDetection resolves a region change to `redetect`, which carries
+    // the threshold along with it -- so the sentence has to describe the
+    // region, or the button and its explanation disagree.
+    const note = detectionActionNote(
+      planDetection(detected({ court_preset_points: MOVED_CORNERS }), {
+        region: MOVED_CORNERS,
+        threshold: 0.3,
+      }),
+    )
+    expect(note).toContain('play region')
+  })
+})
+
+describe('regionInEffect', () => {
+  it('is the quad the cached features were actually built under', () => {
+    // The user's literal question -- "how do i know what play region it is
+    // using?" -- and it had no answer anywhere in the app.
+    expect(regionInEffect(detected())).toEqual({ kind: 'quad', points: CORNERS })
+  })
+
+  it('is "nothing detected yet" before the first run, not "whole frame"', () => {
+    // No features means no run happened; claiming the whole frame was used
+    // would describe a detection that never took place.
+    expect(regionInEffect(detected({ features_at: null })).kind).toBe('unrun')
+  })
+
+  it('is unknown, not "whole frame", when features exist but recorded no region', () => {
+    // Three states collapse here and the client must not tell them apart:
+    // a pre-016 server, a detect that ran with no preset, a preset row now
+    // deleted. Two of the three are "whole frame" and one is not, so the
+    // honest answer is that we do not know.
+    expect(regionInEffect(detected({ features_preset_points: null })).kind).toBe('unknown')
+    expect(regionInEffect(detected({ features_preset_points: undefined })).kind).toBe('unknown')
+  })
+
+  it('is unknown with no source at all', () => {
+    expect(regionInEffect(undefined).kind).toBe('unknown')
+  })
+})
+
+describe('regionAssignedNow', () => {
+  it('is the quad currently assigned to the source', () => {
+    expect(regionAssignedNow(detected({ court_preset_points: MOVED_CORNERS })))
+      .toEqual({ kind: 'quad', points: MOVED_CORNERS })
+  })
+
+  it('is "whole frame" when no preset is assigned, which is what detection does', () => {
+    expect(
+      regionAssignedNow(detected({ court_preset_id: null, court_preset_points: null })).kind,
+    ).toBe('whole-frame')
+  })
+
+  it('is unknown when a preset is assigned but the server did not serve its corners', () => {
+    // A server predating migration 016 omits the points key entirely while
+    // still reporting the id. Saying "whole frame" there would be a lie
+    // about a region that is genuinely in force.
+    expect(
+      regionAssignedNow(detected({ court_preset_id: 'p2', court_preset_points: undefined })).kind,
+    ).toBe('unknown')
+  })
+
+  it('is unknown with no source at all', () => {
+    expect(regionAssignedNow(undefined).kind).toBe('unknown')
+  })
+})
+
+describe('regionStateLabel', () => {
+  it('gives every state words, so none of them renders as a blank', () => {
+    expect(regionStateLabel({ kind: 'quad', points: CORNERS })).toBe('four corners')
+    expect(regionStateLabel({ kind: 'whole-frame' })).toBe('whole frame')
+    expect(regionStateLabel({ kind: 'unknown' })).toBe('not recorded')
+    expect(regionStateLabel({ kind: 'unrun' })).toBe('nothing detected yet')
+  })
+})
+
+describe('NO_CURVE_NOTE', () => {
+  it('says why there is no curve instead of drawing an empty one', () => {
+    // A flat line at zero reads as "the detector found no play", which is a
+    // false claim; nothing has looked yet.
+    expect(NO_CURVE_NOTE).toContain('No score curve yet')
+    expect(NO_CURVE_NOTE).toContain('camera profile')
   })
 })

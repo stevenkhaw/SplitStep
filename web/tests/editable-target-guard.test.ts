@@ -79,9 +79,15 @@ function detailWith(rallies: Rally[]): SessionDetail {
         court_preset_id: null,
         status: 'ready',
         rotation_deg: 0,
-        features_at: null,
+        // A `ready` source really does have cached features and a
+        // recorded threshold -- this fixture used to say otherwise, which
+        // stopped mattering only because the old panel rendered its slider
+        // unconditionally. DetectionPanel renders no slider without
+        // features (there is no honest scale for it before the camera
+        // profile is known), so the fixture has to be the state it claims.
+        features_at: '2026-08-19T11:00:00+00:00',
         preset_assigned_at: null,
-        segment_threshold: null,
+        segment_threshold: 0.15,
       },
     ],
     rallies,

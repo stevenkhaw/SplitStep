@@ -17,7 +17,7 @@
   let { sessionId, sources, onassigned }: Props = $props()
 
   // A one-time snapshot, not a reactive read -- same reasoning as
-  // ResegmentPanel's `sourceId`: this panel owns which source it is
+  // DetectionPanel's threshold seed: this panel owns which source it is
   // editing once mounted, and a later `sources` prop update (e.g. after
   // the assignment this panel itself triggers) must not silently swap the
   // selection out from under a mid-drag user. `untrack` tells svelte-check
@@ -60,7 +60,7 @@
   // Guards both `save` and `assignExisting`: without it, a double-click on
   // "Save & assign" fires createPreset twice before the first request's
   // response lands, creating two identically-shaped presets under
-  // (usually) the same name -- same double-submit class ResegmentPanel's
+  // (usually) the same name -- same double-submit class DetectionPanel's
   // `busy` already guards against.
   let busy = $state(false)
   // Collapsed by default. This panel is a once-per-source setup step -- the
@@ -112,8 +112,8 @@
   async function redetect() {
     if (!source || busy) return
     // Same cost warning the re-segment panel gives at click time, and
-    // literally the same sentence -- ResegmentPanel's own stale-region
-    // button shares this copy (see lib/resegment.ts). A re-detect rebuilds
+    // literally the same sentence -- DetectionPanel's primary action
+    // shares this copy when it plans a re-detect (see lib/resegment.ts). A re-detect rebuilds
     // from detector intervals, so starred/rejected carry over by overlap
     // but manual boundary edits and hand-made rallies do not survive it.
     const sure = window.confirm(redetectConfirmMessage())

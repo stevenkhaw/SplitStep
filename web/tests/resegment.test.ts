@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  STALE_REGION_WARNING,
   editedBoundaryCount,
   recordedThresholdNote,
   seedThreshold,
-  regionNewerThanFeatures,
-  staleRegionSources,
   resegmentConfirmMessage,
   resegmentLossPhrase,
   splitCount,
@@ -170,103 +167,6 @@ function src(overrides: Partial<Source> = {}): Source {
     ...overrides,
   }
 }
-
-describe('regionNewerThanFeatures', () => {
-  it('is true when the region was assigned after the features were written', () => {
-    // The case the warning exists for: re-segment replays features built
-    // under the OLD quad, so it cannot see this region at all.
-    expect(
-      regionNewerThanFeatures(
-        src({
-          features_at: '2026-09-01T10:00:00+00:00',
-          preset_assigned_at: '2026-09-02T10:00:00+00:00',
-        }),
-      ),
-    ).toBe(true)
-  })
-
-  it('is false when the features were rebuilt after the region was assigned', () => {
-    expect(
-      regionNewerThanFeatures(
-        src({
-          features_at: '2026-09-02T10:00:00+00:00',
-          preset_assigned_at: '2026-09-01T10:00:00+00:00',
-        }),
-      ),
-    ).toBe(false)
-  })
-
-  it('is false when the two timestamps are equal', () => {
-    // Strictly newer, not "not older": equal means the detect that wrote
-    // these features already had this region.
-    const t = '2026-09-01T10:00:00+00:00'
-    expect(regionNewerThanFeatures(src({ features_at: t, preset_assigned_at: t }))).toBe(false)
-  })
-
-  it('is false when no region has ever been assigned', () => {
-    expect(
-      regionNewerThanFeatures(
-        src({ features_at: '2026-09-01T10:00:00+00:00', preset_assigned_at: null }),
-      ),
-    ).toBe(false)
-  })
-
-  it('is false when the source has never been detected', () => {
-    expect(
-      regionNewerThanFeatures(
-        src({ features_at: null, preset_assigned_at: '2026-09-01T10:00:00+00:00' }),
-      ),
-    ).toBe(false)
-  })
-
-  it('is false when both timestamps are unknown, so an old library never nags', () => {
-    // Every row in a library predating migration 014 has a null
-    // preset_assigned_at, including rows whose region is genuinely older
-    // than their features. Unknown is not a reason to warn.
-    expect(regionNewerThanFeatures(src())).toBe(false)
-  })
-})
-
-describe('staleRegionSources', () => {
-  const STALE = {
-    features_at: '2026-09-16T03:29:00+00:00',
-    preset_assigned_at: '2026-09-16T17:49:00+00:00',
-  }
-  const FRESH = {
-    features_at: '2026-09-16T17:49:00+00:00',
-    preset_assigned_at: '2026-09-16T03:29:00+00:00',
-  }
-
-  it('picks out the sources whose region the cached features predate', () => {
-    const stale = src({ id: 'src2', idx: 2, ...STALE })
-    expect(staleRegionSources([src({ id: 'src1', idx: 1, ...FRESH }), stale])).toEqual([stale])
-  })
-
-  it('is empty when nothing is stale, which is the silent case', () => {
-    expect(staleRegionSources([src({ ...FRESH }), src({ id: 'src2', idx: 2 })])).toEqual([])
-  })
-
-  it('keeps the caller-given order so the banner reads in source order', () => {
-    const a = src({ id: 'a', idx: 1, ...STALE })
-    const b = src({ id: 'b', idx: 2, ...STALE })
-    expect(staleRegionSources([a, b]).map((s) => s.id)).toEqual(['a', 'b'])
-  })
-
-  it('is empty for an empty list', () => {
-    expect(staleRegionSources([])).toEqual([])
-  })
-})
-
-describe('STALE_REGION_WARNING', () => {
-  it('says both halves: the region changed, and re-segment still uses the old one', () => {
-    // Pinned because this sentence is one of exactly two places the app
-    // says a quad change needs a re-detect rather than a re-segment (see
-    // CLAUDE.md, "Play region"). Losing either half makes it a complaint
-    // with no instruction in it.
-    expect(STALE_REGION_WARNING).toContain('Play region changed after the last detect')
-    expect(STALE_REGION_WARNING).toContain('re-segment still uses the old one')
-  })
-})
 
 describe('seedThreshold', () => {
   // The reported bug, reduced to one function. The slider used to start at

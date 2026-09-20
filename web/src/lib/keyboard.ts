@@ -4,7 +4,7 @@
  *
  * QueueMode and TimelineMode both bind their single-letter keybindings on
  * `window` (`<svelte:window onkeydown>`), and Session.svelte deliberately
- * mounts QuadEditor's preset-name input and ResegmentPanel's/TimelineMode's
+ * mounts QuadEditor's preset-name input and DetectionPanel's/TimelineMode's
  * threshold sliders alongside whichever mode is active (outside the mode's
  * own `{#key}` block -- see Session.svelte's comment on why). Without this
  * guard, every keystroke typed into one of those fields also matches

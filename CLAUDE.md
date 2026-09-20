@@ -186,8 +186,17 @@ is applied when features are built, so cached features are already quad-shaped.
 Two places in the UI say that out loud, and they are the only two: the quad
 editor's card after an assignment (a filled **Run detection with this region**
 button, because as a text link it was missed and the reviewer re-segmented
-instead), and the re-segment panel's warning when `preset_assigned_at`
-(migration 014) is newer than `features.jsonl`'s mtime.
+instead), and the Detection panel, which shows the quad the cached features
+were **built under** (`features_preset_points`, migration 016) beside the one
+assigned now and makes its single primary action a priced re-detect when they
+differ. That comparison is **by corner value, never by preset id or
+timestamp**: the wizard writes a fresh `court_presets` row and stamps
+`preset_assigned_at` on every save, so an id or mtime comparison calls
+re-confirming the same four corners a change — which it did, three times on
+one source, offering fifteen minutes of GPU each time. `sameRegion` in
+`web/src/lib/resegment.ts` is the one oracle; unknown on either side is not a
+change, because an unproven claim across a pre-016 library is how a warning
+gets trained away.
 
 ### Jobs
 

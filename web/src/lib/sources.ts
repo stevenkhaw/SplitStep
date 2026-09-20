@@ -56,10 +56,11 @@ export function resolveSelectedTab(tabs: SourceTab[], current: string | null): s
  * TimelineMode's case, build session-wide ms offsets from every source's
  * `idx`/`duration_ms` -- both need the *full* source list even while the
  * rally list is scoped to one of them. Session.svelte hands QuadEditor and
- * ResegmentPanel the unscoped `detail`/`readySources` directly, never
- * through this function, for the same reason at a coarser grain: those
- * panels have their own source pickers and must stay able to reach every
- * video, not just the selected tab.
+ * the per-source DetectionPanels the unscoped `detail`/`readySources`
+ * directly, never through this function, for the same reason at a coarser
+ * grain: those panels act on a video the reviewer names themselves (a
+ * picker in QuadEditor's case, one panel per video in DetectionPanel's) and
+ * must stay able to reach every video, not just the selected tab.
  */
 export function scopeToSource<T extends { rallies: Rally[] }>(detail: T, sourceId: string | null): T {
   if (sourceId === null) return detail

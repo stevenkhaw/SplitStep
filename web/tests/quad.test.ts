@@ -7,6 +7,7 @@ import {
   movePoint,
   pointFromClient,
   polygonClipPath,
+  quadPolygonPoints,
 } from '../src/lib/quad'
 import type { Preset } from '../src/lib/types'
 
@@ -117,5 +118,21 @@ describe('assignedPresetLabel', () => {
 
   it('falls back to the raw id when the preset is not (yet) in the list', () => {
     expect(assignedPresetLabel('unknown-id', presets)).toBe('unknown-id')
+  })
+})
+
+describe('quadPolygonPoints', () => {
+  it('scales normalized corners into an SVG viewBox', () => {
+    expect(quadPolygonPoints([[0, 0], [1, 0], [1, 1], [0, 1]], 40, 24)).toBe('0,0 40,0 40,24 0,24')
+  })
+
+  it('rounds to two decimals, because an SVG points attribute is markup, not maths', () => {
+    // A full double per corner would put ~17 characters of noise in the DOM
+    // for a 40px-wide thumbnail. Two decimals is a hundredth of a pixel.
+    expect(quadPolygonPoints([[1 / 3, 2 / 3]], 40, 24)).toBe('13.33,16')
+  })
+
+  it('is empty for no corners, so the caller renders nothing rather than a broken polygon', () => {
+    expect(quadPolygonPoints([], 40, 24)).toBe('')
   })
 })

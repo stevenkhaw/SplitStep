@@ -63,6 +63,32 @@ export function polygonClipPath(points: [number, number][]): string {
   return `polygon(${points.map(([x, y]) => `${(x * 100).toFixed(4)}% ${(y * 100).toFixed(4)}%`).join(', ')})`
 }
 
+/**
+ * A quad's corners as an SVG `points` attribute, scaled into a `width` x
+ * `height` viewBox.
+ *
+ * For the thumbnail the detection panel shows beside each region -- the
+ * shape itself, at about the size of a word, so "the features were built
+ * under a different quad" is something a reviewer sees rather than infers
+ * from two timestamps. A frame behind it would cost one server-side ffmpeg
+ * extraction per panel (QuadCanvas' cost, and the reason QuadEditor stays
+ * collapsed), and the shape alone answers the question being asked.
+ *
+ * Two decimals: this string is markup, and a full double per corner would
+ * put seventeen characters of noise in the DOM to place a 40px polygon to
+ * within a hundredth of a pixel. `Number()` drops the trailing zeros
+ * `toFixed` adds, so a whole number stays whole.
+ */
+export function quadPolygonPoints(
+  points: [number, number][],
+  width: number,
+  height: number,
+): string {
+  return points
+    .map(([x, y]) => `${Number((x * width).toFixed(2))},${Number((y * height).toFixed(2))}`)
+    .join(' ')
+}
+
 export function defaultPresetName(sessionId: string, sourceIdx: number): string {
   return `${sessionId} source ${sourceIdx}`
 }
