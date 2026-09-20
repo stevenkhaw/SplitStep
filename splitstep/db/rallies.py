@@ -13,6 +13,21 @@ STAR_OVERLAP_MIN = 0.5
 # rendered must never reach the database, whoever is writing it.
 NOTE_MAX_CHARS = 120
 
+# The shortest span a reviewer may hand-draw, mirroring MIN_RALLY_MS in
+# web/src/lib/timeline.ts (100), where the boundary-drag clamp already lives.
+# Duplicated rather than imported for the reason NOTE_MAX_CHARS is: the two
+# languages cannot share a constant, and the server must not trust a client
+# to have applied its own floor.
+#
+# Enforced here and NOT in split_rally, which is not an inconsistency: a
+# split cuts a span the detector already proposed, so both halves describe
+# footage something scored, and the bounds route deliberately validates only
+# end_ms > start_ms (media/concat.py spells out that a hand-trimmed clip well
+# under 1.5s is a real input). A hand-drawn span has no such provenance --
+# nothing but the floor stands between a stray double-tap of `Enter` and a
+# zero-length rally that renders as a clip nobody can play.
+MIN_RALLY_MS = 100
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -291,6 +306,94 @@ def split_rally(conn: sqlite3.Connection, rally_id: str, at_ms: int) -> str:
         )
         _renumber(conn, row["session_id"])
     except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return new_id
+
+
+def create_rally(
+    conn: sqlite3.Connection,
+    source_id: str,
+    start_ms: int,
+    end_ms: int,
+) -> str:
+    """Add one rally at a span the detector never proposed. Returns its id.
+
+    The detector cannot propose what it never scored -- pair mode hard-zeroes
+    any frame missing a player -- so play it missed is otherwise unreachable:
+    split only cuts an existing rally in two, and merge only undoes that.
+
+    det_start_ms/det_end_ms are NULL, and that absence is the entire marker
+    for "made by a human", exactly as it is for split_rally's second half.
+    Both columns together, never one: the CHECK constraint from migration 009
+    enforces it, because a half-present det span is a third state no consumer
+    knows how to read. No boolean beside it, for the reason 009 gives -- a
+    boolean drifts out of agreement with the columns it describes.
+
+    Every documented consequence of that absence is inherited rather than
+    re-decided here: merge_into_previous accepts this row, /label and
+    /label/retract refuse it, LabelController filters it out of index/total,
+    editedBoundaryCount excludes it in favour of splitCount, and a re-segment
+    destroys it like any other manual edit.
+
+    The row starts plain -- not starred, not a point, not rejected, no
+    winner, no note, no clip_path. A default asserting any of those would be
+    a claim nobody made, and flagging it is the same keystrokes as any other
+    rally. `confidence` is 0.0 only because the column is NOT NULL: there was
+    no detector run, so there is no score, and nothing may read it as one.
+    det_* being NULL is what tells a reader that apart.
+
+    Overlap with an existing rally is deliberately allowed and deliberately
+    unchecked. The rally list is not a partition: clip_relpath() is
+    span-derived, so two overlapping rallies name two different files, and
+    score replay orders by idx, which _renumber assigns regardless. Refusing
+    an overlap would also make the obvious correction -- add the span you
+    meant, then reject the detector's -- impossible in that order.
+
+    Raises ValueError on an unknown source or an incoherent span; the API
+    layer turns that into a 400, as api_split already does.
+    """
+    src = conn.execute(
+        "SELECT session_id, duration_ms FROM sources WHERE id = ?", (source_id,)
+    ).fetchone()
+    if src is None:
+        raise ValueError(f"No such source: {source_id}")
+    if end_ms - start_ms < MIN_RALLY_MS:
+        raise ValueError(
+            f"A rally must be at least {MIN_RALLY_MS}ms long; "
+            f"{start_ms}-{end_ms}ms is {end_ms - start_ms}ms"
+        )
+    # end_ms may equal the duration: a span's end is exclusive, so a rally
+    # running to the last frame of the file is ordinary rather than an
+    # overrun. Both bounds are checked, not just the end -- the scrub bar
+    # hands back a fraction of the source and a negative start is what a
+    # rounding slip off the left edge produces.
+    if start_ms < 0 or end_ms > src["duration_ms"]:
+        raise ValueError(
+            f"Span {start_ms}-{end_ms}ms falls outside the source's "
+            f"0-{src['duration_ms']}ms"
+        )
+
+    new_id = uuid.uuid4().hex
+    try:
+        # A negative placeholder idx, the same technique split_rally and
+        # replace_rallies use: the real idx cannot be assigned until
+        # _renumber runs, and any positive value here risks colliding with a
+        # live row under UNIQUE(session_id, idx).
+        conn.execute(
+            "INSERT INTO rallies (id,session_id,source_id,idx,start_ms,end_ms,"
+            "det_start_ms,det_end_ms,confidence,starred,rejected,point,winner,"
+            "reviewed_at,clip_path,note,seen_at)"
+            " VALUES (?,?,?,-1,?,?,NULL,NULL,0.0,0,0,0,'',NULL,NULL,'',NULL)",
+            (new_id, src["session_id"], source_id, start_ms, end_ms),
+        )
+        _renumber(conn, src["session_id"])
+    except Exception:
+        # One transaction, like split_rally: a half-applied create -- row
+        # inserted, renumber never run -- would sit on the shared connection
+        # violating UNIQUE(session_id, idx) until some unrelated later commit
+        # persisted it.
         conn.rollback()
         raise
     conn.commit()
