@@ -520,6 +520,19 @@ four had to be retargeted during the migration and would again.
   no rally backs. `rally_id IS NULL` marks exactly those rows, and that is
   what `sampled_recall` keys on — `record_boundary_correction` requires a
   rally_id, so a drag row can never be mistaken for a sampled one.
+  **The data survived a re-segment; the lookup did not.** Anchoring on the
+  detector's own span means new detector guesses match no old row, so label
+  mode showed nothing for judgements that were still sitting in the table —
+  measured at 38 of 44 on 2026-09-16 source 01, which reads from the
+  reviewer's chair as a finished pass half-undone. `LabelController` now falls
+  back to the best-overlapping labelled span for the source under the same
+  `>= 0.5` rule `replace_rallies` and `labels score` already use, marks what
+  it resolves that way as **inherited**, and writes nothing — confirming with
+  a verdict is an ordinary write against the rally's *current* det span, and
+  an inherited verdict nobody confirms stays unwritten. Label mode only:
+  `Audit.svelte` never constructs the controller, because that pass is blind
+  by design and is the only measurement that can see recall over play the
+  detector never proposed.
 - **A rally with `det_start_ms IS NULL` was made by a human, not proposed by
   the detector.** Timeline mode's `C` cuts one rally in two; the second half
   carries no detector span, because `rally_labels` anchors on
@@ -540,7 +553,10 @@ four had to be retargeted during the migration and would again.
   click-time confirm dialog and the panel's always-visible warning can never
   disagree about what a re-segment costs. A re-segment destroys them, like
   every other manual edit — `replace_rallies` rebuilds from detector
-  intervals and a hand-made rally has none.
+  intervals and a hand-made rally has none. Timeline mode's `N` is the second
+  way to make one: a span drawn against the full-source scrub bar and
+  committed through `POST /api/sources/{id}/rallies`, which inherits every
+  consequence above rather than adding a case to any of them.
 - **The current label for a span is resolved, not just read.** Newest row per
   `(source_id, span_start_ms, span_end_ms)` by `labelled_at DESC, rowid DESC`,
   then dropped if it carries neither a verdict nor a corrected span. Only a

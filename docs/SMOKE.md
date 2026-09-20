@@ -151,6 +151,44 @@ and the writes are real, the pointer was not:
 - [ ] Playback keys (`Space`, `R`) — VideoDeck has no `<video>` under jsdom
       and the pane would not composite, so neither was exercised
 
+## Inherited labels and manual rally add (2026-09-20)
+
+**Nothing here has been exercised in the app.** Every check behind these two
+surfaces was vitest, pytest or `svelte-check`; no human has opened either one
+in a browser, and the external drive was not mounted this session, so nothing
+ran against the live library where the 38-of-44 stranding was measured. The
+list is therefore entirely unticked, which is the point of this file — the
+inherited badge and the add mode both have tests and neither has been seen.
+
+- [ ] The inherited badge on a source that was actually re-segmented after
+      labelling. It has only ever rendered in jsdom, against a controller
+      handed fixture rows — the drift phrase's wording, its signs and whether
+      the badge reads as "confirm this" rather than "something is wrong" are
+      all unobserved
+- [ ] `N` opening an add, and whether playback visibly jumps when it does.
+      The deck is spanned to the end of the source anchored at the playhead
+      `N` was pressed on, so VideoDeck's re-seek on a `startMs` change should
+      land where the playhead already was — that is reasoning about the
+      component, not something anyone watched
+- [ ] Whether the deck actually plays past the current rally's end while an
+      add is open. jsdom has no `<video>`, so no test can see it
+- [ ] The scrub bar's pixel geometry at a real source length, and its 3px
+      minimum-width floor. `scrubMsAt`/`scrubXFor` are unit-tested as
+      arithmetic; nothing has measured a bar in a real layout
+- [ ] Whether the seeded 100 ms draft is findable on the bar. At an hour
+      under ~900px that is well under one pixel and rides entirely on the
+      floor
+- [ ] Whether clicking the bar seeks where it looks like it should
+- [ ] Whether committing with `Enter` lands the reviewer on the new rally
+      with a sane playhead
+- [ ] `POST /api/sources/{id}/rallies` against the live library. The route
+      and `create_rally` have pytest behind them on a temp library only
+
+The one thing that is structurally guaranteed rather than tested by hand:
+`Audit.svelte` does not construct `LabelController`, so an inherited verdict
+cannot reach the blind pass. A file-content guard pins that, the same way
+`tokens.test.ts` pins the token callsites.
+
 ## Still open
 
 ## First run
