@@ -1,6 +1,6 @@
 [project]
 name = "splitstep"
-version = "0.5.0"
+version = "0.6.0"
 requires-python = "==3.12.*"
 # AGPL-3.0 is inherited, not chosen: Ultralytics YOLO11 is AGPL-3.0 and the
 # frozen sidecar links it into the shipped .dmg, so nothing weaker would state
