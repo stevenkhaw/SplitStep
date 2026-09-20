@@ -49,66 +49,106 @@ function record(over: Partial<LabelRecord> = {}): LabelRecord {
 }
 
 describe('the audit route stays blind', () => {
-  it('does not route through LabelController', () => {
-    // The overlap fallback means LabelController can now show a verdict that
-    // was never written against the span on screen. That is right for label
-    // mode and wrong for the audit pass, which is deliberately blind: the
-    // `Window` it walks carries nothing but its span, and the 2026-08-20
-    // pass hand-labelled a clip wrong -- only the blindness exposed it. An
-    // inherited verdict rendered there would bias the one measurement in the
-    // project that can see recall over play the detector never proposed.
-    //
-    // Asserted on the file rather than on behaviour because the separation
-    // IS structural: Audit.svelte fetches labels itself and never builds a
-    // controller, so there is no flag anyone has to remember -- only a route
-    // that must not start using this one. Reading the source is the only way
-    // to pin that, since jsdom has no <video> and the component is verified
-    // by hand.
-    const src = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../src/routes/Audit.svelte'),
-      'utf8',
-    )
-    expect(src).not.toMatch(/\bLabelController\b/)
-  })
+  // The invariant is "no overlap-resolved verdict reaches the blind pass",
+  // and it is worth more than the rest of this file: the blind sample is the
+  // only measurement in the project that can see recall over play the
+  // detector never proposed (`span_recall` is over spans it did propose, so
+  // it is blind to exactly what this pass exists to find). A verdict
+  // inherited from a *neighbouring* span rendered beside a window would tell
+  // the reviewer what someone already concluded about footage next door, and
+  // the number that comes out the far end is then partly a measurement of
+  // the detector's own opinion. The 2026-08-20 pass hand-labelled a clip
+  // wrong and only the blindness exposed it.
+  //
+  // Asserted on the files rather than on behaviour because the separation IS
+  // structural: neither file builds a controller or resolves an overlap, so
+  // there is no flag anyone has to remember -- only two modules that must
+  // not start. Reading the source is the only way to pin that, since jsdom
+  // has no <video> and the route is verified by hand.
+  //
+  // Every name the fallback is reachable through, not just the controller:
+  // `LabelController` resolves inherited verdicts in its constructor, but
+  // `overlapFraction` and `inheritedDriftPhrase` are exported too, and
+  // someone reaching for a helper directly would walk straight through a
+  // guard that only watched the class.
+  const FORBIDDEN = ['LabelController', 'overlapFraction', 'inheritedDriftPhrase']
+
+  /**
+   * Comments stripped first. `audit.ts` says out loud that its restore path
+   * mirrors `LabelController.restore`, and that sentence is the kind of
+   * cross-reference this codebase wants -- a guard that banned naming the
+   * thing would be answered by deleting the explanation, which is the
+   * opposite of the point. What must not appear is a *use*.
+   */
+  function code(file: string): string {
+    return readFileSync(join(dirname(fileURLToPath(import.meta.url)), file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+  }
+
+  for (const file of ['../src/routes/Audit.svelte', '../src/lib/audit.ts']) {
+    it(`${file} resolves no verdict by overlap`, () => {
+      const src = code(file)
+      for (const name of FORBIDDEN) {
+        expect(src).not.toMatch(new RegExp(`\\b${name}\\b`))
+      }
+    })
+  }
 })
 
+// The same file tests/test_overlap.py reads. overlapFraction is a hand-port
+// of splitstep/db/rallies.py::overlap_fraction, and nothing but this file
+// pinned them: the server carries stars across a re-segment with that
+// function and `labels score` matches candidates to labelled spans with it,
+// so a client drawing the line one millisecond elsewhere shows a verdict the
+// scorer does not count, or hides one it does -- with no error anywhere.
+// Read with join(), not `new URL(..., import.meta.url)`; tokens.test.ts
+// explains the vite quirk.
+const OVERLAP_CASES = JSON.parse(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../tests/fixtures/overlap_cases.json'),
+    'utf8',
+  ),
+) as {
+  gate: number
+  cases: { name: string; a: [number, number]; b: [number, number]; fraction: number; atLeastHalf: boolean }[]
+}
+
 describe('overlapFraction', () => {
-  // Mirrors splitstep/db/rallies.py::overlap_fraction. Every expectation here
-  // was read off that function running, not derived by hand, because the two
-  // must agree exactly: the server carries stars across a re-segment with it
-  // and `labels score` matches candidates to labelled spans with it, so a
-  // client that disagreed about what "the same rally" means would show a
-  // verdict the scorer does not count, or hide one it does.
-
-  it('scores a span against itself as 1.0', () => {
-    expect(overlapFraction(1000, 2000, 1000, 2000)).toBe(1.0)
+  it('is gated at the threshold the fixture asserts against', () => {
+    // SPAN_OVERLAP_MIN is not exported, so this reads it the way the guard
+    // below reads the client floor -- and the Python side asserts the same
+    // number against STAR_OVERLAP_MIN, which is what makes the fixture's
+    // `atLeastHalf` column mean anything in either language.
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../src/lib/labels.ts'),
+      'utf8',
+    )
+    expect(src).toContain(`const SPAN_OVERLAP_MIN = ${OVERLAP_CASES.gate}\n`)
   })
 
-  it('divides by the SHORTER span, so a contained span scores 1.0', () => {
-    // Not by the union and not by the first argument: a short old rally
-    // wholly inside a long new one is entirely accounted for by it.
-    expect(overlapFraction(1000, 2000, 1500, 1600)).toBe(1.0)
-  })
-
-  it('scores a partial overlap against the shorter span', () => {
-    expect(overlapFraction(1000, 2000, 1200, 2200)).toBeCloseTo(0.8, 10)
-    expect(overlapFraction(1000, 2000, 1900, 3000)).toBeCloseTo(0.1, 10)
-    expect(overlapFraction(0, 1000, 500, 1500)).toBeCloseTo(0.5, 10)
-  })
-
-  it('scores touching spans as 0.0, not as an overlap', () => {
-    expect(overlapFraction(1000, 2000, 2000, 3000)).toBe(0.0)
-  })
-
-  it('scores disjoint spans as 0.0', () => {
-    expect(overlapFraction(1000, 2000, 5000, 6000)).toBe(0.0)
-  })
+  for (const c of OVERLAP_CASES.cases) {
+    it(c.name, () => {
+      // Exact equality, not toBeCloseTo: every fraction in the file
+      // round-trips through its decimal literal, so both languages parse
+      // the identical double and an honest port produces it bit for bit.
+      // A near-miss here is drift, not float noise.
+      expect(overlapFraction(c.a[0], c.a[1], c.b[0], c.b[1])).toBe(c.fraction)
+      expect(overlapFraction(c.a[0], c.a[1], c.b[0], c.b[1]) >= OVERLAP_CASES.gate).toBe(
+        c.atLeastHalf,
+      )
+      // Both callers pass the pair in whichever order they hold it, so the
+      // symmetry is relied on rather than incidental.
+      expect(overlapFraction(c.b[0], c.b[1], c.a[0], c.a[1])).toBe(c.fraction)
+    })
+  }
 
   it('returns 0.0 for a zero-length span rather than dividing by zero', () => {
-    // The `max(1, ...)` guard on the denominator is what makes this safe in
-    // Python; in JS the same division would yield Infinity or NaN instead of
-    // raising, which is worse -- Infinity clears the >= 0.5 gate and would
-    // attribute a verdict to a span of no duration at all.
+    // Covered by the fixture too, but stated here for the JS-only reason:
+    // the `max(1, ...)` guard on the denominator is what makes this safe in
+    // Python, while in JS the same division would yield Infinity or NaN
+    // instead of raising, which is worse -- Infinity clears the >= 0.5 gate
+    // and would attribute a verdict to a span of no duration at all.
     expect(overlapFraction(1000, 1000, 1000, 1000)).toBe(0.0)
     expect(overlapFraction(1000, 2000, 1500, 1500)).toBe(0.0)
     expect(overlapFraction(1500, 1500, 1000, 2000)).toBe(0.0)

@@ -41,6 +41,10 @@ def overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> floa
     re-segment. One definition, so a rally that would inherit a star and a
     candidate that would count against a label can never disagree about what
     "the same rally" means.
+
+    Hand-ported to `overlapFraction` in web/src/lib/labels.ts, and the two
+    are pinned to `tests/fixtures/overlap_cases.json` by both suites -- a
+    divergence would otherwise be silent in both directions.
     """
     overlap = min(a_end, b_end) - max(a_start, b_start)
     if overlap <= 0:

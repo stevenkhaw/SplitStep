@@ -92,6 +92,9 @@ function spanKey(sourceId: string, startMs: number, endMs: number): string {
  * `splitstep/db/rallies.py::overlap_fraction`; a port that drops a clause
  * on the grounds that it is currently unreachable is one edit away from
  * the two disagreeing about a case neither author was thinking about.
+ *
+ * Both are pinned to `tests/fixtures/overlap_cases.json`, read by
+ * `tests/test_overlap.py` and by this file's suite.
  */
 export function overlapFraction(
   aStart: number,

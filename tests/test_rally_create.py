@@ -12,6 +12,8 @@ accepts it, /label refuses it, LabelController filters it out, a re-segment
 destroys it -- is inherited for free rather than re-decided here. See the
 spec, part 2.
 """
+from pathlib import Path
+
 import pytest
 
 from splitstep.db.rallies import MIN_RALLY_MS, create_rally, list_rallies, replace_rallies
@@ -177,3 +179,20 @@ def test_a_failed_create_leaves_the_set_untouched(conn, monkeypatch):
     rows = list_rallies(conn, session_id)
     assert len(rows) == 1
     assert (rows[0]["start_ms"], rows[0]["end_ms"]) == (1000, 9000)
+
+
+def test_the_client_floor_is_the_same_number_as_this_one():
+    # A file-content guard rather than a shared fixture, unlike
+    # overlap_cases.json next door. That file exists because two hand-ported
+    # *functions* can disagree on a case neither author thought about, and
+    # the disagreement is silent. This is one integer, and a disagreement
+    # shows itself immediately in either direction: a client floor below the
+    # server's turns a hand-drawn span into a 400 toast, and one above it
+    # refuses a span the server would have taken. Nothing is worth a
+    # round-trip through JSON; what is worth pinning is that the two numbers
+    # are still written down as the same number.
+    #
+    # Matched with the trailing newline so a longer constant that merely
+    # starts with these digits (1000) cannot satisfy it.
+    src = (Path(__file__).parents[1] / "web/src/lib/timeline.ts").read_text()
+    assert f"export const MIN_RALLY_MS = {MIN_RALLY_MS}\n" in src

@@ -1,0 +1,50 @@
+{
+  "_comment": "One case file, two implementations: splitstep/db/rallies.py::overlap_fraction and web/src/lib/labels.ts::overlapFraction. Read by tests/test_overlap.py and web/tests/labels.test.ts, the same way score_cases.json is read by both score suites. Every `fraction` was read off the Python function running, not derived by hand. `atLeastHalf` restates the case against the 0.5 gate (STAR_OVERLAP_MIN / SPAN_OVERLAP_MIN) so a drift of a single millisecond at the boundary fails as a boolean, not as a float comparison nobody reads.",
+  "gate": 0.5,
+  "cases": [
+    {"name": "identical spans", "a": [1000, 2000], "b": [1000, 2000],
+     "fraction": 1.0, "atLeastHalf": true},
+
+    {"name": "disjoint spans", "a": [1000, 2000], "b": [5000, 6000],
+     "fraction": 0.0, "atLeastHalf": false},
+
+    {"name": "touching at a's end is not an overlap", "a": [1000, 2000], "b": [2000, 3000],
+     "fraction": 0.0, "atLeastHalf": false},
+
+    {"name": "touching at a's start is not an overlap", "a": [2000, 3000], "b": [1000, 2000],
+     "fraction": 0.0, "atLeastHalf": false},
+
+    {"name": "partial overlap, b starts later", "a": [1000, 2000], "b": [1200, 2200],
+     "fraction": 0.8, "atLeastHalf": true},
+
+    {"name": "partial overlap, b starts earlier", "a": [1000, 2000], "b": [200, 1200],
+     "fraction": 0.2, "atLeastHalf": false},
+
+    {"name": "a contains b, so the denominator is b", "a": [1000, 5000], "b": [2000, 3000],
+     "fraction": 1.0, "atLeastHalf": true},
+
+    {"name": "b contains a, so the denominator is a", "a": [2000, 3000], "b": [1000, 5000],
+     "fraction": 1.0, "atLeastHalf": true},
+
+    {"name": "exactly half clears the gate, which is >=", "a": [0, 1000], "b": [500, 1500],
+     "fraction": 0.5, "atLeastHalf": true},
+
+    {"name": "one ms under half fails the gate", "a": [1000, 2000], "b": [1501, 2501],
+     "fraction": 0.499, "atLeastHalf": false},
+
+    {"name": "one ms over half clears the gate", "a": [1000, 2000], "b": [1499, 2499],
+     "fraction": 0.501, "atLeastHalf": true},
+
+    {"name": "unequal lengths, over the gate on the shorter span", "a": [0, 10000], "b": [7400, 12400],
+     "fraction": 0.52, "atLeastHalf": true},
+
+    {"name": "unequal lengths, under the gate on the shorter span", "a": [0, 10000], "b": [7600, 12600],
+     "fraction": 0.48, "atLeastHalf": false},
+
+    {"name": "a zero-length span inside another scores 0.0", "a": [1000, 2000], "b": [1500, 1500],
+     "fraction": 0.0, "atLeastHalf": false},
+
+    {"name": "two zero-length spans at the same instant score 0.0", "a": [1000, 1000], "b": [1000, 1000],
+     "fraction": 0.0, "atLeastHalf": false}
+  ]
+}
