@@ -4,12 +4,13 @@
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
   import {
+    STALE_REGION_WARNING,
     editedBoundaryCount,
     redetectConfirmMessage,
-    regionNewerThanFeatures,
     resegmentConfirmMessage,
     resegmentLossPhrase,
     splitCount,
+    staleRegionSources,
   } from '../lib/resegment'
   import type { Rally, Source } from '../lib/types'
   import ScoreCurve from './ScoreCurve.svelte'
@@ -37,6 +38,11 @@
   let busy = $state(false)
   let lastCount = $state<number | null>(null)
   let error = $state<unknown>(null)
+  // The stale-region banner renders outside the collapse (see the markup),
+  // so a failed detect queued from it cannot report into `error` above --
+  // that line is inside the <details> and would be swallowed by the very
+  // collapse this banner exists to get out from behind.
+  let detectError = $state<unknown>(null)
   // Collapsed by default: this is the threshold-tuning loop, opened
   // deliberately, not something a review pass touches. It also gates the
   // /scores fetch below -- that call parses the whole of features.jsonl, and
@@ -61,22 +67,27 @@
   // slider is silently a no-op with respect to the change the reviewer just
   // made, which reads as re-segment being broken rather than as the wrong
   // tool (that is exactly how it was reported).
-  const staleRegion = $derived(source ? regionNewerThanFeatures(source) : false)
+  //
+  // Every stale source, not the selected one: the selector sits inside the
+  // collapse and the banner does not, so scoping to it would go quiet again
+  // for any source nobody has picked. `sources` is the only input -- two
+  // timestamps per row, no fetch (see staleRegionSources).
+  const staleSources = $derived(staleRegionSources(sources))
 
-  async function redetect() {
-    if (!source || busy) return
+  async function redetect(target: Source) {
+    if (busy) return
     // The same sentence the quad editor's own re-detect button asks --
     // shared, because the two queue the same job at the same cost.
     if (!confirm(redetectConfirmMessage())) return
     busy = true
-    error = null
+    detectError = null
     try {
-      await api.detectSource(source.id)
+      await api.detectSource(target.id)
       // Not `lastCount`: nothing has been re-segmented. The jobs badge is
       // what tracks a detect, here as everywhere else.
       lastCount = null
     } catch (e) {
-      error = e
+      detectError = e
     } finally {
       busy = false
     }
@@ -200,86 +211,133 @@
   }
 </script>
 
-<details bind:open class="mt-6 rounded-lg border border-line">
-  <summary class="cursor-pointer select-none p-4 text-body font-semibold">Re-segment</summary>
+<div class="mt-6 space-y-3">
+  <!--
+    Outside the <details>, and that placement is the whole fix.
 
-  <div class="px-4 pb-4">
-    <p class="text-caption text-dim">
-      Runs over cached features — no GPU. Stars and rejections carry across by overlap;
-      hand-edited boundaries do not.
-    </p>
+    This warning is one of exactly two places the app says that a changed
+    play region needs a full re-detect rather than a re-segment (CLAUDE.md,
+    "Play region") -- and it used to render inside the panel below, which
+    ships collapsed. So the one sentence explaining why a freshly assigned
+    region is being ignored was visible only to a reviewer who had already
+    opened the threshold-tuning panel, which is to say: only to someone
+    about to make the exact mistake it warns against. Reported on source
+    2026-09-16/01, region assigned 17:49 against features from 03:29 --
+    re-segmented, nothing changed, nothing on screen said why.
 
-    <div class="mt-3 flex items-center gap-3">
-      <select
-        value={sourceId}
-        onchange={(e) => onSourceChange(e.currentTarget.value)}
-        class="rounded border border-line bg-surface px-2 py-1 text-body"
-        aria-label="source to re-segment"
-      >
-        {#each sources as s (s.id)}
-          <option value={s.id}>source {s.idx}</option>
-        {/each}
-      </select>
+    Above the collapse rather than on the <summary>: a summary is a toggle,
+    so a button inside one has to fight its click (every click in a summary
+    toggles the details), and a sentence plus a filled button is more than a
+    one-line disclosure row can carry anyway. CLAUDE.md records that this
+    affordance as a text link was already missed once -- shrinking it to fit
+    a summary would be walking back into that.
 
-      <input
-        type="range"
-        min="0.05"
-        max="0.95"
-        step="0.01"
-        value={threshold ?? 0.05}
-        oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
-        disabled={threshold === null}
-        class="flex-1 disabled:opacity-40"
-        aria-label="detector threshold"
-      />
-      <span class="w-12 font-data text-body">{threshold === null ? '…' : threshold.toFixed(2)}</span>
+    The collapse itself stays closed by default: it gates the /scores fetch,
+    which parses the whole of features.jsonl, and this banner costs two
+    timestamp comparisons off the `sources` prop -- no fetch, no reason to
+    open anything.
+  -->
+  {#if staleSources.length > 0}
+    <!-- Outlined in `fg`, not `danger`: nothing has failed. The region was
+         assigned correctly and the features are honestly out of date, so
+         this is a call to action, and the app's treatment for one of those
+         is outline and weight, never a colour. `bg-surface` because the
+         caption below is `dim`, which may not sit on bare court. -->
+    <section
+      class="space-y-3 rounded-lg border border-fg bg-surface p-4"
+      aria-label="play region changed since the last detect"
+    >
+      {#each staleSources as s (s.id)}
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-body text-fg">
+              <span class="font-data">source {s.idx}</span> — {STALE_REGION_WARNING}
+            </p>
+            <p class="mt-1 text-caption text-dim">
+              The region is applied when features are built, so only a full detection picks it up.
+            </p>
+          </div>
+          <button
+            class="shrink-0 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
+                   hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+            onclick={() => redetect(s)}
+            disabled={busy}
+          >
+            {busy ? 'working…' : 'Run detection'}
+          </button>
+        </div>
+      {/each}
+      {#if detectError}
+        <p class="mt-2 text-caption text-danger">{describeApiError(detectError, 'source').message}</p>
+      {/if}
+    </section>
+  {/if}
 
-      <button
-        class="rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
-        onclick={run}
-        disabled={busy || !source || threshold === null}
-      >
-        {busy ? 'working…' : 'Re-segment'}
-      </button>
-    </div>
+  <details bind:open class="rounded-lg border border-line">
+    <summary class="cursor-pointer select-none p-4 text-body font-semibold">Re-segment</summary>
 
-    {#if source && threshold !== null}
-      <div class="mt-3">
-        <ScoreCurve {scores} {threshold} stepMs={scoreStepMs} windowStartMs={0} windowEndMs={source.duration_ms} />
-        <p class="mt-1 font-data text-caption text-faint">
-          detector score for the whole source — dashed line is the threshold above
-        </p>
-      </div>
-    {/if}
+    <div class="px-4 pb-4">
+      <p class="text-caption text-dim">
+        Runs over cached features — no GPU. Stars and rejections carry across by overlap;
+        hand-edited boundaries do not.
+      </p>
 
-    {#if staleRegion}
-      <div class="mt-3">
-        <p class="text-caption text-dim">
-          Play region changed after the last detect — re-segment still uses the old one.
-        </p>
-        <button
-          class="mt-2 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
-                 hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
-          onclick={redetect}
-          disabled={busy || !source}
+      <div class="mt-3 flex items-center gap-3">
+        <select
+          value={sourceId}
+          onchange={(e) => onSourceChange(e.currentTarget.value)}
+          class="rounded border border-line bg-surface px-2 py-1 text-body"
+          aria-label="source to re-segment"
         >
-          {busy ? 'working…' : 'Run detection'}
+          {#each sources as s (s.id)}
+            <option value={s.id}>source {s.idx}</option>
+          {/each}
+        </select>
+
+        <input
+          type="range"
+          min="0.05"
+          max="0.95"
+          step="0.01"
+          value={threshold ?? 0.05}
+          oninput={(e) => onThresholdInput(Number(e.currentTarget.value))}
+          disabled={threshold === null}
+          class="flex-1 disabled:opacity-40"
+          aria-label="detector threshold"
+        />
+        <span class="w-12 font-data text-body">{threshold === null ? '…' : threshold.toFixed(2)}</span>
+
+        <button
+          class="rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+          onclick={run}
+          disabled={busy || !source || threshold === null}
+        >
+          {busy ? 'working…' : 'Re-segment'}
         </button>
       </div>
-    {/if}
 
-    {#if editedCount > 0 || splits > 0}
-      <p class="mt-2 text-caption text-danger">
-        Re-segmenting will discard {resegmentLossPhrase(editedCount, splits)} on this source.
-      </p>
-    {/if}
-    {#if lastCount !== null && threshold !== null}
-      <p class="mt-2 font-data text-data text-dim">
-        {lastCount} rallies at threshold {threshold.toFixed(2)}
-      </p>
-    {/if}
-    {#if error}
-      <p class="mt-2 text-caption text-danger">{describeApiError(error, 'source').message}</p>
-    {/if}
-  </div>
-</details>
+      {#if source && threshold !== null}
+        <div class="mt-3">
+          <ScoreCurve {scores} {threshold} stepMs={scoreStepMs} windowStartMs={0} windowEndMs={source.duration_ms} />
+          <p class="mt-1 font-data text-caption text-faint">
+            detector score for the whole source — dashed line is the threshold above
+          </p>
+        </div>
+      {/if}
+
+      {#if editedCount > 0 || splits > 0}
+        <p class="mt-2 text-caption text-danger">
+          Re-segmenting will discard {resegmentLossPhrase(editedCount, splits)} on this source.
+        </p>
+      {/if}
+      {#if lastCount !== null && threshold !== null}
+        <p class="mt-2 font-data text-data text-dim">
+          {lastCount} rallies at threshold {threshold.toFixed(2)}
+        </p>
+      {/if}
+      {#if error}
+        <p class="mt-2 text-caption text-danger">{describeApiError(error, 'source').message}</p>
+      {/if}
+    </div>
+  </details>
+</div>

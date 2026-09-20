@@ -425,16 +425,15 @@ describe('ResegmentPanel stale-region warning', () => {
     expect(target.textContent).not.toContain('Play region changed')
   })
 
-  it('follows the selected source rather than the first one', async () => {
+  it('warns about a stale source even while a different one is selected', async () => {
+    // This used to be scoped to the selected source, which was defensible
+    // only while the warning lived beside the selector. It does not any
+    // more: the selector is inside the collapse, so scoping to it would
+    // mean a stale source 2 says nothing at all until someone opens the
+    // panel and picks it -- the same silence this whole fix is about.
     await open([source('src1', 1, FRESH), source('src2', 2, STALE)])
-    expect(target.textContent).not.toContain('Play region changed')
-
-    const select = target.querySelector('select') as HTMLSelectElement
-    select.value = 'src2'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    flushSync()
-
     expect(target.textContent).toContain(WARNING)
+    expect(target.textContent).toContain('source 2')
   })
 
   it('queues detection on the selected source, once confirmed', async () => {
@@ -454,5 +453,186 @@ describe('ResegmentPanel stale-region warning', () => {
     flushSync()
 
     expect(mockApi.detectSource).not.toHaveBeenCalled()
+  })
+})
+
+// The reported bug, and the reason this describe exists separately from the
+// one above: every test up there expands the panel first, so all of them
+// passed while the warning was unreachable in practice. The panel ships
+// collapsed (the /scores fetch is expensive and gated on it), and the stale
+// region warning used to render *inside* it -- so the one sentence telling a
+// reviewer why their freshly assigned play region is being ignored was only
+// visible to someone who deliberately opened the threshold-tuning panel.
+// Source 2026-09-16/01 got a region fourteen hours after its features were
+// built; the reviewer re-segmented, saw nothing change, and was never told.
+//
+// Note what these tests assert on, and why it is not text or visibility:
+// jsdom has no layout and no UA stylesheet for <details>, so a collapsed
+// panel's children are all still in the DOM and still in `textContent`.
+// Nothing about "is it on screen" is observable here. What IS observable is
+// the structural fact that decides it in a real browser -- content inside a
+// closed <details> is hidden unless it is inside the <summary> -- so these
+// assert on containment, which is the same claim without the layout.
+describe('ResegmentPanel stale-region warning, panel collapsed', () => {
+  let target: HTMLDivElement
+  let instance: unknown
+
+  const STALE = {
+    features_at: '2026-09-16T03:29:00+00:00',
+    preset_assigned_at: '2026-09-16T17:49:00+00:00',
+  }
+  const FRESH = {
+    features_at: '2026-09-16T17:49:00+00:00',
+    preset_assigned_at: '2026-09-16T03:29:00+00:00',
+  }
+  const WARNING = 'Play region changed after the last detect — re-segment still uses the old one.'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.45, scores: [0.1, 0.9] })
+    mockApi.detectSource.mockResolvedValue({ job_id: 'j1', already_running: false })
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+    vi.restoreAllMocks()
+  })
+
+  // Deliberately never expands: mount and look, exactly as a reviewer
+  // arriving on the session route does.
+  function mountCollapsed(sources: Source[]) {
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources, rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+  }
+
+  function details(): HTMLDetailsElement {
+    const el = target.querySelector('details')
+    if (!el) throw new Error('panel details not found')
+    return el as HTMLDetailsElement
+  }
+
+  /**
+   * Whether this node is on screen with the panel collapsed. A closed
+   * <details> hides everything it contains except its own <summary>, so
+   * that is the whole rule -- outside the details, or inside the summary.
+   */
+  function shownWhileCollapsed(node: Node | null | undefined): boolean {
+    if (!node) return false
+    const d = details()
+    const summary = d.querySelector('summary')
+    return !d.contains(node) || !!summary?.contains(node)
+  }
+
+  function warningEl(): Element | null {
+    return (
+      [...target.querySelectorAll('p, div, section')].filter((el) =>
+        el.textContent?.includes(WARNING),
+      ).pop() ?? null
+    )
+  }
+
+  function detectButton(): HTMLButtonElement | null {
+    const all = [...target.querySelectorAll('button')] as HTMLButtonElement[]
+    return all.find((b) => b.textContent?.trim() === 'Run detection') ?? null
+  }
+
+  it('shows the warning without the panel being expanded', () => {
+    mountCollapsed([source('src1', 1, STALE)])
+    expect(details().open).toBe(false)
+    expect(warningEl()).not.toBeNull()
+    expect(shownWhileCollapsed(warningEl())).toBe(true)
+  })
+
+  it('shows the detect button too, not just the sentence', () => {
+    // CLAUDE.md records what happens when this affordance is a text link
+    // rather than a button: the reviewer misses it and re-segments instead,
+    // which is the exact failure being fixed here. Hiding the button behind
+    // the collapse is the same failure by a different route.
+    mountCollapsed([source('src1', 1, STALE)])
+    expect(shownWhileCollapsed(detectButton())).toBe(true)
+    expect(detectButton()?.className).toContain('bg-fg')
+    expect(detectButton()?.className).toContain('text-bg')
+  })
+
+  it('costs no /scores fetch to render -- staleness comes from the source prop alone', () => {
+    // The collapse exists to avoid parsing the whole of features.jsonl on
+    // every session load. Surfacing the warning must not hand that cost back.
+    mountCollapsed([source('src1', 1, STALE)])
+    expect(warningEl()).not.toBeNull()
+    expect(mockApi.scores).not.toHaveBeenCalled()
+  })
+
+  it('renders nothing at all when the features are newer than the region', () => {
+    mountCollapsed([source('src1', 1, FRESH)])
+    expect(target.textContent).not.toContain('Play region changed')
+    expect(detectButton()).toBeNull()
+  })
+
+  it('stays quiet on a library with no timestamps, collapsed or not', () => {
+    // Every row predating migration 014 looks like this. Unknown is not a
+    // reason to nag, and moving the warning out of the collapse would make
+    // a false positive permanently visible rather than merely findable.
+    mountCollapsed([source('src1', 1)])
+    expect(target.textContent).not.toContain('Play region changed')
+  })
+
+  it('warns about every stale source, not only the selected one', () => {
+    // The select that picks a source is itself inside the collapse, so a
+    // warning outside it cannot be scoped by that selection without going
+    // silent again on exactly the sources nobody has picked yet.
+    mountCollapsed([source('src1', 1, FRESH), source('src2', 2, STALE)])
+    expect(shownWhileCollapsed(warningEl())).toBe(true)
+    expect(target.textContent).toContain('source 2')
+  })
+
+  it('names each stale source and gives each its own detect', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mountCollapsed([source('src1', 1, STALE), source('src2', 2, STALE)])
+    const buttons = [...target.querySelectorAll('button')].filter(
+      (b) => b.textContent?.trim() === 'Run detection',
+    ) as HTMLButtonElement[]
+    expect(buttons.length).toBe(2)
+    expect(target.textContent).toContain('source 1')
+    expect(target.textContent).toContain('source 2')
+
+    // The second button must queue the second source, not whatever the
+    // (hidden) selector happens to hold.
+    buttons[1].click()
+    flushSync()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(mockApi.detectSource).toHaveBeenCalledWith('src2')
+  })
+
+  it('queues detection from the collapsed panel, once confirmed', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mountCollapsed([source('src1', 1, STALE)])
+    detectButton()?.click()
+    flushSync()
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(mockApi.detectSource).toHaveBeenCalledWith('src1')
+  })
+
+  it('says it once, not once per place it could have gone', () => {
+    // Above the collapse *and* inside it would be the same sentence twice,
+    // and two identical detect buttons, on an expanded panel.
+    mountCollapsed([source('src1', 1, STALE)])
+    const d = details()
+    d.open = true
+    d.dispatchEvent(new Event('toggle'))
+    flushSync()
+
+    expect((target.textContent ?? '').split(WARNING).length - 1).toBe(1)
+    const buttons = [...target.querySelectorAll('button')].filter(
+      (b) => b.textContent?.trim() === 'Run detection',
+    )
+    expect(buttons.length).toBe(1)
   })
 })

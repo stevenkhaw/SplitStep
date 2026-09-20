@@ -98,3 +98,39 @@ export function redetectConfirmMessage(): string {
     'Detection takes a while — the jobs badge tracks it.'
   )
 }
+
+/**
+ * The sentence naming the one state in which the re-segment slider lies.
+ *
+ * Constant, and here rather than inline in the component, for the reason
+ * CLAUDE.md gives it weight at all: this is one of exactly two places the
+ * app says that a play-region change needs a full re-detect and not a
+ * re-segment (the other is the quad editor's card after an assignment).
+ * A string a test can pin is a string that cannot quietly lose the half
+ * that carries the instruction.
+ */
+export const STALE_REGION_WARNING =
+  'Play region changed after the last detect — re-segment still uses the old one.'
+
+/**
+ * Every source in `sources` whose play region is newer than its cached
+ * features, in the order given.
+ *
+ * All of them, deliberately, and not just whichever source the panel has
+ * selected. The warning this feeds is rendered OUTSIDE the panel's
+ * `<details>`, because inside it -- collapsed by default -- it was invisible
+ * to the reviewer it exists for (the reported bug: a region assigned
+ * fourteen hours after the features were built, a re-segment that changed
+ * nothing, and no explanation anywhere on screen). But the source selector
+ * is itself inside that collapse, so scoping this to the selection would
+ * restore the same silence for every source nobody has picked yet: a stale
+ * source 2 would say nothing until someone opened the tuning panel and
+ * chose it, which is exactly the act this warning exists to pre-empt.
+ *
+ * Cheap on purpose -- it reads two timestamps off the prop and nothing
+ * else. Rendering the warning must not cost the /scores fetch the collapse
+ * was put there to avoid.
+ */
+export function staleRegionSources(sources: Source[]): Source[] {
+  return sources.filter(regionNewerThanFeatures)
+}
