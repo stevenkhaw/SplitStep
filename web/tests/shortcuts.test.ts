@@ -158,3 +158,40 @@ describe('timeline split bindings', () => {
     expect(strip.flatMap((s) => s.keys)).toEqual(['[', ']', 'C', 'U', 'Esc', '?'])
   })
 })
+
+describe('timeline add-a-rally bindings', () => {
+  // `N` is "write a note" in QUEUE and "add a rally" here. Not a collision:
+  // the two modes carry separate maps and neither handler can see the
+  // other's keypress, exactly as `U` (undo in queue, merge here) and `C`
+  // already do. The check that matters is per-mode, and it is the
+  // shortcutKeys uniqueness test above.
+  it('binds N, and Enter to commit, in timeline mode', () => {
+    const keys = shortcutKeys('timeline')
+    expect(keys).toContain('N')
+    expect(keys).toContain('Enter')
+  })
+
+  it('still binds each timeline key exactly once', () => {
+    const keys = shortcutKeys('timeline')
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('says what N does', () => {
+    const items = shortcutGroups('timeline', 'dev').flatMap((g) => g.items)
+    expect(items.find((s) => s.keys.includes('N'))?.label).toMatch(/add/i)
+  })
+
+  // Esc keeps one entry rather than gaining a second: a key listed twice in
+  // one mode is what the uniqueness test forbids, so the one label has to
+  // carry both jobs.
+  it('tells Esc it cancels an add as well as leaving', () => {
+    const items = shortcutGroups('timeline', 'dev').flatMap((g) => g.items)
+    expect(items.find((s) => s.keys.includes('Esc'))?.label).toMatch(/cancel/i)
+  })
+
+  it('leaves the strip at six -- N and Enter live in the ? overlay', () => {
+    const strip = primaryShortcuts('timeline', 'dev')
+    expect(strip).toHaveLength(6)
+    expect(strip.flatMap((s) => s.keys)).toEqual(['[', ']', 'C', 'U', 'Esc', '?'])
+  })
+})

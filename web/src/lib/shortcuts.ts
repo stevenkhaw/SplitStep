@@ -94,6 +94,25 @@ const TIMELINE: ShortcutGroup[] = [
     ],
   },
   {
+    // `N` is "write a note" in QUEUE. Not a collision and not a rename:
+    // the two modes carry separate maps, neither handler ever sees the
+    // other's keypress, and `U` (undo in queue, merge here) and `C` already
+    // do exactly this. Parking the add on some third letter to keep the
+    // two alphabets disjoint would cost a mnemonic in both modes to buy
+    // nothing.
+    //
+    // `[` and `]` are deliberately absent from this group: they are the
+    // same two bindings listed under Trim, doing the same thing to the
+    // draft that they do to a rally, and listing them twice would both
+    // trip the once-per-mode check and imply a second in/out vocabulary
+    // that does not exist.
+    title: 'Add',
+    items: [
+      { keys: ['N'], label: 'Add a rally the detector missed — [ and ] then set its ends' },
+      { keys: ['Enter'], label: 'Keep the rally you just marked out' },
+    ],
+  },
+  {
     title: 'Playback',
     items: [
       { keys: ['Space'], label: 'Play or pause' },
@@ -104,7 +123,10 @@ const TIMELINE: ShortcutGroup[] = [
   {
     title: 'Leave',
     items: [
-      { keys: ['Esc'], label: 'Back to the queue' },
+      // One entry, two jobs, because a key listed twice in a mode is what
+      // the duplicate check forbids -- and rightly: Esc really is one
+      // binding whose meaning depends on whether an add is open.
+      { keys: ['Esc'], label: 'Cancel the add, or back to the queue' },
       { keys: ['?'], label: 'This list' },
     ],
   },
@@ -235,7 +257,7 @@ const PRIMARY: Record<ShortcutMode, Shortcut[]> = {
   queue: [QUEUE[0].items[0], QUEUE[0].items[1], QUEUE[0].items[3], QUEUE[0].items[4],
           QUEUE[2].items[1], QUEUE[3].items[3]],
   timeline: [TIMELINE[0].items[0], TIMELINE[0].items[1], TIMELINE[1].items[0],
-             TIMELINE[1].items[1], TIMELINE[3].items[0], TIMELINE[3].items[1]],
+             TIMELINE[1].items[1], TIMELINE[4].items[0], TIMELINE[4].items[1]],
   label: [LABEL[0].items[0], LABEL[0].items[1], LABEL[3].items[1], LABEL[3].items[2],
           LABEL[4].items[0], LABEL[4].items[1]],
   audit: [AUDIT[0].items[0], AUDIT[0].items[1], AUDIT[0].items[2], AUDIT[2].items[2],

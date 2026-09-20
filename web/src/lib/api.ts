@@ -169,6 +169,22 @@ export const api = {
   // `req` rather than `post`: post's return type has no new_rally_id, and
   // widening it would loosen every other rally write's shape for one caller.
   mergeRally: (id: string) => post(`/api/rallies/${id}/merge`),
+  // Adds a rally at a span the detector never proposed. Addressed to the
+  // SOURCE, not to a rally, because there is no rally yet -- the same
+  // reason `spanLabel` below is span-addressed.
+  //
+  // The response key is `rally_id`, not `new_rally_id`: split names the
+  // *other* half it created, while this names the only row there is. The
+  // id is unwrapped here so no caller has to remember which route spells it
+  // which way -- handing applyAdd an undefined id would put a rally in the
+  // list under an id the server does not have, and the next merge would
+  // name a row that is not there. Queues no clip job: adding a span never
+  // starts an encode.
+  createRally: (sourceId: string, startMs: number, endMs: number) =>
+    req<{ ok: boolean; rally_id: string }>(`/api/sources/${sourceId}/rallies`, {
+      method: 'POST',
+      body: JSON.stringify({ start_ms: startMs, end_ms: endMs }),
+    }).then((r) => r.rally_id),
   label: (id: string, verdict: string, boundary_flags: string[]) =>
     post(`/api/rallies/${id}/label`, { verdict, boundary_flags }),
   // Withdraws the current verdict for the rally's detector span, appending a

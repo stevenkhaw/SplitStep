@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../src/lib/split'
+import { applyAdd, applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../src/lib/split'
 import type { Rally } from '../src/lib/types'
 
 function rally(overrides: Partial<Rally> = {}): Rally {
@@ -201,5 +201,86 @@ describe('applyMerge', () => {
     expect(merged && [merged.start_ms, merged.end_ms]).toEqual([3000, 9000])
     const untouched = out.find((r) => r.id === 'early')
     expect(untouched && [untouched.start_ms, untouched.end_ms]).toEqual([1000, 5000])
+  })
+})
+
+describe('applyAdd', () => {
+  const sourceOrder = ['src1', 'src2']
+
+  it('inserts the new rally in start_ms order and renumbers around it', () => {
+    const before = [
+      rally({ id: 'a', idx: 1, start_ms: 1000, end_ms: 5000 }),
+      rally({ id: 'b', idx: 2, start_ms: 20000, end_ms: 26000 }),
+    ]
+    const after = applyAdd(
+      before,
+      { id: 'new', sessionId: 's1', sourceId: 'src1', startMs: 9000, endMs: 12000 },
+      sourceOrder,
+    )
+    expect(after.map((r) => [r.id, r.idx])).toEqual([
+      ['a', 1],
+      ['new', 2],
+      ['b', 3],
+    ])
+  })
+
+  // The absence of a detector span IS the "a human made this" marker (see
+  // the module comment), and every consequence -- merge accepting it,
+  // /label refusing it, LabelController filtering it out -- reads this and
+  // nothing else.
+  it('carries no detector span', () => {
+    const [added] = applyAdd(
+      [],
+      { id: 'new', sessionId: 's1', sourceId: 'src1', startMs: 9000, endMs: 12000 },
+      sourceOrder,
+    )
+    expect(added.det_start_ms).toBeNull()
+    expect(added.det_end_ms).toBeNull()
+  })
+
+  // Nobody said this span is a point, a favourite or a mistake. A default
+  // that claimed any of those would be a judgement the reviewer never made.
+  it('starts plain -- no star, no point, no rejection, no note, no winner', () => {
+    const [added] = applyAdd(
+      [],
+      { id: 'new', sessionId: 's1', sourceId: 'src1', startMs: 9000, endMs: 12000 },
+      sourceOrder,
+    )
+    expect(added.starred).toBe(0)
+    expect(added.point).toBe(0)
+    expect(added.rejected).toBe(0)
+    expect(added.note).toBe('')
+    expect(added.winner).toBe('')
+    expect(added.reviewed_at).toBeNull()
+    expect(added.seen_at).toBeNull()
+    expect(added.confidence).toBe(0)
+  })
+
+  it("takes the server's id, not one invented here", () => {
+    const [added] = applyAdd(
+      [],
+      { id: 'from-server', sessionId: 's1', sourceId: 'src1', startMs: 9000, endMs: 12000 },
+      sourceOrder,
+    )
+    expect(added.id).toBe('from-server')
+  })
+
+  // Same rule _renumber uses: source idx first, then start_ms. A span added
+  // to the first source renumbers the second source's rallies too.
+  it('renumbers across the whole session, not just the source it lands in', () => {
+    const before = [
+      rally({ id: 'a', idx: 1, source_id: 'src1', start_ms: 1000, end_ms: 5000 }),
+      rally({ id: 'b', idx: 2, source_id: 'src2', start_ms: 1000, end_ms: 5000 }),
+    ]
+    const after = applyAdd(
+      before,
+      { id: 'new', sessionId: 's1', sourceId: 'src1', startMs: 9000, endMs: 12000 },
+      sourceOrder,
+    )
+    expect(after.map((r) => [r.id, r.idx])).toEqual([
+      ['a', 1],
+      ['new', 2],
+      ['b', 3],
+    ])
   })
 })

@@ -173,6 +173,37 @@ export function clampSpanToSource(
   return { startMs: Math.round(gapped.startMs), endMs: Math.round(gapped.endMs) }
 }
 
+/** A span being drawn by hand, before any rally exists to hold it. */
+export interface DraftSpan {
+  startMs: number
+  endMs: number
+}
+
+/**
+ * The span `N` starts an add with: the minimum rally, at the playhead.
+ *
+ * Seeding rather than starting empty is what keeps the add mode free of a
+ * second set of rules. `[` and `]` go through `setInPoint`/`setOutPoint`,
+ * and both of those decide by comparing the playhead against the span's
+ * *other* end -- a draft with no far bound has nothing to refuse against,
+ * so a null draft would need its own in/out vocabulary, which is exactly
+ * what the spec rules out ("no new in/out vocabulary"). There is no
+ * null-draft case to model because there is never a null draft.
+ *
+ * The playhead is rounded before it is used as a bound: it arrives from
+ * `HTMLMediaElement.currentTime * 1000` and is a float, while everything
+ * downstream of here -- the server span, `clip_relpath`, the corpus -- is
+ * whole milliseconds.
+ */
+export function draftSpanAt(
+  playheadMs: number,
+  durationMs: number,
+  minMs: number = MIN_RALLY_MS,
+): DraftSpan {
+  const at = Math.round(playheadMs)
+  return clampSpanToSource(at, at + minMs, durationMs, minMs)
+}
+
 /**
  * The result of a keyboard bounds edit: either a new pair of bounds, or a
  * refusal carrying a reason the UI can show the user.
@@ -225,6 +256,46 @@ export function setOutPoint(
     }
   }
   return { ok: true, startMs, endMs: playheadMs }
+}
+
+/**
+ * `[` and `]` for a draft span: the rally rules, then the source's ends.
+ *
+ * Two compositions rather than two new setters. `setInPoint`/`setOutPoint`
+ * already decide the only question a keyboard bounds edit asks -- whether
+ * the two ends would cross -- and answering it a second way here is how the
+ * draft and an existing rally would come to disagree about what `[` means.
+ * `clampSpanToSource` then handles the part that is genuinely new: a rally
+ * was put inside the file by the detector, whereas a draft's ends are
+ * wherever the playhead or the pointer was, which can be past the last
+ * frame.
+ *
+ * Order matters. The crossing check runs against the values the reviewer
+ * actually aimed at, so a refusal says what they did; clamping first would
+ * silently move an out-of-range end and then refuse (or accept) a different
+ * edit than the one they made.
+ */
+export function setDraftIn(
+  draft: DraftSpan,
+  playheadMs: number,
+  durationMs: number,
+  minMs: number = MIN_RALLY_MS,
+): BoundsEdit {
+  const edit = setInPoint(draft.startMs, draft.endMs, playheadMs, minMs)
+  if (!edit.ok) return edit
+  return { ok: true, ...clampSpanToSource(edit.startMs, edit.endMs, durationMs, minMs) }
+}
+
+/** Mirror of `setDraftIn` for the out-point. */
+export function setDraftOut(
+  draft: DraftSpan,
+  playheadMs: number,
+  durationMs: number,
+  minMs: number = MIN_RALLY_MS,
+): BoundsEdit {
+  const edit = setOutPoint(draft.startMs, draft.endMs, playheadMs, minMs)
+  if (!edit.ok) return edit
+  return { ok: true, ...clampSpanToSource(edit.startMs, edit.endMs, durationMs, minMs) }
 }
 
 /** Which drag handle, if any, a pointer at `xFraction` is grabbing. */

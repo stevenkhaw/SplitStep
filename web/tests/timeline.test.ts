@@ -3,6 +3,7 @@ import {
   MIN_RALLY_MS,
   clampMinGap,
   clampSpanToSource,
+  draftSpanAt,
   fractionToMs,
   msToFraction,
   nearestHandle,
@@ -12,6 +13,8 @@ import {
   scrubMsAt,
   scrubXFor,
   sessionTimeline,
+  setDraftIn,
+  setDraftOut,
   setInPoint,
   setOutPoint,
   toSessionMs,
@@ -403,5 +406,63 @@ describe('full-source scrub geometry (adding a rally by hand)', () => {
       startMs: 240000,
       endMs: DURATION,
     })
+  })
+})
+
+describe('the add-a-rally draft', () => {
+  const DURATION = 600000
+
+  // The seed is what removes the null-draft case: `[` and `]` go through
+  // setInPoint/setOutPoint, which both need a far bound to refuse against,
+  // so an add that started with no span at all would need a second pair of
+  // rules nothing else in this file has.
+  it('seeds the minimum span at the playhead', () => {
+    expect(draftSpanAt(120000, DURATION)).toEqual({
+      startMs: 120000,
+      endMs: 120000 + MIN_RALLY_MS,
+    })
+  })
+
+  it('pulls a seed at the very end of the source back inside it', () => {
+    expect(draftSpanAt(DURATION, DURATION)).toEqual({
+      startMs: DURATION - MIN_RALLY_MS,
+      endMs: DURATION,
+    })
+  })
+
+  it('rounds the playhead, which arrives as a float from currentTime', () => {
+    expect(draftSpanAt(1000.6, DURATION)).toEqual({
+      startMs: 1001,
+      endMs: 1001 + MIN_RALLY_MS,
+    })
+  })
+
+  it('hands back the whole file when it is shorter than one rally', () => {
+    expect(draftSpanAt(30, 60)).toEqual({ startMs: 0, endMs: 60 })
+  })
+
+  it('moves the draft in-point and keeps it inside the source', () => {
+    const edit = setDraftIn({ startMs: 100000, endMs: 200000 }, -5000, DURATION)
+    expect(edit).toEqual({ ok: true, startMs: 0, endMs: 200000 })
+  })
+
+  it('moves the draft out-point and keeps it inside the source', () => {
+    const edit = setDraftOut({ startMs: 100000, endMs: 200000 }, DURATION + 9000, DURATION)
+    expect(edit).toEqual({ ok: true, startMs: 100000, endMs: DURATION })
+  })
+
+  // Refusal is setInPoint/setOutPoint's, unchanged: a draft crosses itself
+  // the same way a rally does, and collapsing it silently is the failure
+  // rally 17 already paid for.
+  it('refuses a draft in-point past its own out-point', () => {
+    const edit = setDraftIn({ startMs: 100000, endMs: 200000 }, 250000, DURATION)
+    expect(edit.ok).toBe(false)
+    if (!edit.ok) expect(edit.reason).toMatch(/out-point/i)
+  })
+
+  it('refuses a draft out-point before its own in-point', () => {
+    const edit = setDraftOut({ startMs: 100000, endMs: 200000 }, 50000, DURATION)
+    expect(edit.ok).toBe(false)
+    if (!edit.ok) expect(edit.reason).toMatch(/in-point/i)
   })
 })

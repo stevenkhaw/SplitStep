@@ -15,6 +15,12 @@ import type { Rally } from './types'
  * anchors on the detector's span), and it is what `canMerge` tests so an
  * undo can never destroy detector provenance.
  *
+ * `applyAdd` lives here rather than in a module of its own for that same
+ * marker: a hand-drawn span and a split half are the same kind of row, and
+ * both have to renumber by exactly the rule below. Two copies of
+ * `_renumber` is already one more than anyone wants; a third would be worse
+ * than the coupling.
+ *
  * `applySplit`/`applyMerge` exist so TimelineMode can update in place rather
  * than triggering Session's `rallyRevision` remount. That is a UX
  * requirement, not an optimisation: a remount resets the playhead, so a cut
@@ -111,6 +117,61 @@ export function applySplit(
   }
   const rest = rallies.filter((r) => r.id !== rallyId)
   return renumber([...rest, first, second], sourceOrder)
+}
+
+/** What the server needs no help with, and what it hands back: the span the
+ *  reviewer drew, plus the id the row was actually created under. */
+export interface AddedRally {
+  id: string
+  sessionId: string
+  sourceId: string
+  startMs: number
+  endMs: number
+}
+
+/**
+ * The local counterpart of create_rally -- a span the detector never
+ * proposed, inserted into the list in place.
+ *
+ * Every field but the span is written out here rather than cloned off a
+ * neighbouring rally, because a clone is how a new rally would silently
+ * arrive starred, rejected, or carrying somebody else's note. The reviewer
+ * said only "there is play here"; a default asserting anything more is a
+ * judgement nobody made.
+ *
+ * `det_start_ms`/`det_end_ms` are null for the same reason the second half
+ * of a split is (see the module comment): the absence IS the "a human made
+ * this" marker, and it is what `canMerge`, `/label`'s refusal and
+ * `LabelController`'s filter all read. `confidence` is 0 because a detector
+ * score is the detector's claim about its own proposal, and there was no
+ * proposal.
+ */
+export function applyAdd(
+  rallies: Rally[],
+  added: AddedRally,
+  sourceOrder: string[],
+): Rally[] {
+  const row: Rally = {
+    id: added.id,
+    session_id: added.sessionId,
+    source_id: added.sourceId,
+    // Overwritten by renumber below; a placeholder here rather than a
+    // guess, so nothing can read a stale idx off this object.
+    idx: 0,
+    start_ms: added.startMs,
+    end_ms: added.endMs,
+    det_start_ms: null,
+    det_end_ms: null,
+    confidence: 0,
+    starred: 0,
+    rejected: 0,
+    point: 0,
+    reviewed_at: null,
+    seen_at: null,
+    note: '',
+    winner: '',
+  }
+  return renumber([...rallies, row], sourceOrder)
 }
 
 /**

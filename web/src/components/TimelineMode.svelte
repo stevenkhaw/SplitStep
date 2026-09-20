@@ -7,18 +7,22 @@
   import { formatTs, frameStep } from '../lib/time'
   import {
     clampMinGap,
+    draftSpanAt,
     msToFraction,
+    setDraftIn,
+    setDraftOut,
     setInPoint,
     setOutPoint,
     toSessionMs,
     zoomWindow,
   } from '../lib/timeline'
-  import type { BoundsEdit } from '../lib/timeline'
-  import { applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../lib/split'
+  import type { BoundsEdit, DraftSpan } from '../lib/timeline'
+  import { applyAdd, applyMerge, applySplit, canMerge, canSplit, findMergePrev } from '../lib/split'
   import type { Rally, SessionDetail } from '../lib/types'
   import OverviewBand from './OverviewBand.svelte'
   import ScoreCurve from './ScoreCurve.svelte'
   import KeyHints from './KeyHints.svelte'
+  import SourceScrub from './SourceScrub.svelte'
   import VideoDeck from './VideoDeck.svelte'
   import ZoomBand from './ZoomBand.svelte'
 
@@ -51,6 +55,30 @@
   let rallies = $state<Rally[]>(untrack(() => [...(initialRallies ?? detail.rallies)]))
   let deck = $state<VideoDeck>()
   let zoomBand = $state<ZoomBand>()
+  let sourceScrub = $state<SourceScrub>()
+
+  /**
+   * The span `N` is drawing, or null when no add is open. Null is the
+   * *mode* flag; the span inside it is never null, because draftSpanAt
+   * seeds one at the playhead -- see its comment for why there is no
+   * empty-draft case to model.
+   */
+  let draft = $state<DraftSpan | null>(null)
+
+  /**
+   * Where the playhead stood when `N` was pressed, and the only thing the
+   * deck's in-point becomes for the duration of the add.
+   *
+   * The deck has to span the rest of the file while adding -- its out-point
+   * is what pauses playback, so with the current rally's end still in place
+   * the reviewer could scrub to a gap and then not play it, which is the
+   * one thing this mode exists to do. But VideoDeck re-seeks whenever its
+   * `startMs` changes, so handing it 0 would throw playback to the top of
+   * the file on the keypress. Anchoring on the playhead makes that re-seek
+   * land exactly where the playhead already was: no jump, and no `tick()`
+   * race to undo one.
+   */
+  let addAnchorMs = $state(0)
   let scores = $state<number[]>([])
   let scoreStepMs = $state(200)
   // Null until the first /scores response supplies it. The two camera
@@ -193,10 +221,28 @@
   // up to ~60Hz, and routing that through $state would re-render this whole
   // mode every frame -- the same reasoning as QueueMode's progress bar.
   function writePlayhead(ms: number): void {
+    // The scrub bar only exists while an add is open, so this is a no-op
+    // the rest of the time. It is written the same imperative way and from
+    // the same call, so the two bars cannot disagree about where the
+    // playhead is.
+    if (source) sourceScrub?.setPlayheadFraction(msToFraction(ms, source.duration_ms))
     if (!rally) return
     zoomBand?.setPlayheadFraction(
       msToFraction(ms - effectiveWin.startMs, Math.max(1, effectiveWin.endMs - effectiveWin.startMs)),
     )
+  }
+
+  // The "saved" notice, armed by every path that persists something:
+  // bounds, a split and an add all have no save button, so this line is the
+  // only thing telling the reviewer the write landed. One function rather
+  // than a third copy of the same four lines.
+  function markSaved(): void {
+    saveState = 'saved'
+    if (saveTimer !== undefined) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveState = 'idle'
+      saveTimer = undefined
+    }, SAVED_NOTICE_MS)
   }
 
   $effect(() => {
@@ -244,12 +290,7 @@
       // this the user has no way to tell an edit landed. Worse, the catch
       // below used to log to the console only, which made a FAILED save look
       // exactly like a successful one.
-      saveState = 'saved'
-      if (saveTimer !== undefined) clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        saveState = 'idle'
-        saveTimer = undefined
-      }, SAVED_NOTICE_MS)
+      markSaved()
     } catch (e) {
       console.error('failed to save bounds', e)
       saveState = 'error'
@@ -285,12 +326,7 @@
     try {
       const { new_rally_id } = await api.splitRally(rally.id, atMs)
       rallies = applySplit(rallies, rally.id, atMs, new_rally_id, sourceOrder)
-      saveState = 'saved'
-      if (saveTimer !== undefined) clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        saveState = 'idle'
-        saveTimer = undefined
-      }, SAVED_NOTICE_MS)
+      markSaved()
       toaster.push(`Split at ${formatTs(atMs)} — U to merge back`)
     } catch (e) {
       console.error('failed to split rally', e)
@@ -327,27 +363,127 @@
     }
   }
 
+  /**
+   * `N`: start drawing a span the detector never proposed.
+   *
+   * The draft is seeded rather than left empty (draftSpanAt), so `[` and
+   * `]` below are the same two functions an existing rally's bounds go
+   * through -- no second in/out vocabulary, which is the whole reason this
+   * mode lives in TimelineMode rather than somewhere of its own.
+   */
+  function startAdd(): void {
+    if (!source) return
+    // A second `N` cannot re-seed: the open draft is the only copy of a
+    // span the reviewer picked by eye. It says so rather than going dead.
+    if (draft) {
+      toaster.push('Already adding — Enter to keep it, Esc to discard.')
+      return
+    }
+    const at = deck?.currentMs() ?? rally?.start_ms ?? 0
+    addAnchorMs = Math.round(at)
+    draft = draftSpanAt(at, source.duration_ms)
+  }
+
+  function cancelAdd(): void {
+    draft = null
+    toaster.push('Discarded — nothing was added.')
+  }
+
+  /** `[` and `]`, while an add is open. Refusals are surfaced for the same
+   *  reason applyEdit surfaces them: a key that silently does nothing is
+   *  indistinguishable from one that is broken. */
+  function applyDraftEdit(edit: BoundsEdit): void {
+    if (!edit.ok) {
+      toaster.push(edit.reason)
+      return
+    }
+    draft = { startMs: edit.startMs, endMs: edit.endMs }
+  }
+
+  /**
+   * `Enter`: persist the draft as a rally.
+   *
+   * The list is updated in place (applyAdd) rather than by asking Session
+   * to remount, for the reason splitHere gives: a remount resets the
+   * playhead, and the reviewer's next move after adding a span is almost
+   * always to trim it. `currentId` lands on the new rally so that trim is
+   * one keypress away -- the same courtesy mergeBack pays by landing on
+   * the survivor.
+   *
+   * No clip job is queued here and none is queued on the server. Adding a
+   * span never starts an encode; cutting stays the explicit button.
+   */
+  async function commitAdd(): Promise<void> {
+    if (!draft || !source) return
+    const span = draft
+    try {
+      const id = await api.createRally(source.id, span.startMs, span.endMs)
+      rallies = applyAdd(
+        rallies,
+        {
+          id,
+          sessionId: detail.session.id,
+          sourceId: source.id,
+          startMs: span.startMs,
+          endMs: span.endMs,
+        },
+        sourceOrder,
+      )
+      draft = null
+      currentId = id
+      markSaved()
+      toaster.push(`Added a rally — ${formatTs(span.startMs)} to ${formatTs(span.endMs)}`)
+    } catch (e) {
+      console.error('failed to add rally', e)
+      saveState = 'error'
+      // The draft is deliberately left open: it is the only copy of a span
+      // the reviewer picked by eye, and clearing it on a failed write would
+      // make them find it again.
+      toaster.push('Could not add this rally — check that the server is running.')
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (isEditableTarget(e.target)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
     if (!rally || !source) return
+    // An open add owns the keyboard. `[`, `]`, Esc and the playback keys
+    // all mean something here, but they mean it about the DRAFT -- so they
+    // are dispatched from one place that knows which of the two is being
+    // edited, rather than from handlers each re-deriving it. The keys that
+    // have no draft reading (`C`, `U`) refuse out loud instead of going
+    // dead: a key that silently does nothing reads as a broken app, which
+    // is the same argument applyEdit's refusals are built on.
+    const d = draft
     switch (e.key) {
       case 'Escape':
-        onclose()
+        if (d) cancelAdd()
+        else onclose()
+        break
+      case 'Enter':
+        if (d) commitAdd()
+        break
+      case 'n':
+      case 'N':
+        startAdd()
         break
       case '[':
-        applyEdit(setInPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.start_ms))
+        if (d) applyDraftEdit(setDraftIn(d, deck?.currentMs() ?? d.startMs, source.duration_ms))
+        else applyEdit(setInPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.start_ms))
         break
       case ']':
-        applyEdit(setOutPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.end_ms))
+        if (d) applyDraftEdit(setDraftOut(d, deck?.currentMs() ?? d.endMs, source.duration_ms))
+        else applyEdit(setOutPoint(rally.start_ms, rally.end_ms, deck?.currentMs() ?? rally.end_ms))
         break
       case 'c':
       case 'C':
-        splitHere()
+        if (d) toaster.push('Finish the add first — Enter to keep it, Esc to discard.')
+        else splitHere()
         break
       case 'u':
       case 'U':
-        mergeBack()
+        if (d) toaster.push('Finish the add first — Enter to keep it, Esc to discard.')
+        else mergeBack()
         break
       case ',': {
         const ms = frameStep(deck?.currentMs() ?? 0, source.fps, -1)
@@ -379,12 +515,18 @@
        the deck plus the page header; a 16:9 frame at (100vh - 28rem) tall
        is this wide. On a tall display the cap is never reached. -->
   <div class="mx-auto w-full max-w-[calc((100vh-28rem)*16/9)]">
+    <!-- While an add is open the deck spans the rest of the FILE, not the
+         rally: its out-point is what pauses playback, and watching footage
+         the detector proposed nothing for is the entire point of the mode.
+         The in-point is the playhead at the moment `N` was pressed (see
+         addAnchorMs) rather than 0, so the re-seek VideoDeck performs on a
+         startMs change lands where the playhead already was. -->
     <VideoDeck
       bind:this={deck}
       src={api.proxyUrl(detail.session.id, source.idx)}
-      startMs={rally.start_ms}
-      endMs={rally.end_ms}
-      onended={() => writePlayhead(rally.end_ms)}
+      startMs={draft ? addAnchorMs : rally.start_ms}
+      endMs={draft ? source.duration_ms : rally.end_ms}
+      onended={() => writePlayhead(draft ? source.duration_ms : rally.end_ms)}
       onprogress={() => writePlayhead(deck?.currentMs() ?? 0)}
     />
   </div>
@@ -392,6 +534,35 @@
   <p class="mt-2 font-data text-data text-dim">
     rally {rally.idx} · {formatTs(rally.start_ms)} → {formatTs(rally.end_ms)}
   </p>
+
+  {#if draft}
+    <!-- The one surface in the app that says a rally is being made rather
+         than edited. It is an outlined card, not a coloured one: there is
+         no accent, and state is carried by fill, outline and weight. -->
+    <section class="mt-4 space-y-2 rounded border border-fg bg-surface p-3">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <p class="text-body text-fg">Adding a rally the detector missed</p>
+        <p class="font-data text-data text-fg">
+          {formatTs(draft.startMs)} → {formatTs(draft.endMs)} ·
+          {((draft.endMs - draft.startMs) / 1000).toFixed(1)}s
+        </p>
+      </div>
+      <SourceScrub
+        bind:this={sourceScrub}
+        durationMs={source.duration_ms}
+        draft={draft}
+        rallies={rallies.filter((r) => r.source_id === source.id)}
+        onscrub={(ms) => {
+          deck?.seekTo(ms)
+          writePlayhead(ms)
+        }}
+      />
+      <p class="text-caption text-dim">
+        Click the bar to move the playhead, then [ and ] to set the ends —
+        Enter keeps it, Esc discards it. Nothing is cut until you ask for it.
+      </p>
+    </section>
+  {/if}
 
   <section class="mt-4 space-y-1">
     <p class="text-caption tracking-wide text-faint uppercase">whole session</p>
