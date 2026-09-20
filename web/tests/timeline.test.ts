@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   MIN_RALLY_MS,
   clampMinGap,
+  clampSpanToSource,
   fractionToMs,
   msToFraction,
   nearestHandle,
   rallyBandLabel,
   scoreCurvePoints,
   scoreToY,
+  scrubMsAt,
+  scrubXFor,
   sessionTimeline,
   setInPoint,
   setOutPoint,
@@ -317,5 +320,88 @@ describe('rallyBandLabel', () => {
     expect(rallyBandLabel(r({ winner: 'b', rejected: 1 }), DEFAULT_RULES)).toBe(
       'rally 7 (rejected) · won by Opp',
     )
+  })
+})
+
+describe('full-source scrub geometry (adding a rally by hand)', () => {
+  // A ten-minute source under a 1000px bar: 600ms per pixel.
+  const DURATION = 600000
+  const WIDTH = 1000
+
+  it('round-trips a position through both directions', () => {
+    expect(scrubMsAt(250, WIDTH, DURATION)).toBe(150000)
+    expect(scrubXFor(150000, WIDTH, DURATION)).toBe(250)
+  })
+
+  it('clamps a click past either end of the bar', () => {
+    expect(scrubMsAt(-40, WIDTH, DURATION)).toBe(0)
+    expect(scrubMsAt(WIDTH + 400, WIDTH, DURATION)).toBe(DURATION)
+  })
+
+  it('does not divide by a zero-width bar', () => {
+    expect(scrubMsAt(120, 0, DURATION)).toBe(0)
+    expect(scrubXFor(150000, 0, DURATION)).toBe(0)
+  })
+
+  it('does not divide by a zero-length source', () => {
+    expect(scrubMsAt(250, WIDTH, 0)).toBe(0)
+    expect(scrubXFor(150000, WIDTH, 0)).toBe(0)
+  })
+
+  it('leaves a span already inside the source untouched', () => {
+    expect(clampSpanToSource(1000, 5000, DURATION)).toEqual({ startMs: 1000, endMs: 5000 })
+  })
+
+  it('pulls a span reaching past the end back inside, keeping the minimum', () => {
+    expect(clampSpanToSource(DURATION - 50, DURATION + 9000, DURATION)).toEqual({
+      startMs: DURATION - MIN_RALLY_MS,
+      endMs: DURATION,
+    })
+  })
+
+  it('pushes a span starting before zero back inside', () => {
+    expect(clampSpanToSource(-4000, 5000, DURATION)).toEqual({ startMs: 0, endMs: 5000 })
+  })
+
+  it('never returns an inverted span', () => {
+    const s = clampSpanToSource(8000, 5000, DURATION)
+    expect(s.endMs).toBe(s.startMs + MIN_RALLY_MS)
+  })
+
+  it('returns the whole file when it is shorter than one rally', () => {
+    expect(clampSpanToSource(0, 500, 60)).toEqual({ startMs: 0, endMs: 60 })
+  })
+
+  it('rounds to whole milliseconds, as fractionToMs already does', () => {
+    expect(clampSpanToSource(1000.4, 5000.6, DURATION)).toEqual({ startMs: 1000, endMs: 5001 })
+  })
+
+  it('refuses an out-point dropped before the in-point, anchoring the in-point', () => {
+    // Same rule as an existing rally's `]`: the draft's in-point is the
+    // anchor and is handed back untouched, rather than collapsing.
+    const inMs = scrubMsAt(500, WIDTH, DURATION) // 300000
+    const r = setOutPoint(inMs, DURATION, scrubMsAt(200, WIDTH, DURATION))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/in-point/i)
+  })
+
+  it('refuses an in-point dropped past the out-point, anchoring the out-point', () => {
+    const outMs = scrubMsAt(300, WIDTH, DURATION) // 180000
+    const r = setInPoint(0, outMs, scrubMsAt(700, WIDTH, DURATION))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/out-point/i)
+  })
+
+  it('accepts an ordinary scrubbed in/out pair and lands it inside the source', () => {
+    const out = setOutPoint(0, MIN_RALLY_MS, scrubMsAt(WIDTH + 50, WIDTH, DURATION))
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    const inn = setInPoint(out.startMs, out.endMs, scrubMsAt(400, WIDTH, DURATION))
+    expect(inn.ok).toBe(true)
+    if (!inn.ok) return
+    expect(clampSpanToSource(inn.startMs, inn.endMs, DURATION)).toEqual({
+      startMs: 240000,
+      endMs: DURATION,
+    })
   })
 })

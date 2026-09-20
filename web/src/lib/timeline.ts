@@ -57,6 +57,37 @@ export function fractionToMs(fraction: number, totalMs: number): number {
   return Math.round(clamp(fraction, 0, 1) * totalMs)
 }
 
+/**
+ * Where a pointer at `xPx` along a bar of `widthPx` lands in a source.
+ *
+ * The bar spans the WHOLE source, not one rally's span -- this is what the
+ * add-a-rally scrub reaches the rest of the file with, where `VideoDeck`
+ * only ever plays between an existing in and out point.
+ *
+ * The zero-width guard is not defensive padding: a bar measured before
+ * layout (a `$effect` racing the first paint, a hidden panel) reports
+ * `width: 0`, and `fractionToMs` cannot absorb the resulting Infinity/NaN
+ * -- `clamp`'s comparisons are both false for NaN, so it passes straight
+ * through to `Math.round` and a NaN reaches the commit as a rally span.
+ * Out-of-range x needs no guard here; `fractionToMs` already clamps, which
+ * is what makes a click past either end of the bar land on the end.
+ */
+export function scrubMsAt(xPx: number, widthPx: number, durationMs: number): number {
+  if (widthPx <= 0) return 0
+  return fractionToMs(xPx / widthPx, durationMs)
+}
+
+/**
+ * The inverse of `scrubMsAt`: where `ms` is drawn along the same bar.
+ *
+ * In pixels, to round-trip against the pointer coordinate the caller
+ * measured. A caller positioning with a percentage should use
+ * `msToFraction` directly rather than dividing this back out.
+ */
+export function scrubXFor(ms: number, widthPx: number, durationMs: number): number {
+  return msToFraction(ms, durationMs) * widthPx
+}
+
 /** A window of `spanMs` around `centerMs`, shifted (never shrunk) to stay in bounds. */
 export function zoomWindow(
   centerMs: number,
@@ -104,6 +135,42 @@ export function clampMinGap(
 ): { startMs: number; endMs: number } {
   if (endMs - startMs < minMs) return { startMs, endMs: startMs + minMs }
   return { startMs, endMs }
+}
+
+/**
+ * Confine a draft span to a source that actually holds it.
+ *
+ * An existing rally is edited against bounds the detector already put
+ * inside the file; a hand-drawn span has no such history, so its ends can
+ * sit anywhere the pointer or the playhead did. The far end is the one
+ * that bites: `lastSafeFrameMs` keeps playback short of the reported
+ * duration, but a drag released past the bar, or a `]` on a playhead the
+ * browser rounded up, both reach past it.
+ *
+ * `startMs` stays the anchor, as everywhere else in this file -- it is
+ * clamped first so the `clampMinGap` backstop can only ever push the end
+ * to exactly `durationMs`, never past it. The result is rounded because
+ * this is what goes to the server as a span, and `fractionToMs` -- the
+ * other end of the same scrub -- already deals in whole milliseconds.
+ *
+ * Crossing in and out is NOT this function's job: `setInPoint` and
+ * `setOutPoint` already refuse that outright rather than collapsing a
+ * span, and a draft goes through them for the same reason a rally does.
+ * `clampMinGap` survives here only as the backstop for a pair that never
+ * passed through either.
+ */
+export function clampSpanToSource(
+  startMs: number,
+  endMs: number,
+  durationMs: number,
+  minMs: number = MIN_RALLY_MS,
+): { startMs: number; endMs: number } {
+  // A source too short to hold one rally cannot be trimmed into one; hand
+  // back the whole file rather than a span reaching past its own end.
+  if (durationMs <= minMs) return { startMs: 0, endMs: Math.max(0, Math.round(durationMs)) }
+  const start = clamp(startMs, 0, durationMs - minMs)
+  const gapped = clampMinGap(start, clamp(endMs, 0, durationMs), minMs)
+  return { startMs: Math.round(gapped.startMs), endMs: Math.round(gapped.endMs) }
 }
 
 /**
