@@ -29,6 +29,7 @@ from splitstep.db.labels import (
 from splitstep.db.presets import create_preset, get_preset, list_presets
 from splitstep.db.rallies import (
     NOTE_MAX_CHARS,
+    create_rally,
     list_rallies,
     list_rallies_for_source,
     merge_into_previous,
@@ -157,6 +158,22 @@ class BoundsBody(BaseModel):
 
 class SplitBody(BaseModel):
     at_ms: int
+
+
+class CreateRallyBody(BaseModel):
+    """A span the reviewer drew by hand, with no rally behind it yet.
+
+    Deliberately carries no validator, unlike BoundsBody. Every rule about
+    this span -- the MIN_RALLY_MS floor, both bounds inside the source's
+    duration -- needs the source's duration_ms to check, which pydantic
+    cannot see, and create_rally already enforces all of them. A partial
+    copy here would answer 422 for the half it could check and 400 for the
+    rest, so one incoherent span would arrive as two different statuses
+    depending on which way it was incoherent.
+    """
+
+    start_ms: int
+    end_ms: int
 
 
 class SpanLabelBody(BaseModel):
@@ -881,6 +898,30 @@ def api_label_retract(rally_id: str, request: Request):
     # No session_status refresh, same as api_label: a label is a note about
     # the detector, not a review decision.
     return {"ok": True, "id": label_id}
+
+
+@router.post("/api/sources/{source_id}/rallies")
+def api_create_rally(source_id: str, body: CreateRallyBody, request: Request):
+    """Add one rally at a span the detector never proposed.
+
+    The 404/400 split is api_split's, for the reason api_split gives: an
+    unknown source is a stale client and the reviewer reloads, while a bad
+    span is a live client asking for something incoherent and the reviewer
+    moves the playhead. create_rally raises ValueError for both, so the
+    source is resolved here first -- exactly as api_split resolves the rally
+    first -- or every stale client would be told to move its playhead.
+
+    No clip job is queued. Adding a span never starts an encode; cutting
+    stays the explicit button, as it is everywhere else.
+    """
+    conn = _conn(request)
+    if get_source(conn, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    try:
+        rally_id = create_rally(conn, source_id, body.start_ms, body.end_ms)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "rally_id": rally_id}
 
 
 @router.get("/api/sources/{source_id}/label-sample")
