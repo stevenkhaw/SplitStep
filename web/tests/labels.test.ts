@@ -1,5 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { isDetected, LabelController, LabelWriter, persistLabel } from '../src/lib/labels'
+import {
+  isDetected,
+  LabelController,
+  LabelWriter,
+  overlapFraction,
+  persistLabel,
+} from '../src/lib/labels'
 import type { BoundaryFlag, DetectedRally, LabelAction, Verdict } from '../src/lib/labels'
 import type { LabelRecord, Rally } from '../src/lib/types'
 
@@ -37,6 +46,73 @@ function record(over: Partial<LabelRecord> = {}): LabelRecord {
     ...over,
   }
 }
+
+describe('the audit route stays blind', () => {
+  it('does not route through LabelController', () => {
+    // The overlap fallback means LabelController can now show a verdict that
+    // was never written against the span on screen. That is right for label
+    // mode and wrong for the audit pass, which is deliberately blind: the
+    // `Window` it walks carries nothing but its span, and the 2026-08-20
+    // pass hand-labelled a clip wrong -- only the blindness exposed it. An
+    // inherited verdict rendered there would bias the one measurement in the
+    // project that can see recall over play the detector never proposed.
+    //
+    // Asserted on the file rather than on behaviour because the separation
+    // IS structural: Audit.svelte fetches labels itself and never builds a
+    // controller, so there is no flag anyone has to remember -- only a route
+    // that must not start using this one. Reading the source is the only way
+    // to pin that, since jsdom has no <video> and the component is verified
+    // by hand.
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../src/routes/Audit.svelte'),
+      'utf8',
+    )
+    expect(src).not.toMatch(/\bLabelController\b/)
+  })
+})
+
+describe('overlapFraction', () => {
+  // Mirrors splitstep/db/rallies.py::overlap_fraction. Every expectation here
+  // was read off that function running, not derived by hand, because the two
+  // must agree exactly: the server carries stars across a re-segment with it
+  // and `labels score` matches candidates to labelled spans with it, so a
+  // client that disagreed about what "the same rally" means would show a
+  // verdict the scorer does not count, or hide one it does.
+
+  it('scores a span against itself as 1.0', () => {
+    expect(overlapFraction(1000, 2000, 1000, 2000)).toBe(1.0)
+  })
+
+  it('divides by the SHORTER span, so a contained span scores 1.0', () => {
+    // Not by the union and not by the first argument: a short old rally
+    // wholly inside a long new one is entirely accounted for by it.
+    expect(overlapFraction(1000, 2000, 1500, 1600)).toBe(1.0)
+  })
+
+  it('scores a partial overlap against the shorter span', () => {
+    expect(overlapFraction(1000, 2000, 1200, 2200)).toBeCloseTo(0.8, 10)
+    expect(overlapFraction(1000, 2000, 1900, 3000)).toBeCloseTo(0.1, 10)
+    expect(overlapFraction(0, 1000, 500, 1500)).toBeCloseTo(0.5, 10)
+  })
+
+  it('scores touching spans as 0.0, not as an overlap', () => {
+    expect(overlapFraction(1000, 2000, 2000, 3000)).toBe(0.0)
+  })
+
+  it('scores disjoint spans as 0.0', () => {
+    expect(overlapFraction(1000, 2000, 5000, 6000)).toBe(0.0)
+  })
+
+  it('returns 0.0 for a zero-length span rather than dividing by zero', () => {
+    // The `max(1, ...)` guard on the denominator is what makes this safe in
+    // Python; in JS the same division would yield Infinity or NaN instead of
+    // raising, which is worse -- Infinity clears the >= 0.5 gate and would
+    // attribute a verdict to a span of no duration at all.
+    expect(overlapFraction(1000, 1000, 1000, 1000)).toBe(0.0)
+    expect(overlapFraction(1000, 2000, 1500, 1500)).toBe(0.0)
+    expect(overlapFraction(1500, 1500, 1000, 2000)).toBe(0.0)
+  })
+})
 
 describe('LabelController', () => {
   let c: LabelController
@@ -144,20 +220,119 @@ describe('LabelController', () => {
       [record({ span_start_ms: 10000, span_end_ms: 18000, verdict: 'not_play' })],
     )
     expect(seeded.currentVerdict).toBe('not_play')
+    // An exact match is the reviewer's judgement of exactly this span, so it
+    // carries no inherited badge -- only the overlap fallback does.
+    expect(seeded.currentInherited).toBe(false)
     seeded.next()
     expect(seeded.currentVerdict).toBeNull()
+    expect(seeded.currentInherited).toBe(false)
   })
 
-  it('does not seed from a label whose span merely overlaps', () => {
-    // A re-segment that moved this edge produced different detector output,
-    // so the old judgement is not a judgement of this span. Matching by
-    // overlap here would silently attribute a verdict to a clip nobody
-    // watched.
+  it('seeds from a label whose span moved under a re-segment, and marks it inherited', () => {
+    // Measured on the live library: 2026-09-16 source 01 had 44 judgements
+    // and a re-segment left 6 of them resolving, because the lookup was an
+    // exact match on a detector span the detector had just rewritten. The
+    // rows were never lost -- rally_labels has no foreign key precisely so
+    // replace_rallies cannot wipe it -- only the display of them was.
+    //
+    // 200 ms of drift is one rally the reviewer already watched, so the
+    // verdict shows. It shows as INHERITED because it is still a judgement
+    // of a span slightly different from this one, and nothing is written
+    // until the reviewer confirms it against the current span.
     const seeded = new LabelController(
       [rally(1)],
       [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
     )
+    expect(seeded.currentVerdict).toBe('not_play')
+    expect(seeded.currentInherited).toBe(true)
+  })
+
+  it('does not seed from a label overlapping less than half the span', () => {
+    // Below the >= 0.5 gate these are two different rallies by the only
+    // definition the codebase has (STAR_OVERLAP_MIN, the same rule
+    // replace_rallies uses to carry a star and labels score uses to match a
+    // candidate). Attributing a verdict across it would invent a judgement
+    // of a clip nobody watched -- the objection exact matching was defending
+    // against, which the fallback narrows rather than abandons.
+    const seeded = new LabelController(
+      [rally(1)], // 10000 - 18000
+      [record({ span_start_ms: 14100, span_end_ms: 22100, verdict: 'clean' })], // 3900/8000
+    )
     expect(seeded.currentVerdict).toBeNull()
+    expect(seeded.currentInherited).toBe(false)
+  })
+
+  it('takes the best-overlapping label when two clear the gate, whatever the input order', () => {
+    // Two old judgements can both survive into one new span after a merge.
+    // Ranking has to be a total order or the answer depends on the order the
+    // API happened to return the rows in, which would make the same corpus
+    // render two different verdicts on two reloads.
+    const better = record({ span_start_ms: 10500, span_end_ms: 18000, verdict: 'clean' })
+    const worse = record({ span_start_ms: 13000, span_end_ms: 18000, verdict: 'not_play' })
+
+    const forward = new LabelController([rally(1)], [better, worse])
+    expect(forward.currentVerdict).toBe('clean')
+    expect(forward.currentInherited).toBe(true)
+
+    const reversed = new LabelController([rally(1)], [worse, better])
+    expect(reversed.currentVerdict).toBe('clean')
+    expect(reversed.currentInherited).toBe(true)
+  })
+
+  it('breaks an overlap tie on the nearer start, whatever the input order', () => {
+    // Both of these cover 7800 of the rally's 8000 ms, so the fraction alone
+    // cannot separate them; the nearer start edge does.
+    const rally1 = rally(1, { det_start_ms: 10000, det_end_ms: 18000 })
+    const near = record({ span_start_ms: 10100, span_end_ms: 17900, verdict: 'clean' })
+    const far = record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })
+
+    expect(new LabelController([rally1], [near, far]).currentVerdict).toBe('clean')
+    expect(new LabelController([rally1], [far, near]).currentVerdict).toBe('clean')
+  })
+
+  it('does not resurrect a hand-made rally through the overlap fallback', () => {
+    // A rally with no detector span is filtered out at construction and the
+    // fallback must not be a second door back in: rally_labels anchors on
+    // (source_id, det_start_ms, det_end_ms), so there is still nothing for a
+    // judgement on one of these to attach to, however well some neighbouring
+    // labelled span overlaps its player-set bounds.
+    const handMade = rally(1, { det_start_ms: null, det_end_ms: null })
+    const seeded = new LabelController(
+      [handMade],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'clean' })],
+    )
+    expect(seeded.total).toBe(0)
+    expect(seeded.currentVerdict).toBeNull()
+    expect(seeded.currentInherited).toBe(false)
+  })
+
+  it('stops calling a verdict inherited once the reviewer confirms it', () => {
+    // The confirming write goes out against this rally's CURRENT det span
+    // (LabelWriter sends the span's whole state and the span is the rally's
+    // own), so the judgement is no longer second-hand and the next
+    // re-segment starts from an exact match again.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    expect(seeded.currentInherited).toBe(true)
+    seeded.setVerdict('not_play')
+    expect(seeded.currentInherited).toBe(false)
+  })
+
+  it('brings the inherited badge back when the confirming keystroke is undone', () => {
+    // Undo restores the state the reviewer was looking at, and before the
+    // keystroke that state was an unconfirmed inherited verdict. Leaving the
+    // badge off would show a second-hand judgement as first-hand.
+    const seeded = new LabelController(
+      [rally(1)],
+      [record({ span_start_ms: 10200, span_end_ms: 18000, verdict: 'not_play' })],
+    )
+    seeded.setVerdict('clean')
+    expect(seeded.currentInherited).toBe(false)
+    seeded.undo()
+    expect(seeded.currentVerdict).toBe('not_play')
+    expect(seeded.currentInherited).toBe(true)
   })
 
   it('does not seed a label from one source onto another source\'s rally at the same span', () => {

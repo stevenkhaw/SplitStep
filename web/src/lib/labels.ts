@@ -46,6 +46,11 @@ interface HistoryEntry {
   index: number
   verdict: Verdict | null
   flags: BoundaryFlag[]
+  // Undo restores what the reviewer was looking at, and before their
+  // keystroke that may have been an unconfirmed inherited verdict. Without
+  // this the undone state would render a second-hand judgement as
+  // first-hand.
+  inherited: boolean
 }
 
 // Keyed on (source_id, span), not span alone. Sources are independent clips
@@ -60,6 +65,85 @@ interface HistoryEntry {
 // door.
 function spanKey(sourceId: string, startMs: number, endMs: number): string {
   return `${sourceId}:${startMs}:${endMs}`
+}
+
+/**
+ * Overlap as a fraction of the *shorter* of the two spans.
+ *
+ * The same function as `splitstep/db/rallies.py::overlap_fraction`, ported
+ * rather than called because this resolution happens in the browser against
+ * rows already on the wire. Keep the two identical: that Python function is
+ * the codebase's single definition of "the same rally" -- `replace_rallies`
+ * carries a star across a re-segment with it and `labels score` matches a
+ * candidate interval to a labelled span with it -- and a client that drew the
+ * line anywhere else would show a verdict the scorer does not count, or hide
+ * one it does.
+ *
+ * Dividing by the shorter span, not the union, is what makes a short old
+ * judgement wholly inside a longer new rally score a flat 1.0.
+ *
+ * The `Math.max(1, ...)` on the denominator mirrors Python's `max(1, ...)`
+ * and matters more here than there: a zero-length span would raise in Python
+ * but silently yield Infinity or NaN in JS, and Infinity clears the >= 0.5
+ * gate -- a span of no duration at all would inherit a verdict.
+ */
+export function overlapFraction(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+): number {
+  const overlap = Math.min(aEnd, bEnd) - Math.max(aStart, bStart)
+  if (overlap <= 0) return 0.0
+  return overlap / Math.max(1, Math.min(aEnd - aStart, bEnd - bStart))
+}
+
+/** Mirrors STAR_OVERLAP_MIN in splitstep/db/rallies.py. */
+const SPAN_OVERLAP_MIN = 0.5
+
+/**
+ * The labelled span that best represents `startMs`-`endMs`, or undefined.
+ *
+ * Only reached when no row carries this exact span (see the constructor).
+ * Ranking must be a total order, not "the first one over the line": the rows
+ * arrive in whatever order the API returned them, and an order-dependent
+ * answer would render two different verdicts on the same corpus across two
+ * reloads. Three stages -- highest overlap, then the nearest start edge, then
+ * the earlier span -- and the last one exists only to break the remaining
+ * symmetry, since overlapFraction divides by the shorter span and so cannot
+ * separate two candidates that both cover the rally equally.
+ *
+ * Verdict-less rows are not candidates. Such a row is a boundary correction
+ * written by a drag, not a judgement, so it has nothing to inherit -- and
+ * letting one win the ranking would suppress a judged row that also
+ * qualified.
+ */
+function bestOverlapping(
+  records: readonly LabelRecord[],
+  startMs: number,
+  endMs: number,
+): LabelRecord | undefined {
+  let best: LabelRecord | undefined
+  let bestScore = 0
+  let bestDrift = 0
+
+  for (const rec of records) {
+    if (rec.verdict === null) continue
+    const score = overlapFraction(startMs, endMs, rec.span_start_ms, rec.span_end_ms)
+    if (score < SPAN_OVERLAP_MIN) continue
+    const drift = Math.abs(rec.span_start_ms - startMs)
+    const better =
+      best === undefined ||
+      score > bestScore ||
+      (score === bestScore &&
+        (drift < bestDrift || (drift === bestDrift && rec.span_start_ms < best.span_start_ms)))
+    if (better) {
+      best = rec
+      bestScore = score
+      bestDrift = drift
+    }
+  }
+  return best
 }
 
 /**
@@ -98,6 +182,10 @@ export class LabelController {
   #rallies: DetectedRally[]
   #verdicts = new Map<string, Verdict>()
   #flags = new Map<string, BoundaryFlag[]>()
+  // Rallies whose seeded verdict came from the overlap fallback rather than
+  // a row written against their own span. Derived state, never persisted --
+  // the corpus has no column for it and must not grow one.
+  #inherited = new Set<string>()
   #index = 0
   #history = new UndoStack<HistoryEntry>()
 
@@ -107,11 +195,33 @@ export class LabelController {
    * hiding it here would bias the set toward what the detector already gets
    * right.
    *
-   * `existing` seeds from labels already stored. Matching is on the exact
-   * detector span: a re-segment that moved an edge produced genuinely
-   * different detector output, so the old judgement is not a judgement of
-   * this span, and matching by overlap would attribute a verdict to a clip
-   * nobody watched.
+   * `existing` seeds from labels already stored, in two steps: the exact
+   * detector span first, then the best-overlapping labelled span for the same
+   * source.
+   *
+   * Exact-only was the original rule, and it stranded the reviewer's work.
+   * Measured on the live library: 2026-09-16 source 01 held 44 judgements and
+   * a re-segment left 6 of them resolving. Nothing was lost -- `rally_labels`
+   * anchors on `(source_id, det_start_ms, det_end_ms)` with no foreign key
+   * precisely so `replace_rallies` cannot wipe it, and `labels score` still
+   * reads every row -- but the detector's new guesses carry new anchors, so
+   * the lookup found nothing and the pass looked half-done.
+   *
+   * The fallback is not a new notion of sameness. It is `overlap_fraction`'s
+   * existing `>= 0.5`, the same rule `replace_rallies` uses to carry a star
+   * and `labels score` uses to match a candidate to a labelled span; this is
+   * a third caller, not a third rule. Under that line the old objection still
+   * holds and the verdict stays hidden, because two spans sharing less than
+   * half of the shorter one are two different rallies by the only definition
+   * the codebase has.
+   *
+   * A record found by the fallback is marked inherited, and that mark exists
+   * only in this object. NOTHING is written: re-anchoring rows onto the new
+   * det spans during `replace_rallies` would assert the reviewer judged a
+   * span they never saw, which is the fabricated-training-data objection
+   * CLAUDE.md already makes about inventing det spans. The corpus keeps
+   * recording only spans a human actually looked at, and this resolution is
+   * undone by reverting one function.
    */
   constructor(rallies: Rally[], existing: LabelRecord[]) {
     // Hand-made rallies (det_start_ms null -- a half someone split off, see
@@ -129,18 +239,35 @@ export class LabelController {
     // short of (see below).
     this.#rallies = rallies.filter(isDetected)
     const bySpan = new Map<string, LabelRecord>()
+    // Bucketed by source for the fallback scan below, for the same reason
+    // spanKey carries the source id: LabelMode flattens every source's labels
+    // into one list, and two sources can produce identical spans, so an
+    // unscoped scan would hand source A's verdict to source B's rally (M2)
+    // through the very door exact matching closed.
+    const bySource = new Map<string, LabelRecord[]>()
     for (const rec of existing) {
       bySpan.set(spanKey(rec.source_id, rec.span_start_ms, rec.span_end_ms), rec)
+      const forSource = bySource.get(rec.source_id)
+      if (forSource) forSource.push(rec)
+      else bySource.set(rec.source_id, [rec])
     }
 
     for (const r of this.#rallies) {
-      const rec = bySpan.get(spanKey(r.source_id, r.det_start_ms, r.det_end_ms))
+      const exact = bySpan.get(spanKey(r.source_id, r.det_start_ms, r.det_end_ms))
+      // The exact row, when there is one, is the answer -- including when it
+      // carries no verdict. Falling through to the overlap scan there would
+      // reach past a row written against this very span in favour of one
+      // written against a neighbour.
+      const rec =
+        exact ??
+        bestOverlapping(bySource.get(r.source_id) ?? [], r.det_start_ms, r.det_end_ms)
       // A verdict-less row is a boundary correction from a drag, not a
       // judgement -- rendering it as one would invent a verdict the reviewer
       // never gave.
       if (!rec || rec.verdict === null) continue
       this.#verdicts.set(r.id, rec.verdict)
       this.#flags.set(r.id, [...rec.boundary_flags])
+      if (!exact) this.#inherited.add(r.id)
     }
   }
 
@@ -173,6 +300,24 @@ export class LabelController {
     return r ? [...(this.#flags.get(r.id) ?? [])] : []
   }
 
+  /**
+   * True when the verdict on screen was resolved from a span that moved,
+   * rather than written against this rally's own detector span.
+   *
+   * Label mode only. It must never reach the audit route: that pass is
+   * deliberately blind -- the `Window` it returns carries nothing but its
+   * span, and the 2026-08-20 pass mislabelled a clip which only the
+   * blindness exposed -- so a verdict shown there would bias the one
+   * measurement in the project that can see recall. `Audit.svelte` calls
+   * `api.sourceLabels` directly and never constructs this controller, which
+   * keeps the separation structural rather than a flag someone has to
+   * remember.
+   */
+  get currentInherited(): boolean {
+    const r = this.current
+    return r ? this.#inherited.has(r.id) : false
+  }
+
   get flagsEnabled(): boolean {
     const v = this.currentVerdict
     return v !== null && FLAGGABLE.includes(v)
@@ -185,7 +330,24 @@ export class LabelController {
       index: this.#index,
       verdict: this.#verdicts.get(r.id) ?? null,
       flags: [...(this.#flags.get(r.id) ?? [])],
+      inherited: this.#inherited.has(r.id),
     })
+  }
+
+  /**
+   * The reviewer just asserted something about the rally on screen, so any
+   * inherited verdict on it stops being second-hand.
+   *
+   * Every caller of this is about to produce a LabelAction, and the write it
+   * becomes carries the span's whole state against this rally's *own* det
+   * span -- LabelWriter needs no special case for it. Once that lands the
+   * next re-segment starts from a clean exact match again.
+   *
+   * An inherited verdict nobody touches is never written, which is the
+   * point: the corpus keeps recording only spans a human looked at.
+   */
+  #confirm(rallyId: string): void {
+    this.#inherited.delete(rallyId)
   }
 
   setVerdict(verdict: Verdict): LabelAction | null {
@@ -196,6 +358,7 @@ export class LabelController {
     const previousFlags = [...(this.#flags.get(r.id) ?? [])]
 
     this.#verdicts.set(r.id, verdict)
+    this.#confirm(r.id)
     // Dropping to a verdict that admits no boundary error clears whatever was
     // already flagged, so a not_play row can never carry an end_late that
     // contradicts it.
@@ -231,6 +394,11 @@ export class LabelController {
     // Canonical order, so the rendered row does not reshuffle as you toggle.
     const ordered = FLAG_ORDER.filter((f) => next.includes(f))
     this.#flags.set(r.id, ordered)
+    // A flag toggle is a write too, and it carries the inherited verdict out
+    // with it -- LabelWriter sends the span's whole state. Leaving the mark
+    // on would badge a judgement the reviewer has now made against this very
+    // span as still second-hand.
+    this.#confirm(r.id)
 
     return {
       rallyId: r.id,
@@ -275,6 +443,8 @@ export class LabelController {
     if (entry.verdict === null) this.#verdicts.delete(r.id)
     else this.#verdicts.set(r.id, entry.verdict)
     this.#flags.set(r.id, [...entry.flags])
+    if (entry.inherited) this.#inherited.add(r.id)
+    else this.#inherited.delete(r.id)
 
     // Returns an action even when the restored state has no verdict. That
     // case used to return null and persist nothing, on the reasoning that
