@@ -237,9 +237,19 @@ export const api = {
 
   jobs: () => req<Job[]>('/api/jobs'),
   retryJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
-  detectSource: (id: string) =>
+  // The optional threshold is what lets one button serve a region change and
+  // a threshold change together: a detect re-segments at the end, so sending
+  // the slider's value with it means the reviewer never has to come back and
+  // re-segment afterwards. Omitted (not null) when unset, so the body stays
+  // absent entirely -- the route has been bodyless for months and
+  // `DetectBody | None` keeps every existing caller working (see
+  // splitstep/api/routes.py::api_detect). A threshold of 0 is a threshold:
+  // `!== undefined`, never truthiness. `req` adds the JSON content-type for
+  // any non-FormData body, so there is none to set here.
+  detectSource: (id: string, threshold?: number) =>
     req<{ job_id: string | null; already_running: boolean }>(`/api/sources/${id}/detect`, {
       method: 'POST',
+      ...(threshold === undefined ? {} : { body: JSON.stringify({ threshold }) }),
     }),
 
   importFile: (file: File) => {

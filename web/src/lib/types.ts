@@ -46,6 +46,29 @@ export interface Source {
   // something else is the bug this column was added for. See
   // splitstep/db/migrations/015_segment_threshold.sql.
   segment_threshold: number | null
+  // The preset the cached features were actually BUILT under (migration
+  // 016), as distinct from `court_preset_id`, which is the preset assigned
+  // right now. Written only on the branch that rebuilt features --
+  // `--reuse-features` must not restate a region it did not apply.
+  features_preset_id?: string | null
+  // Those two presets' four corners, served by `_source_json` so the client
+  // can compare GEOMETRY rather than ids. A fresh preset row holding the
+  // same four points is not a change, and the wizard writes a fresh row on
+  // every save: comparing ids is what announced a changed region three
+  // times on one source and cost three fifteen-minute detects.
+  //
+  // Optional (`?:`) and not merely nullable, unlike every field above. That
+  // is not fixture convenience -- it is what the wire actually does. A
+  // server predating migration 016 omits these keys entirely, so a real
+  // payload can carry `undefined` here, and a type saying otherwise would
+  // be a lie the compiler enforces. It costs nothing in safety because null
+  // and absent already have to mean the same thing downstream: `null` here
+  // collapses three states the client must not tell apart (no preset
+  // assigned, no preset recorded for the features, an id whose row is gone)
+  // and every one of them is "unknown, do not warn" -- the same answer
+  // `undefined` gets. See `sameRegion` in lib/resegment.ts.
+  court_preset_points?: [number, number][] | null
+  features_preset_points?: [number, number][] | null
 }
 
 export interface Rally {

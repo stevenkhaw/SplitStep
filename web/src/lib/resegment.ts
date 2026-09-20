@@ -62,9 +62,181 @@ export function resegmentConfirmMessage(editedCount: number, splits: number): st
 }
 
 /**
+ * True when two play regions are the same region.
+ *
+ * **By value, never by id, and that is the entire point of this function.**
+ * The setup wizard writes a *fresh* `court_presets` row on every save, so
+ * `court_preset_id !== features_preset_id` is true after re-confirming the
+ * region you already had. The user hit exactly that: the same four corners
+ * assigned three times on one source, each save announcing "the play region
+ * changed" and each one offering a fifteen-minute re-detect that produced
+ * byte-identical features. An id answers "is this the same row?"; the
+ * question detection actually asks is "were these features built under
+ * these corners?", and only the corners can answer it.
+ *
+ * Exact `===` on the floats, deliberately, with no epsilon:
+ *
+ *   - Both sides reach the client through one path -- `presets.quad` JSON ->
+ *     `Quad.from_json` -> Python float -> JSON -> JS double (`_preset_points`
+ *     in splitstep/api/routes.py serves both). Python's `json` and
+ *     JavaScript's `JSON.parse` both round-trip a double exactly, so two
+ *     rows storing the same corners deserialize bit-identically. There is no
+ *     drift for a tolerance to absorb.
+ *   - The corners that *are* different are enormously different. A quad
+ *     corner is a normalized pointer position (`pointFromClient`, lib/quad.ts),
+ *     so the smallest change a reviewer can make is one pixel -- about 5e-4
+ *     of a 1920-wide frame, twelve orders of magnitude above double noise.
+ *     An epsilon would therefore only ever discriminate values that cannot
+ *     occur, while adding a band in which a genuine drag is silently
+ *     ignored.
+ *
+ * So the tolerance would buy nothing and could only lose a real edit. If a
+ * future writer ever *computes* a quad (a snap-to-court, an imported
+ * calibration) rather than reading one back, that reasoning expires and this
+ * is the comment to revisit.
+ *
+ * Unknown on either side is not equality and not inequality -- callers must
+ * test for it before asking (see `planDetection`).
+ */
+export function sameRegion(a: [number, number][], b: [number, number][]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1])
+}
+
+/** What the reviewer currently has on screen: a region and a threshold. */
+export interface DetectionDraft {
+  /** The region assigned to the source now (normally `court_preset_points`),
+   *  or null when none is assigned or the server did not say. */
+  region: [number, number][] | null | undefined
+  /** The threshold the slider sits at, or null before one has been resolved. */
+  threshold: number | null
+}
+
+/**
+ * The one action a detection panel should offer.
+ *
+ * `redetect` is the expensive run (YOLO + audio, ~15 min) and the only thing
+ * that can act on a play region, because the quad filters boxes when
+ * `features.jsonl` is BUILT. `resegment` replays those cached features
+ * through the pure `segment()` (~200 ms). `none` disables the button.
+ */
+export type DetectionActionKind = 'redetect' | 'resegment' | 'none'
+
+export interface DetectionPlan {
+  action: DetectionActionKind
+  /** The assigned region differs, by value, from the one the features were
+   *  built under. False whenever either side is unknown. */
+  regionChanged: boolean
+  /** The draft threshold differs from the one the current rallies were cut
+   *  at (or nothing recorded one, so it cannot be shown to match). */
+  thresholdChanged: boolean
+  /** Whether a score curve exists to render at all -- see `hasFeatures`. */
+  curveAvailable: boolean
+  /** `cutAtPhrase(source)`, carried here so the sentence the panel prints
+   *  and the action its button takes are resolved from one call and cannot
+   *  describe different sources. */
+  cutAt: string
+}
+
+/**
+ * Which single action a source needs to make the reviewer's draft real.
+ *
+ * One function, because the UI's failure was having two surfaces -- a quad
+ * editor and a re-segment panel -- and no way for the reviewer to tell which
+ * one their change needed. The rules, in the order they are decided:
+ *
+ * 1. **No cached features, no re-segment.** `segment()` replays
+ *    `features.jsonl`; before the first detect the file does not exist and
+ *    `/scores` answers 409. Anything the reviewer wants on such a source
+ *    costs the full run -- which is fine, because `POST /detect` now takes a
+ *    threshold (da51585) and carries the cheap change along with it.
+ * 2. **A changed region beats a changed threshold**, for the same reason:
+ *    the detect run re-segments at the end anyway, so one job serves both
+ *    and there is never a second button to press afterwards.
+ * 3. **Unknown never counts as changed, for the region.** Either quad being
+ *    null (or absent) means the comparison cannot be made, and claiming a
+ *    change would offer fifteen minutes of GPU on no evidence -- across an
+ *    entire pre-016 library, which is how a warning gets trained away.
+ * 4. **Unknown DOES count as changed, for the threshold, and the asymmetry
+ *    is deliberate.** A re-segment costs 200 ms and is behind a confirm,
+ *    while suppressing it would leave every source segmented before
+ *    migration 015 permanently unable to re-cut from this panel: its
+ *    recorded threshold is null, so no slider position could ever be proven
+ *    to differ from it. The cheap action fails open, the expensive one fails
+ *    closed.
+ */
+export function planDetection(
+  source: Source | undefined,
+  draft: DetectionDraft,
+): DetectionPlan {
+  const cutAt = cutAtPhrase(source)
+  if (!source) {
+    return { action: 'none', regionChanged: false, thresholdChanged: false,
+             curveAvailable: false, cutAt }
+  }
+
+  const builtUnder = source.features_preset_points
+  const regionChanged =
+    !!draft.region && !!builtUnder && !sameRegion(draft.region, builtUnder)
+
+  // `?? null` rather than a truthiness test: a recorded 0 is a recorded
+  // threshold, and it is the one value where truthy and recorded disagree.
+  const recorded = source.segment_threshold ?? null
+  const thresholdChanged =
+    draft.threshold !== null && (recorded === null || draft.threshold !== recorded)
+
+  const curveAvailable = hasFeatures(source)
+
+  let action: DetectionActionKind = 'none'
+  if (regionChanged) action = 'redetect'
+  else if (thresholdChanged) action = curveAvailable ? 'resegment' : 'redetect'
+  return { action, regionChanged, thresholdChanged, curveAvailable, cutAt }
+}
+
+/**
+ * Whether this source has cached features -- i.e. whether a score curve can
+ * be drawn and a re-segment can run at all.
+ *
+ * `features_at` is the mtime of `features.jsonl` (`_features_at` in
+ * splitstep/api/routes.py), so null means the file is not there. The panel
+ * has to say this out loud rather than render an empty chart: on a first
+ * run the threshold picker is genuinely blind, and a flat line at zero
+ * reads as "the detector found no play" instead of "nothing has looked
+ * yet".
+ */
+export function hasFeatures(source: Source | undefined): boolean {
+  return !!source?.features_at
+}
+
+/**
+ * The threshold the rallies on screen were cut at, as a phrase.
+ *
+ * "unknown" and never a number when nothing recorded one -- an unsegmented
+ * source, or one cut before migration 015. Naming the profile default here
+ * would re-state the original bug in prose: 0.25 is a fact about the
+ * detector's `subject` profile, not about the list of rallies beside this
+ * sentence, and source 2026-09-16/01 was cut at 0.15.
+ *
+ * Two decimals, matching the slider readout, so one number is not spelled
+ * two ways on one row.
+ */
+export function cutAtPhrase(source: Source | undefined): string {
+  const threshold = seedThreshold(source)
+  return threshold === null ? 'cut at an unknown threshold' : `cut at ${threshold.toFixed(2)}`
+}
+
+/**
  * True when this source's play region was assigned after its cached
  * features were written -- the one state in which the re-segment slider
- * lies. `segment()` replays `features.jsonl`, and the quad is applied when
+ * lies.
+ *
+ * **Superseded by `planDetection`'s `regionChanged`, and kept only until the
+ * panel that calls it is replaced.** This asks "was a region assigned since
+ * the features were built?", which is not the question: the wizard stamps
+ * `preset_assigned_at` on every save, so re-confirming an unchanged region
+ * answers yes. Migration 016 records the corners the features were actually
+ * built under; compare those (`sameRegion`) and the false alarm cannot
+ * happen. `segment()` replays `features.jsonl`, and the quad is applied when
  * those features are BUILT (it filters boxes before near/far are elected,
  * see CLAUDE.md "Play region"), so a region newer than the file is invisible
  * to every threshold in the panel. Only a full re-detect picks it up.
