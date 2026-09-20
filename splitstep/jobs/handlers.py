@@ -21,8 +21,8 @@ from splitstep.db.sessions import (
     get_source_by_original_name,
     scoring_rules,
     set_session_status,
+    set_source_detection,
     set_source_dimensions,
-    set_source_segment_threshold,
     set_source_status,
 )
 from splitstep.db.settings import get_color_profile, get_hr_clips_root, lock_color_profile
@@ -325,11 +325,26 @@ def handle_detect(library: Library, payload: dict,
     try:
         if payload.get("reuse_features") and features_path.exists():
             frames = read_features(features_path)
+            # The features on disk were shaped by whatever region built them,
+            # which is what the column already says. The source's *current*
+            # court_preset_id may well be newer -- that divergence is exactly
+            # what migration 016 exists to make visible, so restating it here
+            # would erase the thing the reviewer needs to see.
+            features_preset_id = source["features_preset_id"]
         else:
             set_source_status(conn, source["id"], "detecting")
             audio_path = _audio_source(src_dir, proxy, source)
             grid = _audio_grid(audio_path, source["duration_ms"])
             quad = _quad_for(conn, source)
+            # Captured here, beside the quad it names, rather than re-read
+            # after the ~15 minutes of YOLO below: the quad these features
+            # carry is the one _quad_for just resolved, and a reviewer who
+            # reassigns the region mid-run would otherwise have their new
+            # preset recorded against features built under the old one --
+            # silencing the staleness warning for a source that is genuinely
+            # stale. NULL where there is no preset: detection ran whole-frame
+            # (DEFAULT_QUAD), which has no row to point at.
+            features_preset_id = source["court_preset_id"] or None
             boxes = list(iter_person_boxes(proxy, sample_fps=SAMPLE_FPS))
             frames = build_features(boxes, quad, grid, STEP_MS)
             write_features(features_path, frames)
@@ -338,14 +353,18 @@ def handle_detect(library: Library, payload: dict,
         # so the re-segment slider can open on the number these rallies were
         # actually cut at. params_for_frames picks the profile per source, so
         # the value differs by source and a constant here would be wrong for
-        # half of them (migration 015).
-        params = params_for_frames(frames)
+        # half of them (migration 015) -- which is also why an absent
+        # payload threshold is passed through as None rather than defaulted
+        # here: None is the instruction to resolve per profile, and the route
+        # serialises "the reviewer did not choose" as exactly that.
+        params = params_for_frames(frames, threshold=payload.get("threshold"))
         intervals = segment(frames, params)
         replace_rallies(conn, source["session_id"], source["id"], intervals)
-        # After replace_rallies, never before: the column describes the
+        # After replace_rallies, never before: the columns describe the
         # rallies now in the table, and a write that landed ahead of a failed
-        # rewrite would describe rallies that were never replaced.
-        set_source_segment_threshold(conn, source["id"], params.threshold)
+        # rewrite would describe rallies that were never replaced. Both in
+        # one call because they are one answer -- see set_source_detection.
+        set_source_detection(conn, source["id"], params.threshold, features_preset_id)
     except Exception:
         set_source_status(conn, source["id"], "failed")
         # See _session_should_fail: don't strand a sibling source's

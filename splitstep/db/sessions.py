@@ -276,6 +276,46 @@ def set_source_segment_threshold(
     conn.commit()
 
 
+def set_source_detection(
+    conn: sqlite3.Connection,
+    source_id: str,
+    threshold: float,
+    features_preset_id: str | None,
+) -> None:
+    """Record what a detect run produced: the threshold it cut at, and the
+    play region its features.jsonl was built under.
+
+    One statement, not two calls, because the two numbers are one answer.
+    The re-segment panel reads them together -- "these rallies were cut at
+    0.15, from features built under this region" -- and a run that recorded
+    the threshold and then failed before recording the region would leave
+    the panel stating half of that with no way to tell which half. They
+    describe the same run or neither does.
+
+    `threshold` is `params.threshold` off the SegmentParams actually scored
+    against, never the caller's own argument, for the reason
+    set_source_segment_threshold spells out: a default run passes None and
+    only `params_for_frames` resolves it per profile.
+
+    `features_preset_id` is genuinely nullable and None means unknown, not
+    "no region": whole-frame detection has no preset row, and a
+    --reuse-features run passes the value already stored rather than the
+    source's current preset -- the cached features were shaped by whatever
+    built them, and claiming otherwise erases the divergence migration 016
+    exists to expose.
+
+    The other two writers of a segmentation -- api_resegment and `splitstep
+    segment` -- deliberately keep calling set_source_segment_threshold
+    instead: they replay cached features and build none, so they have
+    nothing new to say about the region and must not restate it.
+    """
+    conn.execute(
+        "UPDATE sources SET segment_threshold = ?, features_preset_id = ? WHERE id = ?",
+        (float(threshold), features_preset_id, source_id),
+    )
+    conn.commit()
+
+
 def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: int) -> None:
     conn.execute(
         "UPDATE sources SET rotation_deg=? WHERE id=?",

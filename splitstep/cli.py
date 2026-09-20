@@ -292,7 +292,15 @@ def cmd_detect(args) -> int:
     lib = _library(args)
     conn = connect(lib.db_path)
     migrate(conn)
-    payload = {"source_id": args.source_id, "reuse_features": args.reuse_features}
+    # Mirrors the API route: an absent --threshold is None, and None is the
+    # instruction to let params_for_frames resolve per profile rather than a
+    # stand-in for any particular number. HTTP and terminal must not drift on
+    # this the way they must not drift on validation (setup.py::queue_setup).
+    payload = {
+        "source_id": args.source_id,
+        "reuse_features": args.reuse_features,
+        "threshold": args.threshold,
+    }
     jobq.enqueue(conn, "detect", payload)
     if args.now:
         Worker(lib, HANDLERS).run_once()
@@ -769,6 +777,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("detect", help="queue detection for a source")
     p.add_argument("source_id")
     p.add_argument("--reuse-features", action="store_true")
+    p.add_argument("--threshold", type=float, default=None,
+                   help="score threshold; omit to use the source's profile default")
     p.add_argument("--now", action="store_true")
     p.set_defaults(func=cmd_detect)
 

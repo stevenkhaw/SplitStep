@@ -1,0 +1,44 @@
+-- The play region that shaped a source's CURRENT features.jsonl.
+--
+-- Migration 014 gave the UI `preset_assigned_at` and it compares that
+-- timestamp against the features file's mtime to answer "were these cached
+-- features built under this region?". A timestamp cannot answer that. It
+-- answers "was a region assigned after the last detect?", which is a
+-- different question with the same shape, and the two diverge the moment a
+-- reviewer re-saves a region without changing it: the wizard stamps
+-- preset_assigned_at on every assignment, so saving the identical four
+-- corners makes the app announce that the play region changed and that a
+-- fifteen-minute re-detect is owed. Measured on the user's library on
+-- 2026-09-20: the same quad assigned three separate times, three warnings,
+-- no change to a single corner.
+--
+-- Recording the preset the features were actually built with turns the
+-- guess into a fact the client can check. It checks it against *corners*,
+-- not against this id -- a second preset row holding the identical four
+-- points is not a changed region, and the wizard creates a new row on every
+-- save -- so the API serves the quad on both sides (`court_preset_points`
+-- and `features_preset_points`). The id is what makes those two quads
+-- resolvable at all; it is not itself the comparison.
+--
+-- Written only where it is true: by the detect handler, in the same call
+-- that records segment_threshold (migration 015) and only on the branch
+-- that actually rebuilt features. `--reuse-features` replays what is on
+-- disk, so overwriting this with whatever is assigned now would erase the
+-- exact divergence the column exists to expose.
+--
+-- Nullable, like preset_assigned_at (014) and segment_threshold (015), and
+-- for the same reason: a source detected before this migration was built
+-- under *some* region nobody recorded, and back-filling the source's
+-- current court_preset_id would assert the two agree -- the same
+-- unearned claim this column is replacing. NULL is also the honest value
+-- for whole-frame detection, which has no preset row to point at; the
+-- client renders both as "unknown region" and declines to warn.
+--
+-- REFERENCES, mirroring court_preset_id's own declaration in 001_init.sql:
+-- unlike rally_labels.rally_id (deliberately un-keyed, because
+-- replace_rallies deletes the rows it would point at), a preset row is
+-- never deleted by anything in the app, and this column is only useful
+-- while the row it names is still there to be read for its corners.
+-- SQLite permits a REFERENCES clause on ADD COLUMN precisely because the
+-- default is NULL.
+ALTER TABLE sources ADD COLUMN features_preset_id TEXT REFERENCES court_presets(id);

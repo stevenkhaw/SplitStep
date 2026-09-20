@@ -247,6 +247,28 @@ class ResegmentBody(BaseModel):
     threshold: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class DetectBody(BaseModel):
+    """Optional body on POST /detect -- a threshold for the expensive run.
+
+    Same field and the same ge/le rationale as ResegmentBody: a non-finite
+    float would otherwise sail through and blow up the JSON renderer later.
+
+    None is not "unset, use 0.25". It is the instruction to let
+    `params_for_frames` resolve per source: the two camera profiles put the
+    threshold on different scales (0.25 subject, 0.45 pair) and a constant
+    here would be wrong for half of every library. The route passes the None
+    straight through to the job payload for that reason.
+
+    The whole body is optional, not just the field. The shipped client posts
+    this route with no body and no content-type, and detect existed for
+    months before it took one; making a body required would 422 every
+    existing caller, including the wizard's "Run detection with this region"
+    button.
+    """
+
+    threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class PresetBody(BaseModel):
     preset_id: str
 
@@ -425,15 +447,49 @@ def _features_at(library, source: sqlite3.Row) -> str | None:
     return datetime.fromtimestamp(mtime, UTC).isoformat()
 
 
-def _source_json(library, source: sqlite3.Row) -> dict:
-    """A source row plus the one field that is not in it: `features_at`.
+def _preset_points(conn, preset_id) -> list[list[float]] | None:
+    """A preset's four corners, or None when there is no preset to read.
 
-    Paired with the row's own `preset_assigned_at`, this is what lets the
-    re-segment panel notice that a play region was assigned after the last
-    detect -- re-segment only replays cached features, so it cannot see that
-    region and would silently produce the same rallies again.
+    None covers three states the client must not tell apart, because none
+    of them is a region it can compare: no preset assigned (detection ran
+    whole-frame), no preset recorded for the features (a source detected
+    before migration 016), and -- defensively -- an id whose row is gone.
+    Serving `[]` or the whole-frame quad instead would each make one of
+    those read as a real region that happens to differ from the other side.
     """
-    return {**dict(source), "features_at": _features_at(library, source)}
+    if not preset_id:
+        return None
+    row = get_preset(conn, preset_id)
+    if row is None:
+        return None
+    return [list(p) for p in Quad.from_json(row["quad"]).points]
+
+
+def _source_json(conn, library, source: sqlite3.Row) -> dict:
+    """A source row plus the fields that are not in it: `features_at` and
+    the two play-region quads.
+
+    `features_at` paired with the row's own `preset_assigned_at` is what
+    lets the re-segment panel notice that a play region was assigned after
+    the last detect -- re-segment only replays cached features, so it cannot
+    see that region and would silently produce the same rallies again.
+
+    Those two timestamps can only ask "was something assigned since?", which
+    is not the question. The wizard stamps `preset_assigned_at` on every
+    save, so re-saving the identical four corners announced a changed region
+    three separate times on the user's own library. The quads are the actual
+    question: `court_preset_points` is the region assigned now,
+    `features_preset_points` the region the cached features were built
+    under (migration 016), and the client compares *corners* -- a fresh
+    preset row holding the same four points is not a change, and the wizard
+    creates a fresh row on every save.
+    """
+    return {
+        **dict(source),
+        "features_at": _features_at(library, source),
+        "court_preset_points": _preset_points(conn, source["court_preset_id"]),
+        "features_preset_points": _preset_points(conn, source["features_preset_id"]),
+    }
 
 
 def _session_json(row) -> dict:
@@ -486,7 +542,7 @@ def api_get_session(session_id: str, request: Request):
     library = _library(request)
     return {
         "session": _session_json(session),
-        "sources": [_source_json(library, r) for r in list_sources(conn, session_id)],
+        "sources": [_source_json(conn, library, r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
     }
 
@@ -1102,14 +1158,29 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
 
 
 @router.post("/api/sources/{source_id}/detect")
-def api_detect(source_id: str, request: Request):
-    """Queue a full re-detect for one source.
+def api_detect(source_id: str, request: Request, body: DetectBody | None = None):
+    """Queue a full re-detect for one source, optionally at a chosen threshold.
 
     Always a full run, never reuse_features: this route exists for "I just
     assigned a play region", and the quad is applied when features are built,
     so cached features are already shaped by the old quad (see CLAUDE.md on
     --reuse-features). Idempotent at the queue: enqueue_once means mashing
     the button cannot stack duplicate fifteen-minute jobs.
+
+    The threshold rides in the payload and changes nothing about that
+    dedupe: enqueue_once keys on the job type and `payload.source_id` alone
+    (a `json_extract(payload, '$.source_id')` match), so a second click
+    carrying a different number is still the same pending detect and still
+    returns job_id None. That is the behaviour we want and not an accident
+    to tidy up -- two detects on one source both call replace_rallies, and
+    the second silently discards the first's rallies along with any hand
+    edits. A reviewer who wants a different threshold has the re-segment
+    slider, which costs 200 ms rather than fifteen minutes.
+
+    Threading it through at all exists because the reverse used to happen:
+    a source re-segmented to 0.15 and then re-detected came back at the
+    profile default, fifteen minutes spent discarding the reviewer's
+    choice. None still means "resolve per profile" -- see DetectBody.
     """
     conn = _conn(request)
     source = get_source(conn, source_id)
@@ -1120,7 +1191,14 @@ def api_detect(source_id: str, request: Request):
             status_code=409,
             detail="This source has no proxy yet -- finish setup first.",
         )
-    job_id = jobq.enqueue_once(conn, "detect", source_id, {"source_id": source_id})
+    # `body is None` is a caller that sent no body at all, which is what the
+    # shipped client does and what this route accepted for months; it is the
+    # same request as an explicit `{"threshold": null}` and must resolve the
+    # same way -- per profile, downstream.
+    threshold = body.threshold if body is not None else None
+    job_id = jobq.enqueue_once(
+        conn, "detect", source_id, {"source_id": source_id, "threshold": threshold}
+    )
     return {"job_id": job_id, "already_running": job_id is None}
 
 
@@ -1160,10 +1238,18 @@ def api_set_preset(source_id: str, body: PresetBody, request: Request):
 
 @router.get("/api/sources/{source_id}")
 def api_get_source(source_id: str, request: Request):
-    source = get_source(_conn(request), source_id)
+    """The same shape one source takes inside the session payload.
+
+    Through _source_json rather than a bare `dict(source)`: the setup and
+    session routes both read a source's play-region quads, and two spellings
+    of "a source" would drift the moment one of them gained a field -- which
+    is what happened with `features_at`, present on the list and absent here.
+    """
+    conn = _conn(request)
+    source = get_source(conn, source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    return dict(source)
+    return _source_json(conn, _library(request), source)
 
 
 @router.post("/api/sources/{source_id}/setup")
