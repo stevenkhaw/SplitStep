@@ -8,6 +8,7 @@ const source: Source = {
   id: 'src', session_id: 's', idx: 1, recorded_at: '', offset_ms: 0, duration_ms: 100000,
   width: 1920, height: 1080, fps: 30, has_original: 1, court_preset_id: null, status: 'ready', rotation_deg: 0,
   features_at: null, preset_assigned_at: null,
+  segment_threshold: null,
 }
 function rally(idx: number, over: Partial<Rally> = {}): Rally {
   return {

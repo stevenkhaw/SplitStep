@@ -134,3 +134,63 @@ export const STALE_REGION_WARNING =
 export function staleRegionSources(sources: Source[]): Source[] {
   return sources.filter(regionNewerThanFeatures)
 }
+
+/**
+ * The value the threshold slider opens on for `source`: the threshold that
+ * source's current rallies were actually cut at, or null when nothing
+ * recorded one.
+ *
+ * Null is not a fallback value, it is the absence of one -- the panel answers
+ * it by asking `/scores` to resolve the per-source profile default, exactly
+ * as it did before this column existed. What it must never do is *render* a
+ * null as a number, which is the whole bug: the slider seeded itself from
+ * that profile default (0.25 subject, 0.45 pair) no matter what produced the
+ * rallies underneath it, so source 2026-09-16/01 -- re-segmented at 0.15,
+ * holding rallies with confidence down to 0.176 -- reopened reading 0.25.
+ * A reset would have been cosmetic; a number stating the wrong threshold
+ * over the rallies it describes is a false claim about the data.
+ *
+ * `?? null` and not `|| null`: a recorded 0 is a recorded threshold, and it
+ * is the one value where truthiness and recordedness disagree.
+ */
+export function seedThreshold(source: Source | undefined): number | null {
+  return source?.segment_threshold ?? null
+}
+
+/**
+ * What the panel says, in words, about the threshold behind the rallies the
+ * reviewer is looking at -- split into the sentence and the number so the
+ * component can put the number in `font-data` (every threshold, timecode and
+ * confidence in the app is mono, so none of them jitters beside a moving
+ * readout).
+ *
+ * `value` is null for an unrecorded threshold, and `lead` then says so rather
+ * than naming the default the slider fell back to. Stating "cut at 0.25" over
+ * rallies nobody knows the threshold for would re-introduce the bug in prose
+ * having just removed it from the slider.
+ *
+ * Two decimals, matching the slider's own readout: one number rendered twice
+ * on the same row must not be spelled two ways.
+ *
+ * Reads through `seedThreshold` rather than the field, so this sentence and
+ * the slider's starting position can never disagree about whether a
+ * threshold is known -- including for a payload that carries no
+ * `segment_threshold` key at all (an older server, a cached response), which
+ * is `undefined` rather than null and would otherwise reach `.toFixed` and
+ * take the whole session route down with it.
+ */
+export function recordedThresholdNote(
+  source: Source | undefined,
+): { lead: string; value: string | null } | null {
+  if (!source) return null
+  const threshold = seedThreshold(source)
+  if (threshold === null) {
+    return {
+      lead:
+        'These rallies were cut before SplitStep recorded the threshold — ' +
+        'the slider shows this source’s profile default.',
+      value: null,
+    }
+  }
+  return { lead: 'These rallies were cut at', value: threshold.toFixed(2) }
+}

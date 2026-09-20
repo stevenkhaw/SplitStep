@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   STALE_REGION_WARNING,
   editedBoundaryCount,
+  recordedThresholdNote,
+  seedThreshold,
   regionNewerThanFeatures,
   staleRegionSources,
   resegmentConfirmMessage,
@@ -164,6 +166,7 @@ function src(overrides: Partial<Source> = {}): Source {
     rotation_deg: 0,
     features_at: null,
     preset_assigned_at: null,
+    segment_threshold: null,
     ...overrides,
   }
 }
@@ -262,5 +265,70 @@ describe('STALE_REGION_WARNING', () => {
     // with no instruction in it.
     expect(STALE_REGION_WARNING).toContain('Play region changed after the last detect')
     expect(STALE_REGION_WARNING).toContain('re-segment still uses the old one')
+  })
+})
+
+describe('seedThreshold', () => {
+  // The reported bug, reduced to one function. The slider used to start at
+  // whatever /scores called the profile default, which is a statement about
+  // the DETECTOR, not about the rallies on screen. Source 2026-09-16/01 was
+  // cut at 0.15 and the slider read 0.25.
+  it('is the threshold the source records, when it has one', () => {
+    expect(seedThreshold(src({ segment_threshold: 0.15 }))).toBe(0.15)
+  })
+
+  it('is null when the source has never recorded one', () => {
+    // Null is not a number, deliberately: every source segmented before
+    // migration 015 has no honest value, and 0.25 would be a guess the
+    // reviewer would read as a fact. Null sends the panel back to asking
+    // /scores for the profile default, exactly as it did before.
+    expect(seedThreshold(src({ segment_threshold: null }))).toBeNull()
+  })
+
+  it('is null when there is no source at all', () => {
+    expect(seedThreshold(undefined)).toBeNull()
+  })
+
+  it('does not treat a recorded 0 as absent', () => {
+    // A `||` fallback would turn this into null and silently re-seed from
+    // the profile default -- the falsy-zero bug, on the one value where the
+    // difference between "recorded" and "unknown" is the whole point.
+    expect(seedThreshold(src({ segment_threshold: 0 }))).toBe(0)
+  })
+})
+
+describe('recordedThresholdNote', () => {
+  it('names the number the current rallies were cut at', () => {
+    const note = recordedThresholdNote(src({ segment_threshold: 0.15 }))
+    expect(note?.value).toBe('0.15')
+    expect(note?.lead).toContain('cut at')
+  })
+
+  it('formats to the same two decimals the slider readout uses', () => {
+    // Otherwise the sentence and the readout above it disagree about the
+    // same number, which is the shape of the bug being fixed.
+    expect(recordedThresholdNote(src({ segment_threshold: 0.2 }))?.value).toBe('0.20')
+  })
+
+  it('carries no number at all when nothing was recorded', () => {
+    const note = recordedThresholdNote(src({ segment_threshold: null }))
+    expect(note?.value).toBeNull()
+    expect(note?.lead).toContain('before')
+  })
+
+  it('says nothing when there is no source', () => {
+    expect(recordedThresholdNote(undefined)).toBeNull()
+  })
+
+  it('treats a payload with no segment_threshold key at all as unknown', () => {
+    // An older server, or a response cached before migration 015 shipped:
+    // the field is `undefined`, not null. Reaching .toFixed on it throws
+    // inside the render and takes the whole session route down to
+    // "Loading…" -- observed exactly that way across five unrelated test
+    // files the first time this function read the field directly.
+    const { segment_threshold: _omitted, ...rest } = src()
+    const note = recordedThresholdNote(rest as Source)
+    expect(note?.value).toBeNull()
+    expect(seedThreshold(rest as Source)).toBeNull()
   })
 })

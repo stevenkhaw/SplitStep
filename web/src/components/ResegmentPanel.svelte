@@ -6,9 +6,11 @@
   import {
     STALE_REGION_WARNING,
     editedBoundaryCount,
+    recordedThresholdNote,
     redetectConfirmMessage,
     resegmentConfirmMessage,
     resegmentLossPhrase,
+    seedThreshold,
     splitCount,
     staleRegionSources,
   } from '../lib/resegment'
@@ -30,11 +32,20 @@
   // update (e.g. after the resegment this panel itself triggers) should
   // silently override. `untrack` tells svelte-check this is intentional.
   let sourceId = $state(untrack(() => sources[0]?.id ?? ''))
-  // Null until the first /scores response supplies it. The two camera
-  // profiles put the threshold on different scales (0.25 subject, 0.45 pair),
-  // so a constant here is wrong for half of all sources -- the API resolves
-  // it per source and this is where that answer lands.
-  let threshold = $state<number | null>(null)
+  // Seeded from the source's own recorded threshold -- the number its
+  // rallies were actually cut at (migration 015) -- and null only when no
+  // segmentation ever recorded one. In that case the first /scores response
+  // supplies the per-source profile default instead: the two camera profiles
+  // put the threshold on different scales (0.25 subject, 0.45 pair), so a
+  // constant here is wrong for half of all sources.
+  //
+  // The recorded value takes priority over that default precisely because
+  // the default is a fact about the DETECTOR and this slider is a claim
+  // about the RALLIES ON SCREEN. Source 2026-09-16/01 was re-segmented at
+  // 0.15 and reopened reading 0.25, over rallies carrying confidence down to
+  // 0.176 -- the readout was stating something false about the list beside
+  // it, which is worse than having forgotten.
+  let threshold = $state<number | null>(seedThreshold(untrack(() => sources[0])))
   let busy = $state(false)
   let lastCount = $state<number | null>(null)
   let error = $state<unknown>(null)
@@ -73,6 +84,13 @@
   // for any source nobody has picked. `sources` is the only input -- two
   // timestamps per row, no fetch (see staleRegionSources).
   const staleSources = $derived(staleRegionSources(sources))
+
+  // What the slider's starting position actually means, said out loud. The
+  // number alone cannot distinguish "these rallies were cut at 0.25" from
+  // "nobody knows, so here is the default" -- and confusing those two is the
+  // bug. Reads the live `sources` prop, not the mount-time snapshot, so it
+  // updates to the freshly recorded value after this panel's own re-segment.
+  const thresholdNote = $derived(recordedThresholdNote(source))
 
   async function redetect(target: Source) {
     if (busy) return
@@ -137,13 +155,21 @@
   // is `source`; threshold-driven refetches go through the debounced path
   // below instead (same split TimelineMode's preview slider uses).
   //
-  // A genuine switch to a different source resets `threshold` to null
-  // first, so the call below omits it and asks the API to resolve *that*
-  // source's own profile default -- first call is per source, not just
-  // once per mount. Carrying over the previous source's numeric value here
-  // would be sent as an explicit override, which the server just echoes
-  // back (see loadScores' comment above), silently wrong-scale whenever
-  // the two sources sit on different camera-view profiles.
+  // A genuine switch to a different source re-seeds `threshold` from that
+  // source first -- its recorded value, or null -- so the call below sends
+  // the recorded one or omits it and asks the API to resolve *that*
+  // source's own profile default. First call is per source, not just once
+  // per mount. Carrying over the *previous* source's value here would be
+  // sent as an explicit override, which the server just echoes back (see
+  // loadScores' comment above), silently wrong-scale whenever the two
+  // sources sit on different camera-view profiles.
+  //
+  // Note the two ways a threshold reaches this call, and that they are not
+  // interchangeable: a recorded value goes out explicitly (so loadScores
+  // does not overwrite it with the echoed default), a null goes out as
+  // "resolve it for me". Seeding a recorded value also removes the null
+  // window entirely for that source -- the slider is live on the first
+  // frame, with no round trip to wait on.
   $effect(() => {
     // Reading `open` makes this effect fire on first expand, so the panel
     // fetches when it is actually looked at. Re-collapsing just re-runs it
@@ -151,7 +177,12 @@
     // against whatever the source looks like by then.
     if (!open) return
     if (!source) return
-    if (source.id !== scoredSourceId) threshold = null
+    // A genuine switch re-seeds from the NEW source's recorded threshold, per
+    // source -- two sources' recorded values differ the same way their
+    // profile defaults do, so carrying one across would state the wrong
+    // number about the other's rallies. Null when it has none, which sends
+    // the call below back to asking for that source's own profile default.
+    if (source.id !== scoredSourceId) threshold = seedThreshold(source)
     scoredSourceId = source.id
     loadScores(source.id, untrack(() => threshold))
   })
@@ -315,6 +346,19 @@
           {busy ? 'working…' : 'Re-segment'}
         </button>
       </div>
+
+      <!-- Under the slider, because it explains where the thumb is sitting.
+           `dim` on a `surface` card (the panel's own border/ground), never on
+           bare court. The number is `font-data` like every other threshold,
+           timecode and confidence in the app -- it is read against the mono
+           readout a few pixels above it, and two spellings of one number is
+           the disagreement this whole change is about. -->
+      {#if thresholdNote}
+        <p class="mt-2 text-caption text-dim">
+          {thresholdNote.lead}{#if thresholdNote.value !== null}
+            <span class="font-data">{thresholdNote.value}</span>.{/if}
+        </p>
+      {/if}
 
       {#if source && threshold !== null}
         <div class="mt-3">

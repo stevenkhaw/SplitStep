@@ -1,0 +1,25 @@
+-- The detector threshold a source's CURRENT rallies were cut at.
+--
+-- Until now this number existed only for the duration of the call that used
+-- it. The re-segment slider seeded itself from /api/sources/{id}/scores,
+-- which answers with `params_for_frames`' resolved *profile default* (0.25
+-- subject, 0.45 pair) -- so the slider showed the default no matter what
+-- produced the rallies underneath it. Reported on source 2026-09-16/01:
+-- re-segmented at 0.15, reopened, slider read 0.25, while the rallies on
+-- screen carried confidences down to 0.176. The number was not merely reset;
+-- it was a false statement about the data next to it.
+--
+-- Written by every path that persists a segmentation -- the detect handler,
+-- POST /resegment, and `splitstep segment` -- always from the SegmentParams
+-- actually scored against, never from a constant: the two profiles put the
+-- threshold on different scales and hardcoding either one is the bug
+-- params_for_frames exists to prevent.
+--
+-- Nullable, like preset_assigned_at (migration 014) and for the same reason:
+-- absence here is unknown, not a known negative. Every source detected
+-- before this migration was cut at *some* threshold nobody recorded, and
+-- back-filling the profile default would assert a number that may well be
+-- wrong -- precisely the false claim this column exists to remove. NULL lets
+-- the UI decline to answer, which is the truth, and it falls back to asking
+-- /scores for the profile default exactly as it did before.
+ALTER TABLE sources ADD COLUMN segment_threshold REAL;

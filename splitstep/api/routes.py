@@ -66,6 +66,7 @@ from splitstep.db.sessions import (
     scoring_rules,
     set_scoring,
     set_source_preset,
+    set_source_segment_threshold,
 )
 from splitstep.db.settings import get_hr_clips_root, set_hr_clips_root
 from splitstep.detect.features import read_features
@@ -1075,8 +1076,17 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
         raise HTTPException(status_code=409, detail="Source has not been detected yet")
 
     frames = read_features(path)
-    intervals = segment(frames, params_for_frames(frames, threshold=body.threshold))
+    # Held rather than inlined: `body.threshold` is None on a default run and
+    # params_for_frames is what resolves it per source (0.25 subject, 0.45
+    # pair), so `params.threshold` is the only honest record of what these
+    # rallies were cut at -- recording the request body would store None for
+    # exactly the runs the reviewer most needs a number for (migration 015).
+    params = params_for_frames(frames, threshold=body.threshold)
+    intervals = segment(frames, params)
     count = replace_rallies(conn, source["session_id"], source_id, intervals)
+    # After replace_rallies: the column describes the rallies now in the
+    # table, so it must not be written ahead of a rewrite that could fail.
+    set_source_segment_threshold(conn, source_id, params.threshold)
     # replace_rallies inserts every new rally with reviewed_at NULL and
     # carries starred/rejected across by overlap, but never reviewed_at --
     # so a session that read "reviewed" before this call would otherwise

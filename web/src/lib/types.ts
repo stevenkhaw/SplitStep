@@ -38,6 +38,14 @@ export interface Source {
   // an old timestamp. See splitstep/db/migrations/014_preset_assigned_at.sql.
   features_at: string | null
   preset_assigned_at: string | null
+  // The detector threshold this source's CURRENT rallies were cut at, written
+  // by whichever path last segmented it (detect, /resegment, `splitstep
+  // segment`). Null means genuinely unknown -- never segmented, or segmented
+  // before migration 015 existed -- and must never be rendered as a number:
+  // the re-segment slider showing a profile default over rallies cut at
+  // something else is the bug this column was added for. See
+  // splitstep/db/migrations/015_segment_threshold.sql.
+  segment_threshold: number | null
 }
 
 export interface Rally {

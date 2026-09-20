@@ -20,6 +20,7 @@ from splitstep.db.sessions import (
     scoring_rules,
     set_scoring,
     set_source_preset,
+    set_source_segment_threshold,
 )
 from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
@@ -324,7 +325,14 @@ def cmd_segment(args) -> int:
         return 0
 
     replace_rallies(conn, source["session_id"], args.source_id, intervals)
-    # Mirrors api_resegment: replace_rallies inserts every new rally with
+    # Mirrors api_resegment: the threshold a source's rallies were cut at is
+    # stored so the UI's slider can open on it instead of on the profile
+    # default. A CLI sweep that skipped this would leave the column
+    # describing some earlier run's rallies, which is the same false claim
+    # migration 015 exists to remove -- just reached from the terminal. Not
+    # written on --dry-run above, which persists no rallies to describe.
+    set_source_segment_threshold(conn, args.source_id, params.threshold)
+    # Mirrors api_resegment too: replace_rallies inserts every new rally with
     # reviewed_at NULL, so a session that read 'reviewed' before this call now
     # contains nothing anyone has seen. Without the refresh the Library keeps
     # showing it as done and never prompts for the new rallies. HTTP and

@@ -53,6 +53,7 @@ function source(id: string, idx: number, status: 'needs_setup' | 'ready'): Sourc
     rotation_deg: 0,
     features_at: null,
     preset_assigned_at: null,
+    segment_threshold: null,
   }
 }
 

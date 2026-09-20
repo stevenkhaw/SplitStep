@@ -47,6 +47,7 @@ function source(id: string, idx: number, overrides: Partial<Source> = {}): Sourc
     rotation_deg: 0,
     features_at: null,
     preset_assigned_at: null,
+    segment_threshold: null,
     ...overrides,
   }
 }
@@ -634,5 +635,166 @@ describe('ResegmentPanel stale-region warning, panel collapsed', () => {
       (b) => b.textContent?.trim() === 'Run detection',
     )
     expect(buttons.length).toBe(1)
+  })
+})
+
+
+// The reported bug: the reviewer re-segmented source 2026-09-16/01 at 0.15,
+// closed the app, reopened it, and the slider read 0.25. Nothing stored the
+// number -- the panel seeded itself from /scores, which answers with the
+// per-source PROFILE DEFAULT, so the readout was a claim about the detector
+// dressed up as a claim about the rallies underneath it. That source now
+// holds rallies with confidence down to 0.176; the label above them said
+// 0.25.
+//
+// These assert on the slider's value and on which arguments /scores is
+// called with, not on anything visual: jsdom has no layout, and the value is
+// the thing that was wrong anyway.
+describe('ResegmentPanel threshold seeding', () => {
+  let target: HTMLDivElement
+  let instance: unknown
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApi.scores.mockResolvedValue({ step_ms: 200, threshold: 0.25, scores: [0.1, 0.9] })
+    target = document.createElement('div')
+    document.body.appendChild(target)
+  })
+
+  afterEach(() => {
+    if (instance) unmount(instance as never)
+    target.remove()
+    instance = undefined
+    vi.restoreAllMocks()
+  })
+
+  async function open(sources: Source[]) {
+    instance = mount(ResegmentPanel, {
+      target,
+      props: { sources, rallies: [rally()], onresegmented: vi.fn() },
+    })
+    flushSync()
+    const details = target.querySelector('details')
+    if (!details) throw new Error('panel details not found')
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
+    await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalled())
+    flushSync()
+  }
+
+  function slider(): HTMLInputElement {
+    const el = target.querySelector('input[type="range"]')
+    if (!el) throw new Error('threshold slider not found')
+    return el as HTMLInputElement
+  }
+
+  it('opens on the threshold the source was cut at, not the profile default', async () => {
+    await open([source('src1', 1, { segment_threshold: 0.15 })])
+    expect(slider().value).toBe('0.15')
+  })
+
+  it('asks /scores for that same threshold, so the curve draws its line there', async () => {
+    // Passing it explicitly also stops loadScores adopting the echoed
+    // profile default -- it only does that when asked to resolve one
+    // (th === null), which is exactly what must not happen here.
+    await open([source('src1', 1, { segment_threshold: 0.15 })])
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', 0.15)
+  })
+
+  it('falls back to the profile default when nothing was recorded', async () => {
+    // Every source segmented before migration 015 looks like this, and so
+    // does one that has never been detected. Unknown is not 0.25; it is a
+    // question for /scores, the way it always was.
+    await open([source('src1', 1, { segment_threshold: null })])
+    expect(mockApi.scores).toHaveBeenCalledWith('src1', undefined)
+    expect(slider().value).toBe('0.25')
+  })
+
+  it('never renders an unrecorded threshold as a number before /scores answers', async () => {
+    // The null window. The readout says so and the slider stays disabled --
+    // a number here would be invented, which is the bug in miniature.
+    let resolve!: (v: { step_ms: number; threshold: number; scores: number[] }) => void
+    mockApi.scores.mockImplementation(() => new Promise((r) => (resolve = r)))
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1, { segment_threshold: null })],
+        rallies: [rally()],
+        onresegmented: vi.fn(),
+      },
+    })
+    flushSync()
+    const details = target.querySelector('details') as HTMLDetailsElement
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
+
+    expect(slider().disabled).toBe(true)
+    expect(target.textContent).toContain('…')
+
+    resolve({ step_ms: 200, threshold: 0.25, scores: [0.1, 0.9] })
+    await vi.waitFor(() => expect(slider().disabled).toBe(false))
+  })
+
+  it('seeds a recorded threshold with no null window at all', async () => {
+    // A recorded value needs no round trip, so the slider is live on the
+    // first frame -- there is nothing to wait for.
+    mockApi.scores.mockImplementation(() => new Promise(() => {}))
+    instance = mount(ResegmentPanel, {
+      target,
+      props: {
+        sources: [source('src1', 1, { segment_threshold: 0.15 })],
+        rallies: [rally()],
+        onresegmented: vi.fn(),
+      },
+    })
+    flushSync()
+    const details = target.querySelector('details') as HTMLDetailsElement
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    flushSync()
+
+    expect(slider().disabled).toBe(false)
+    expect(slider().value).toBe('0.15')
+  })
+
+  it('re-seeds from the newly selected source, per source', async () => {
+    // The two profiles' thresholds are on different scales, and so are two
+    // sources' recorded values. Carrying one across a switch would state the
+    // wrong number about the new source's rallies.
+    await open([
+      source('src1', 1, { segment_threshold: 0.15 }),
+      source('src2', 2, { segment_threshold: 0.4 }),
+    ])
+    expect(slider().value).toBe('0.15')
+
+    const select = target.querySelector('select') as HTMLSelectElement
+    select.value = 'src2'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+
+    expect(slider().value).toBe('0.4')
+    expect(mockApi.scores).toHaveBeenCalledWith('src2', 0.4)
+  })
+
+  it('tells the reviewer, in words, what the rallies on screen were cut at', async () => {
+    await open([source('src1', 1, { segment_threshold: 0.15 })])
+    expect(target.textContent).toContain('cut at')
+    expect(target.textContent).toContain('0.15')
+  })
+
+  it('says the threshold is unknown rather than naming one, when it is', async () => {
+    await open([source('src1', 1, { segment_threshold: null })])
+    expect(target.textContent).toContain('before')
+    expect(target.textContent).not.toContain('cut at')
+  })
+
+  it('renders the recorded number in font-data, like every other figure', async () => {
+    // A threshold is a number that sits beside a moving readout; the mono
+    // role carries tabular-nums so neither jitters (CLAUDE.md, Type).
+    await open([source('src1', 1, { segment_threshold: 0.15 })])
+    const mono = [...target.querySelectorAll('.font-data')]
+    expect(mono.some((el) => el.textContent?.trim() === '0.15')).toBe(true)
   })
 })

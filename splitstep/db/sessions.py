@@ -253,6 +253,29 @@ def set_source_preset(conn: sqlite3.Connection, source_id: str, preset_id: str) 
     conn.commit()
 
 
+def set_source_segment_threshold(
+    conn: sqlite3.Connection, source_id: str, threshold: float
+) -> None:
+    """Record the detector threshold this source's current rallies were cut at.
+
+    Called by every writer of a segmentation -- handle_detect, api_resegment
+    and `splitstep segment` -- immediately after `replace_rallies`, so the
+    column always describes the rallies that are actually in the table rather
+    than the last threshold anyone happened to try.
+
+    Pass `params.threshold` off the SegmentParams that were scored against,
+    never the caller's own argument: a default run passes None and
+    `params_for_frames` resolves it per source (0.25 subject, 0.45 pair), and
+    recording the unresolved None would put this column straight back into
+    the "nobody knows" state it exists to leave (migration 015).
+    """
+    conn.execute(
+        "UPDATE sources SET segment_threshold = ? WHERE id = ?",
+        (float(threshold), source_id),
+    )
+    conn.commit()
+
+
 def set_source_rotation(conn: sqlite3.Connection, source_id: str, rotation_deg: int) -> None:
     conn.execute(
         "UPDATE sources SET rotation_deg=? WHERE id=?",

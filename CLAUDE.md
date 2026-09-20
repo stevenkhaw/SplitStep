@@ -108,6 +108,17 @@ intervals. The split exists so a threshold sweep costs milliseconds and no GPU
 slider. `detect --reuse-features` skips straight to re-segmenting cached
 features, so it will NOT pick up a newly assigned play region.
 
+Whichever path persists a segmentation — the detect handler, `POST
+/resegment`, `splitstep segment` — records the threshold it used in
+`sources.segment_threshold` (migration 015), always from the `SegmentParams`
+actually scored against and never from a constant. The re-segment slider
+seeds from it. Before that column the slider seeded from `/scores`, which
+answers with the **profile default**, so it read 0.25 over rallies a reviewer
+had cut at 0.15 — not a forgotten setting but a false claim about the list
+beside it. NULL means unknown (a source segmented before the migration), and
+is rendered as unknown, never as a number; the panel then falls back to
+asking `/scores` for the profile default exactly as it always did.
+
 Scoring has **two profiles**, picked per source by `detect/viewpoint.py::analyze_view`
 from the median vertical gap between the two largest person boxes. Always build
 params with `segment.params_for_frames(frames)` — constructing `SegmentParams()`

@@ -19,6 +19,7 @@ function source(over: Partial<Source> = {}): Source {
     rotation_deg: 0,
     features_at: null,
     preset_assigned_at: null,
+    segment_threshold: null,
     ...over,
   }
 }

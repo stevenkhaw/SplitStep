@@ -91,6 +91,7 @@ function detailWith(rallies: Rally[]): SessionDetail {
         rotation_deg: 0,
         features_at: null,
         preset_assigned_at: null,
+        segment_threshold: null,
       },
     ],
     rallies,
@@ -253,6 +254,7 @@ function sourceWith(id: string, idx: number) {
     rotation_deg: 90,
     features_at: null,
     preset_assigned_at: null,
+    segment_threshold: null,
   }
 }
 

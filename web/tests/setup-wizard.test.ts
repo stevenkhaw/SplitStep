@@ -6,6 +6,7 @@ const source = {
   offset_ms: 0, duration_ms: 1173905, width: 3840, height: 2160, fps: 30,
   has_original: 1, court_preset_id: null, status: 'needs_setup', rotation_deg: 90,
   features_at: null, preset_assigned_at: null,
+  segment_threshold: null,
 }
 
 const existingPreset = {

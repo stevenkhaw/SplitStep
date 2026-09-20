@@ -22,6 +22,7 @@ from splitstep.db.sessions import (
     scoring_rules,
     set_session_status,
     set_source_dimensions,
+    set_source_segment_threshold,
     set_source_status,
 )
 from splitstep.db.settings import get_color_profile, get_hr_clips_root, lock_color_profile
@@ -333,8 +334,18 @@ def handle_detect(library: Library, payload: dict,
             frames = build_features(boxes, quad, grid, STEP_MS)
             write_features(features_path, frames)
 
-        intervals = segment(frames, params_for_frames(frames))
+        # Held rather than inlined: the resolved threshold is recorded below
+        # so the re-segment slider can open on the number these rallies were
+        # actually cut at. params_for_frames picks the profile per source, so
+        # the value differs by source and a constant here would be wrong for
+        # half of them (migration 015).
+        params = params_for_frames(frames)
+        intervals = segment(frames, params)
         replace_rallies(conn, source["session_id"], source["id"], intervals)
+        # After replace_rallies, never before: the column describes the
+        # rallies now in the table, and a write that landed ahead of a failed
+        # rewrite would describe rallies that were never replaced.
+        set_source_segment_threshold(conn, source["id"], params.threshold)
     except Exception:
         set_source_status(conn, source["id"], "failed")
         # See _session_should_fail: don't strand a sibling source's
