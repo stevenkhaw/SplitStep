@@ -666,6 +666,23 @@ four had to be retargeted during the migration and would again.
   with a whole tiebreak counting as one, which is what makes "the player
   who served first in the tiebreak receives first in the next set" fall out
   of plain alternation.
+  **A wrong score is fixed with an anchor, never by editing the board.**
+  `score_anchors` (migration 017) holds "entering this point in the source,
+  the score is X" — sets, games and raw point counts — and `score_before`
+  starts its replay from the newest anchor at or before the rally instead of
+  from love-all. An anchor is a stored *input* to the replay, like a winner;
+  nothing about the resulting score is stored. It is keyed on
+  `(source_id, at_ms)` with no rally foreign key, for the reason
+  `reel_items` is keyed on a span: `replace_rallies` deletes every rally on
+  a sweep. `_place_anchors` / `placeAnchors` attach an anchor to the rally
+  *containing* its time (or the next one along from a gap), not the one
+  starting at it, because QueueMode stamps it on a `start_ms` and a
+  re-segment nudges boundaries. The known limit follows from that: a
+  re-segment can move a boundary across an anchor, and which rally is
+  "first after it" can change — the anchor still applies at its time. The
+  numbered reel and `splitstep score show` read the same anchors the panel
+  does. `lib/anchor.ts` owns the form's label ↔ count conversion; `Ad` is
+  stored as one more than the `40` it faces.
 
 ## Distribution status
 

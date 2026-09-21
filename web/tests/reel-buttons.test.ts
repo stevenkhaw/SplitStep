@@ -66,6 +66,7 @@ function reviewed(): SessionDetail {
       features_at: null, preset_assigned_at: null,
       segment_threshold: null,
     }],
+    anchors: [],
     rallies: [
       rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' }),
       rally('r2', 2, { point: 1, reviewed_at: '2026-08-19T11:01:00Z', seen_at: '2026-08-19T11:01:00Z' }),
@@ -139,6 +140,7 @@ describe('the reviewed panel compiles reels', () => {
   it('disables a reel button whose set is empty', async () => {
     mockApi.getSession.mockResolvedValue({
       ...reviewed(),
+      anchors: [],
       rallies: [rally('r1', 1, { point: 1, reviewed_at: '2026-08-19T11:00:00Z', seen_at: '2026-08-19T11:00:00Z' })],
     })
     instance = mount(SessionHarness, { target })

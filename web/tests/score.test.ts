@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_RULES, score, scoreBefore, scoreboardRows } from '../src/lib/score'
+import { DEFAULT_RULES, anchorsAt, score, scoreBefore, scoreboardRows } from '../src/lib/score'
 import type { AnchorState, Player, ScoreRules } from '../src/lib/score'
 import type { Rally, ScoreAnchor } from '../src/lib/types'
 
@@ -141,6 +141,25 @@ describe('scoreBefore with anchors', () => {
   it('counts unscored points only after the anchor', () => {
     const rallies = [rally(1), rally(2, { winner: 'a' }), rally(3)]
     expect(scoreBefore(rallies, '', DEFAULT_RULES, [anchor(rallies[1].start_ms)]).unscored).toBe(1)
+  })
+})
+
+describe('anchorsAt', () => {
+  it('lists the anchors that land on this rally, newest first', () => {
+    // The same placement scoreBefore uses: the containing rally, or the
+    // next one along from a gap. QueueMode shows these as "anchored here"
+    // and offers to remove them, so it must agree with the replay about
+    // which rally that is.
+    const rallies = [1, 2, 3].map((i) => rally(i, { winner: 'a' }))
+    const inside = anchor(rallies[1].start_ms + 500, { games: [1, 0] })
+    const atStart = anchor(rallies[1].start_ms, { games: [2, 0] })
+    const gapBefore = anchor(rallies[0].end_ms + 100, { games: [3, 0] })
+    const other = anchor(rallies[2].start_ms, { games: [4, 0] })
+    const elsewhere = anchor(rallies[1].start_ms, { games: [5, 0] }, 'other-source')
+    expect(anchorsAt(rallies, 'r2', [other, gapBefore, atStart, inside, elsewhere]))
+      .toEqual([inside, atStart, gapBefore])
+    expect(anchorsAt(rallies, 'r1', [other, gapBefore, atStart, inside])).toEqual([])
+    expect(anchorsAt(rallies, 'nope', [other])).toEqual([])
   })
 })
 

@@ -223,6 +223,23 @@ function placeAnchors(ordered: Rally[], anchors: ScoreAnchor[]): PlacedAnchor[] 
   return placed
 }
 
+/**
+ * The anchors that land on `rallyId` -- placed before it by the same rule
+ * scoreBefore replays by -- newest first. QueueMode shows these as
+ * "anchored here" and offers to remove them, so which rally an anchor
+ * belongs to is decided once, here, and never re-derived from at_ms in a
+ * component.
+ */
+export function anchorsAt(rallies: Rally[], rallyId: string, anchors: ScoreAnchor[]): ScoreAnchor[] {
+  const target = rallies.find((r) => r.id === rallyId)
+  if (!target) return []
+  const ordered = [...rallies].sort((x, y) => x.idx - y.idx)
+  return placeAnchors(ordered, anchors)
+    .filter((p) => p.idx === target.idx && p.slot === 0)
+    .sort((x, y) => y.anchor.at_ms - x.anchor.at_ms)
+    .map((p) => p.anchor)
+}
+
 function later(x: PlacedAnchor, y: PlacedAnchor): boolean {
   if (x.idx !== y.idx) return x.idx > y.idx
   if (x.slot !== y.slot) return x.slot > y.slot

@@ -82,6 +82,7 @@ function detailWith(rallies: Rally[]): SessionDetail {
         segment_threshold: null,
       },
     ],
+    anchors: [],
     rallies,
   }
 }

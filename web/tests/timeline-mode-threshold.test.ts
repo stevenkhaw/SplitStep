@@ -84,6 +84,7 @@ function mixedProfileDetail(): SessionDetail {
   return {
     session: { id: 's1', title: 'test session', played_on: '2026-08-19', status: 'ready', scoring: null },
     sources: [source('src1', 1), source('src2', 2)],
+    anchors: [],
     rallies: [rally('r1', 1, 'src1'), rally('r2', 2, 'src2')],
   }
 }

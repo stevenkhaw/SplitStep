@@ -1,6 +1,7 @@
 <script lang="ts">
   import { playerName, scoreboardRows } from '../lib/score'
   import type { Player, ScoreRules, ScoreState } from '../lib/score'
+  import type { ScoreAnchor } from '../lib/types'
 
   interface Props {
     rules: ScoreRules
@@ -14,8 +15,15 @@
     /** P was just pressed with tracking on: ask who won. */
     prompting: boolean
     onwin: (p: Player) => void
+    /** The anchors the replay attaches to this rally (lib/score.ts::anchorsAt),
+     *  newest first -- the board above is stated by the reviewer, not
+     *  replayed, when this is non-empty. */
+    anchored?: ScoreAnchor[]
+    /** Open the anchor form for this rally. */
+    onanchor?: () => void
+    onunanchor?: (a: ScoreAnchor) => void
   }
-  let { rules, state, unscored, prompting, onwin }: Props = $props()
+  let { rules, state, unscored, prompting, onwin, anchored = [], onanchor, onunanchor }: Props = $props()
 
   const rows = $derived(scoreboardRows(state, rules))
   const winnerName = $derived(state.finished ? playerName(rules, state.finished) : null)
@@ -91,4 +99,29 @@
   {#if unscored > 0}
     <p class="mt-2 font-data text-caption text-faint">{unscored} unscored point{unscored === 1 ? '' : 's'} before this</p>
   {/if}
+
+  <!-- Anchoring is a correction, not a verdict, so it sits below the
+       winner buttons and takes the outlined weight rather than the filled
+       one: the frequent action on this panel is A/B. An anchored rally says
+       so in words, because the board above it is then the reviewer's claim
+       and no longer what the winners replay to. -->
+  <div class="mt-2 flex items-center justify-between gap-2 font-data text-caption">
+    {#if anchored.length > 0}
+      <span data-testid="anchored" class="text-fg">Score anchored here</span>
+      <button
+        type="button"
+        data-testid="unanchor"
+        class="rounded border border-line px-2 py-0.5 text-dim hover:text-fg motion-safe:transition-colors"
+        onclick={() => onunanchor?.(anchored[0])}
+      >Remove</button>
+    {:else}
+      <span class="text-faint">Wrong score?</span>
+      <button
+        type="button"
+        data-testid="anchor"
+        class="rounded border border-line px-2 py-0.5 text-dim hover:text-fg motion-safe:transition-colors"
+        onclick={() => onanchor?.()}
+      >Set score here</button>
+    {/if}
+  </div>
 </aside>

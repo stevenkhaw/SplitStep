@@ -95,6 +95,7 @@ function detail(): SessionDetail {
       scoring: null,
     },
     sources: [source],
+    anchors: [],
     rallies: [rally],
   }
 }

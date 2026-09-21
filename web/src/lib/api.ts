@@ -14,13 +14,14 @@ import type {
   ReelMergeResult,
   RenderResult,
   RevealResult,
+  ScoreAnchor,
   ScoreSeries,
   Session,
   SessionDetail,
   Source,
   SpanRef,
 } from './types'
-import type { ScoreRules } from './score'
+import type { AnchorState, ScoreRules } from './score'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -155,6 +156,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ rules }),
     }),
+  // Both answer with the session's whole anchor list, because one anchor's
+  // effect on the replay depends on every other (lib/score.ts::scoreBefore).
+  setAnchor: (sourceId: string, atMs: number, state: AnchorState) =>
+    req<{ anchors: ScoreAnchor[] }>(`/api/sources/${sourceId}/anchors`, {
+      method: 'POST',
+      body: JSON.stringify({ at_ms: atMs, ...state }),
+    }),
+  deleteAnchor: (sourceId: string, atMs: number) =>
+    req<{ anchors: ScoreAnchor[] }>(`/api/sources/${sourceId}/anchors/${atMs}`, { method: 'DELETE' }),
   setNote: (id: string, note: string) => post(`/api/rallies/${id}/note`, { note }),
   // Called on every plain right-arrow (see persist.ts's skip case) --
   // on this". See splitstep/db/rallies.py::set_seen.

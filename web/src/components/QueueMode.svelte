@@ -11,13 +11,14 @@
   import { QueueController } from '../lib/queue'
   import { navigate } from '../lib/router.svelte'
   import { fractionToScrubMs, scrubMsToFraction } from '../lib/scrub'
-  import { DEFAULT_RULES, playerName, scoreBefore, winnerChip } from '../lib/score'
+  import { DEFAULT_RULES, anchorsAt, playerName, scoreBefore, winnerChip } from '../lib/score'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
   import { formatDuration, formatTs } from '../lib/time'
   import type { VerdictFlash } from '../lib/flash'
   import type { QueueAction } from '../lib/queue'
-  import type { Player, ScoreRules } from '../lib/score'
-  import type { ExportResult, Rally, SessionDetail, Source } from '../lib/types'
+  import type { AnchorState, Player, ScoreRules } from '../lib/score'
+  import type { ExportResult, Rally, ScoreAnchor, SessionDetail, Source } from '../lib/types'
+  import AnchorForm from './AnchorForm.svelte'
   import KeyHints from './KeyHints.svelte'
   import ScorePanel from './ScorePanel.svelte'
   import ScoreSetup from './ScoreSetup.svelte'
@@ -66,6 +67,9 @@
     /** Tracking was switched on/off or its rules changed. Session keeps
      *  `detail.session.scoring` in step so a remount seeds correctly. */
     onscoring?: (rules: ScoreRules | null) => void
+    /** An anchor was set or removed; the same remount-seeding contract as
+     *  onscoring, for `detail.anchors`. */
+    onanchors?: (anchors: ScoreAnchor[]) => void
     /** Whether this pass includes rejected rallies (H toggles it). Read only
      *  at construction -- see the `queue` one-time snapshot below -- so
      *  flipping it is meaningless without the remount `ontoggle_rejected`
@@ -85,6 +89,7 @@
     onexport,
     sessionRallies,
     onscoring,
+    onanchors,
     showRejected,
     ontoggle_rejected,
   }: Props = $props()
@@ -157,11 +162,49 @@
   // P was pressed with tracking on: the panel asks who won until A/B/Esc.
   let awaitingWinner = $state(false)
 
+  // The session's anchors (migration 017), seeded like `rules` and owned
+  // here until a remount. They are inputs to the replay below, the way a
+  // winner is; nothing about the resulting score is stored on this side.
+  let anchors = $state<ScoreAnchor[]>(untrack(() => detail.anchors))
+  // The anchor form is open for the rally on screen.
+  let anchoring = $state(false)
+
   const board = $derived.by(() => {
     version
     if (!rules || !current) return null
-    return scoreBefore(queue.liveSnapshot(sessionRallies), current.id, rules)
+    return scoreBefore(queue.liveSnapshot(sessionRallies), current.id, rules, anchors)
   })
+  // Which anchors the replay attaches to this rally -- decided by the same
+  // placement scoreBefore uses, never re-derived here from at_ms.
+  const anchoredHere = $derived.by(() => {
+    version
+    return current ? anchorsAt(sessionRallies, current.id, anchors) : []
+  })
+
+  async function saveAnchor(state: AnchorState): Promise<void> {
+    if (!current) return
+    // Stamped at the rally's start: "entering this rally". scoreBefore
+    // attaches it to the rally CONTAINING that instant, so a re-segment that
+    // nudges the boundary keeps it on this footage.
+    try {
+      const r = await api.setAnchor(current.source_id, current.start_ms, state)
+      anchors = r.anchors
+      anchoring = false
+      onanchors?.(anchors)
+    } catch (e) {
+      toaster.push(`Couldn't anchor the score -- ${String(e)}`)
+    }
+  }
+
+  async function removeAnchor(a: ScoreAnchor): Promise<void> {
+    try {
+      const r = await api.deleteAnchor(a.source_id, a.at_ms)
+      anchors = r.anchors
+      onanchors?.(anchors)
+    } catch (e) {
+      toaster.push(`Couldn't remove the anchor -- ${String(e)}`)
+    }
+  }
 
   async function startTracking(next: ScoreRules): Promise<void> {
     try {
@@ -521,11 +564,13 @@
       case 'ArrowRight':
         e.preventDefault()
         awaitingWinner = false
+        anchoring = false
         apply(queue.skip())
         break
       case 'ArrowLeft':
         e.preventDefault()
         awaitingWinner = false
+        anchoring = false
         queue.back()
         version += 1
         break
@@ -753,8 +798,25 @@
            -- `--breakpoint-ultra` is 1800px, which would stack the panel
            under the video on a common 1440-wide laptop screen. Below `xl`
            the panel stacks beneath the deck instead. -->
-      <div class="xl:w-72 xl:shrink-0">
-        <ScorePanel {rules} state={board.state} unscored={board.unscored} prompting={awaitingWinner} onwin={recordWinner} />
+      <div class="flex flex-col gap-3 xl:w-72 xl:shrink-0">
+        <ScorePanel
+          {rules}
+          state={board.state}
+          unscored={board.unscored}
+          prompting={awaitingWinner}
+          onwin={recordWinner}
+          anchored={anchoredHere}
+          onanchor={() => (anchoring = true)}
+          onunanchor={removeAnchor}
+        />
+        {#if anchoring}
+          <!-- Keyed on the rally so the form re-seeds when the reviewer
+               moves on (S/X/P also advance) rather than carrying one
+               rally's score into the next. -->
+          {#key current.id}
+            <AnchorForm {rules} replayed={board.state} onsave={saveAnchor} oncancel={() => (anchoring = false)} />
+          {/key}
+        {/if}
       </div>
     {/if}
   </div>

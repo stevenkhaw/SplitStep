@@ -397,6 +397,9 @@
         onscoring={(rules) => {
           if (detail) detail.session.scoring = rules
         }}
+        onanchors={(anchors) => {
+          if (detail) detail.anchors = anchors
+        }}
         {showRejected}
         ontoggle_rejected={toggleRejected}
       />

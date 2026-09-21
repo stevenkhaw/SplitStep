@@ -38,6 +38,7 @@ const sessions: Session[] = [
 const detailS1: SessionDetail = {
   session: { id: 's1', title: '2026-08-18', played_on: '2026-08-18', status: 'reviewed', scoring: null },
   sources: [],
+  anchors: [],
   rallies: [
     rally('r1', 1, { point: 1 }),
     rally('r2', 2, { point: 1, starred: 1 }),
@@ -65,6 +66,7 @@ const detailS1: SessionDetail = {
 const detailS2: SessionDetail = {
   session: { id: 's2', title: '2026-08-19', played_on: '2026-08-19', status: 'reviewed', scoring: null },
   sources: [],
+  anchors: [],
   rallies: [
     rally('r1', 1, { session_id: 's2', source_id: 'src2', point: 1 }),
   ],

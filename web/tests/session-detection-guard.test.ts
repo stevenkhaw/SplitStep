@@ -134,6 +134,7 @@ describe('Session filters sources before handing them to DetectionPanel', () => 
         source('src-setup', 1, 'needs_setup'),
         source('src-ready', 2, 'ready', { features_at: '2026-09-16T03:29:00+00:00' }),
       ],
+      anchors: [],
       rallies: [rally('r1', 1, 'src-ready')],
     } as SessionDetail)
 
@@ -151,6 +152,7 @@ describe('Session filters sources before handing them to DetectionPanel', () => 
         source('src-setup', 1, 'needs_setup'),
         source('src-ready', 2, 'ready', { features_at: '2026-09-16T03:29:00+00:00' }),
       ],
+      anchors: [],
       rallies: [rally('r1', 1, 'src-ready')],
     } as SessionDetail)
 
@@ -172,6 +174,7 @@ describe('Session filters sources before handing them to DetectionPanel', () => 
     mockApi.getSession.mockResolvedValue({
       session: { id: 's1', title: 'Setup Session', played_on: '2026-08-19', status: 'needs_setup', scoring: null },
       sources: [source('src-setup', 1, 'needs_setup')],
+      anchors: [],
       rallies: [],
     } as SessionDetail)
 
@@ -195,6 +198,7 @@ describe('Session filters sources before handing them to DetectionPanel', () => 
     mockApi.getSession.mockResolvedValue({
       session: { id: 's1', title: 'Fresh Session', played_on: '2026-08-19', status: 'ready', scoring: null },
       sources: [source('src-fresh', 1, 'ready')],
+      anchors: [],
       rallies: [],
     } as SessionDetail)
 

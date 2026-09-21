@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ScorePanel from '../src/components/ScorePanel.svelte'
 import { DEFAULT_RULES, score } from '../src/lib/score'
 import type { Player, ScoreRules, ScoreState } from '../src/lib/score'
+import type { ScoreAnchor } from '../src/lib/types'
 
 let host: HTMLElement | null = null
 let app: Record<string, unknown> | null = null
@@ -13,12 +14,18 @@ interface Props {
   unscored: number
   prompting: boolean
   onwin: (p: Player) => void
+  anchored?: ScoreAnchor[]
+  onanchor?: () => void
+  onunanchor?: (a: ScoreAnchor) => void
 }
 
 function render(props: Props) {
   host = document.createElement('div')
   document.body.appendChild(host)
-  app = mount(ScorePanel, { target: host, props })
+  app = mount(ScorePanel, {
+    target: host,
+    props: { anchored: [], onanchor: () => {}, onunanchor: () => {}, ...props },
+  })
   return host
 }
 
@@ -88,6 +95,23 @@ describe('ScorePanel', () => {
     expect(marks[1].getAttribute('aria-label')).toBe('serving')
     expect(marks[0].textContent?.trim()).toBe('')
     expect(marks[1].textContent?.trim()).not.toBe('')
+  })
+
+  it('offers to anchor the score at this rally', () => {
+    const onanchor = vi.fn()
+    const el = render({ rules: DEFAULT_RULES, state: score([], DEFAULT_RULES), unscored: 0, prompting: false, onwin: () => {}, onanchor })
+    expect(el.querySelector('[data-testid="anchored"]')).toBeNull()
+    ;(el.querySelector('[data-testid="anchor"]') as HTMLButtonElement).click()
+    expect(onanchor).toHaveBeenCalled()
+  })
+
+  it('says when the score entering this rally is anchored, and offers to remove it', () => {
+    const onunanchor = vi.fn()
+    const a: ScoreAnchor = { source_id: 's', at_ms: 1000, sets: [], games: [1, 0], points: [0, 0] }
+    const el = render({ rules: DEFAULT_RULES, state: score([], DEFAULT_RULES), unscored: 0, prompting: false, onwin: () => {}, anchored: [a], onunanchor })
+    expect(el.querySelector('[data-testid="anchored"]')).not.toBeNull()
+    ;(el.querySelector('[data-testid="unanchor"]') as HTMLButtonElement).click()
+    expect(onunanchor).toHaveBeenCalledWith(a)
   })
 
   it('drops the server once the match is decided', () => {
