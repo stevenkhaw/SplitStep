@@ -212,10 +212,52 @@ def make_proxy(src: Path, dst: Path, accel: Accel | None = None, rotation_deg: i
 # Sources that do not match are therefore conformed at cut time rather than
 # at concat time -- an upscale is a smaller price than a clip library that
 # cannot be concatenated.
+#
+# The frame is now one of TWO (see clip_frame below), which loosens that
+# guarantee in exactly one way and no further: clips agree within an
+# orientation, and a reel mixing orientations is refused rather than
+# concatenated. It also means every clip cut from a portrait source before
+# clip_frame landed is 3840x2160 and disagrees with what the same span cuts
+# to now -- `splitstep clips prune-stale` is what finds and removes those.
 CLIP_WIDTH = 3840
 CLIP_HEIGHT = 2160
 CLIP_FPS = 30
 CLIP_CRF = 20
+
+# The same pixel budget stood on its end. A phone shot in portrait is 9:16,
+# so it lands in this frame with no padding at all -- which is the whole
+# point: conformed to CLIP_WIDTH x CLIP_HEIGHT it was 1215x2160 of picture
+# inside 1312px of black on either side, and the numbered reel's counter,
+# note and scoreboard all burned into that left-hand bar rather than over
+# the footage. Six of this library's eleven sources are portrait, including
+# the most recent, so that was the majority case.
+#
+# Two frames rather than one per source aspect: every clip in a reel must
+# share a frame for `-c copy`, and a frame derived freely from each source
+# would make that agreement accidental. Two is the smallest number that can
+# hold a phone in either hand.
+CLIP_PORTRAIT_WIDTH = CLIP_HEIGHT
+CLIP_PORTRAIT_HEIGHT = CLIP_WIDTH
+
+
+def clip_frame(width: int, height: int, sar: float = 1.0, rotation_deg: int = 0) -> tuple[int, int]:
+    """The locked frame a source with these coded dimensions conforms to.
+
+    Measured on the source's DISPLAY shape -- coded size times SAR, then
+    rotated -- because that is what the viewer sees and what make_clip's
+    filter chain produces. This library's portrait sources are coded
+    3840x2160 with a display matrix the wizard stored as rotation_deg=90;
+    reading the coded size alone would call every one of them landscape.
+
+    Square ties to landscape. Arbitrary, but it has to go somewhere, and a
+    tie is not a phone held on its end.
+    """
+    display_w, display_h = width * sar, float(height)
+    if rotation_deg in (90, 270):
+        display_w, display_h = display_h, display_w
+    if display_w >= display_h:
+        return CLIP_WIDTH, CLIP_HEIGHT
+    return CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT
 
 # Colour is the fifth property of a source the profile relied on and never
 # stated -- after the frame, the rate, the sample aspect and the audio track.
@@ -337,9 +379,20 @@ def make_clip(
     if info.sar != 1.0:
         unsquish = f"scale={max(2, round(info.width * info.sar / 2) * 2)}:{info.height}"
 
+    # Which of the two locked frames this source belongs in, measured on its
+    # own display shape rather than assumed. A portrait source conformed to
+    # the landscape frame is 1215x2160 of picture between two 1312px bars,
+    # and the numbered reel burns its counter into the left-hand one.
+    frame_w, frame_h = clip_frame(info.width, info.height, info.sar, rotation_deg)
+
     # Rotation FIRST, then scale, then pad. At 90 and 270 the rotation swaps
     # the frame's axes, so scaling before rotating pads against the wrong one.
     # Irrelevant at 0 and 180, wrong the moment the camera is mounted sideways.
+    #
+    # scale+pad stay even though a 16:9 or 9:16 phone source now lands in its
+    # frame exactly: the frame is chosen by orientation, not by aspect, so a
+    # 4:3 source still has to be fitted into one of the two. What changed is
+    # which frame, not whether it is conformed.
     #
     # `setsar=1` goes LAST rather than next to the unsquish: scale and pad
     # each recompute the output SAR to preserve display aspect, so a
@@ -350,8 +403,8 @@ def make_clip(
         for f in (
             unsquish,
             rotation_filter(rotation_deg),
-            f"scale={CLIP_WIDTH}:{CLIP_HEIGHT}:force_original_aspect_ratio=decrease",
-            f"pad={CLIP_WIDTH}:{CLIP_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+            f"scale={frame_w}:{frame_h}:force_original_aspect_ratio=decrease",
+            f"pad={frame_w}:{frame_h}:(ow-iw)/2:(oh-ih)/2",
             "setsar=1",
         )
         if f

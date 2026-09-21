@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import { videoAspect } from '../lib/aspect'
   import { AuditController, spanLabelApi } from '../lib/audit'
   import { describeApiError } from '../lib/errors'
   import { isEditableTarget } from '../lib/keyboard'
@@ -107,6 +108,7 @@
   })
 
   const src = $derived(source ? api.proxyUrl(source.session_id, source.idx) : '')
+  const aspect = $derived(videoAspect(source?.width, source?.height))
 
   async function apply(action: LabelAction | null): Promise<void> {
     version += 1
@@ -210,6 +212,7 @@
     <VideoDeck
       bind:this={deck}
       {src}
+      {aspect}
       startMs={current.start_ms}
       endMs={current.end_ms}
       onended={() => deck?.replay()}

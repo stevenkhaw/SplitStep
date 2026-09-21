@@ -233,6 +233,21 @@ checks, not one: a pre-flight comparison of every input's codec parameters
 against the first clip's (`ClipParams`/`divergences` in `media/concat.py`),
 and a post-hoc probe of the output's duration against the sum of the inputs.
 Either failing falls back to a full re-encode at the locked profile, logged.
+
+**Frame size is the one divergence the fallback cannot fix, because the
+fallback is what causes it.** Measured the same way: a portrait clip
+concatenated after a landscape one and re-encoded exits 0, lands on the
+right duration, and comes out **stretched** to the first clip's width rather
+than padded into it — pixels at the left edge carry picture, so nothing
+about the file says it happened. `frame_divergences` therefore raises before
+either branch runs. `handle_reel` repeats the refusal in the reel's own
+terms (`N at 3840x2160, M at 2160x3840`) because a numbered render
+re-encodes every clip *first* and would otherwise reach concat's refusal an
+hour later; `POST /render` repeats it a third time from the sources'
+orientation alone, which costs no ffprobe on a request thread, and the
+builder badges the minority shape (`minorityShapeKeys`) so it is visible
+before the press. The three answer slightly different questions — see
+`reels.mixed_orientation`.
 Render **refuses** while any clip is missing, naming the count, and never
 auto-enqueues the cuts: the builder's *Cut missing clips* is the only button
 that starts an encode.
@@ -331,8 +346,11 @@ Session hosts QueueMode (autoplay + star/reject/undo) and TimelineMode
 All logic lives in pure TypeScript under `web/src/lib/` — queue state machine,
 undo stack, timeline math, quad geometry, persistence, polling, debounce,
 plus `shortcuts.ts` (the one place a keybinding is written down; the inline
-strip and the `?` overlay both render from it), `status.ts` (status → label +
-tone for the list cards), `jobs.ts` (job phase names and batch elapsed),
+strip and the `?` overlay both render from it), `aspect.ts` (the one place a
+video box's shape and height budget are decided — every deck, preview and
+clip player was a hardcoded 16:9 until six of eleven sources turned out to be
+a phone held on its end), `status.ts` (status → label + tone for the list
+cards), `jobs.ts` (job phase names and batch elapsed),
 `split.ts` (cutting a rally in two and putting it back, with the same idx
 ordering `_renumber` uses), `flash.ts` (the verdict confirmation),
 `errors.ts` (`ApiError` → a sentence) and `score.ts` (the tennis scoring
@@ -487,6 +505,25 @@ four had to be retargeted during the migration and would again.
   `-noautorotate` and applies the stored `rotation_deg`. Autorotate once scaled
   a 4K clip to 608x1080 and destroyed every detection. `rotation_filter()` is
   the single validator for the angle.
+- **The clip frame is one of two, chosen by the source's display shape.**
+  `transcode.clip_frame` returns 3840x2160 or 2160x3840, measured on coded
+  size x SAR *after* `rotation_deg` — the library's portrait sources are
+  coded 3840x2160 with a quarter turn on the row, so reading the coded size
+  alone calls every one of them landscape. That is what it used to do, and
+  it put 1215px of picture between two 1312px bars with the numbered reel's
+  counter burned into the left one. Two frames and not one per aspect
+  because every clip in a reel must share a frame for `-c copy`, and a
+  reel that mixes the two is refused rather than joined. Clips cut from a
+  portrait source before this landed are 3840x2160 and disagree with what
+  the same span cuts to now: `splitstep clips prune-stale` probes each clip,
+  deletes the ones whose frame is not its source's, and leaves the re-cut
+  to the builder's *Cut missing clips*. `media/numbered.py` takes the frame
+  as a required argument for the same reason — `overlay` neither scales nor
+  refuses a mismatched second input, it keeps the main input's frame and
+  silently clips the rest. On the UI side `lib/aspect.ts` is the one place
+  a video box's shape is decided; `VideoDeck` takes the source's aspect (and
+  falls back to measuring the live element) plus a height budget, because a
+  9:16 box at full page width wants to be 2560px tall.
 - **The clip profile pins colour, and `make_clip` refuses a source that
   disagrees.** `tv / bt2020nc / arib-std-b67 / bt2020` — HLG, what an iPhone
   records and what every existing clip carries. Strict equality, untagged

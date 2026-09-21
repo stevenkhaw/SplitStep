@@ -4,7 +4,9 @@ import {
   canWatchRendered,
   deleteConfirmationText,
   formatBytes,
+  minorityShapeKeys,
   missingClipCount,
+  mixedOrientationReason,
   normalizedItemNote,
   normalizedReelName,
   reelMembershipKey,
@@ -30,6 +32,7 @@ function item(overrides: Partial<ReelItem> = {}): ReelItem {
     clip_ready: true,
     rally: null,
     note: '',
+    portrait: false,
     ...overrides,
   }
 }
@@ -131,6 +134,67 @@ describe('renderBlockedReason', () => {
 
   it('returns null when every clip is ready', () => {
     expect(renderBlockedReason([item(), item()])).toBeNull()
+  })
+
+  it('blocks a reel that mixes orientations even with every clip cut', () => {
+    // Mirrors the server's own 409: joining two shapes stretches the odd
+    // one out rather than padding it, and nothing in the file would say so.
+    expect(renderBlockedReason([item(), item({ portrait: true })]))
+      .toBe('1 vertical and 1 horizontal \u2014 a reel is one shape')
+  })
+
+  it('still names the uncut clips first when a reel is both', () => {
+    // One actionable problem at a time, and cutting is the one that might
+    // resolve the other: a re-cut portrait clip is what makes a stale
+    // landscape one disappear.
+    expect(renderBlockedReason([item({ clip_ready: false }), item({ portrait: true })]))
+      .toBe('1 clip not cut yet')
+  })
+})
+
+describe('mixedOrientationReason', () => {
+  it('is null for a reel that is all one shape', () => {
+    expect(mixedOrientationReason([item(), item()])).toBeNull()
+    expect(mixedOrientationReason([item({ portrait: true }), item({ portrait: true })]))
+      .toBeNull()
+  })
+
+  it('is null for an empty reel -- there is nothing to disagree', () => {
+    expect(mixedOrientationReason([])).toBeNull()
+  })
+
+  it('counts both sides', () => {
+    expect(mixedOrientationReason([
+      item({ portrait: true }), item({ portrait: true }), item(),
+    ])).toBe('2 vertical and 1 horizontal \u2014 a reel is one shape')
+  })
+})
+
+describe('minorityShapeKeys', () => {
+  it('is empty for a reel that is all one shape', () => {
+    expect(minorityShapeKeys([item(), item()]).size).toBe(0)
+    expect(minorityShapeKeys([item({ portrait: true })]).size).toBe(0)
+  })
+
+  it('badges the smaller group -- the one a reviewer would pull out', () => {
+    const odd = item({ start_ms: 9000, portrait: true })
+    const keys = minorityShapeKeys([item(), item({ start_ms: 20000 }), odd])
+    expect([...keys]).toEqual([spanKey(odd)])
+  })
+
+  it('badges the landscape ones when those are the minority', () => {
+    const odd = item({ start_ms: 9000 })
+    const keys = minorityShapeKeys([
+      item({ portrait: true }), item({ start_ms: 20000, portrait: true }), odd,
+    ])
+    expect([...keys]).toEqual([spanKey(odd)])
+  })
+
+  it('breaks a tie towards the portrait items', () => {
+    // Arbitrary, but a tie has to land somewhere, and "the reel is
+    // landscape" is the older assumption.
+    const portrait = item({ start_ms: 9000, portrait: true })
+    expect([...minorityShapeKeys([item(), portrait])]).toEqual([spanKey(portrait)])
   })
 })
 

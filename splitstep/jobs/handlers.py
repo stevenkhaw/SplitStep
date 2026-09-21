@@ -2,6 +2,7 @@ import logging
 import shutil
 import sqlite3
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from splitstep.detect.segment import params_for_frames, segment
 from splitstep.detect.vision import build_features, iter_person_boxes
 from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
-from splitstep.media.concat import concat_clips
+from splitstep.media.concat import clip_params, concat_clips
 from splitstep.media.files import find_original
 from splitstep.media.numbered import make_numbered_intermediate, render_overlay_png
 from splitstep.media.probe import display_size, probe
@@ -562,6 +563,35 @@ def handle_reel(library: Library, payload: dict,
         inputs = hr_clip_paths(hr_root, items)
     dst = library.reels_dir / f"{reel['slug']}.mp4"
 
+    # One ffprobe per input, up front, before any encoding at all. Two
+    # things need it and both need it early.
+    #
+    # The frames must agree: a reel is session-agnostic, so it can hold a
+    # portrait source's clips and a landscape source's, and those conform to
+    # different locked frames (transcode.clip_frame). concat_clips refuses
+    # that mismatch too and is the real guard -- but in numbered mode it is
+    # reached only after every clip has been re-encoded, which is an hour on
+    # a 68-item reel spent to arrive at a refusal knowable in three seconds.
+    # This is that refusal, said in terms of the reel rather than of the
+    # first input's pixel dimensions.
+    #
+    # And the overlay has to be drawn at the frame it will be composited
+    # onto, which is the clip's own -- not the source's, because the clips
+    # are what gets concatenated, and in `hr` mode they are RallyMetrics's
+    # copies rather than files this app wrote at all.
+    frames = [(p.width, p.height) for p in (clip_params(i) for i in inputs)]
+    if len(set(frames)) > 1:
+        tally = Counter(frames)
+        shape = ", ".join(
+            f"{count} at {w}x{h}" for (w, h), count in tally.most_common()
+        )
+        raise ValueError(
+            f"Reel {reel['slug']} mixes clip shapes ({shape}). A reel is one shape: "
+            f"joining them would stretch the odd ones out to fit rather than pad "
+            f"them, and nothing in the file would say it happened. Split it into "
+            f"one reel per shape, or re-cut the clips that disagree."
+        )
+
     if payload.get("numbered"):
         # Space: every input re-encoded (~input size again) plus the concat
         # of the copies -- triple the plain render's bound, and the same
@@ -610,6 +640,11 @@ def handle_reel(library: Library, payload: dict,
                 # burn mirrors the counter the reviewer already reads.
                 render_overlay_png(
                     png_i, counter=f"{i} / {total}", note=item.note, font=font,
+                    # Every input shares one frame (checked above), so
+                    # frames[0] is each clip's own -- read from the clip
+                    # rather than assumed, because an overlay drawn at the
+                    # wrong frame is composited clipped and in silence.
+                    frame=frames[0],
                     scoreboard=board_for(item),
                 )
                 dst_i = tmp_dir / f"{i:03d}.mp4"

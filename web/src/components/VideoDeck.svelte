@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
+  import { DEFAULT_ASPECT, DEFAULT_DECK_HEIGHT, deckMaxWidth } from '../lib/aspect'
 
   interface Props {
     src: string
@@ -8,6 +9,16 @@
     nextSrc?: string
     nextStartMs?: number
     speed?: number
+    /** Display aspect (width/height) of the footage, for the box that holds
+     * it. Omitted, the deck measures the live element once its metadata
+     * arrives -- which is exact but one frame late, so a caller holding the
+     * source row should pass `videoAspect(source.width, source.height)` and
+     * skip the reflow. */
+    aspect?: number
+    /** The tallest this deck may be, as a CSS length. The box's width is
+     * capped to whatever that height implies at its aspect, so the controls
+     * under it stay on screen -- see deckMaxWidth. */
+    maxHeight?: string
     onended: () => void
     onprogress?: (fraction: number) => void
     onblocked?: (err: unknown) => void
@@ -20,6 +31,8 @@
     nextSrc,
     nextStartMs,
     speed = 1,
+    aspect,
+    maxHeight = DEFAULT_DECK_HEIGHT,
     onended,
     onprogress,
     onblocked,
@@ -33,6 +46,22 @@
   let b: HTMLVideoElement
   let aIsLive = $state(true)
   let raf = 0
+
+  // What the live element's own metadata says, for callers that do not pass
+  // an aspect. Seeded at 16:9 so the box has a size before any metadata
+  // exists, and only ever assigned a real measurement -- never reset to the
+  // default -- so swapping to an element that has not loaded yet leaves the
+  // box where it is instead of snapping back to landscape and out again.
+  let measured = $state(DEFAULT_ASPECT)
+  const boxAspect = $derived(aspect ?? measured)
+
+  function remeasure(el: HTMLVideoElement | undefined): void {
+    // Only the live element. Both elements fire loadedmetadata, and the idle
+    // one is loading the NEXT span -- which, in a queue that crosses
+    // sources, can be the other orientation entirely.
+    if (!el || el !== live()) return
+    if (el.videoWidth > 0 && el.videoHeight > 0) measured = el.videoWidth / el.videoHeight
+  }
 
   // Unmuted autoplay is blocked by browsers until the page has real user
   // activation. Rather than swallow that rejection, track it so the template
@@ -242,6 +271,9 @@
         // and nothing could stop it, since pause() only ever reaches live().
         liveEl?.pause()
         aIsLive = !aIsLive
+        // The element that just became live may already have its metadata,
+        // in which case no further loadedmetadata is coming for it.
+        remeasure(idleEl)
         return idleEl
       }
 
@@ -320,12 +352,22 @@
   }
 </script>
 
-<div class="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+<!-- The box takes the footage's own shape rather than a hardcoded 16:9.
+     A portrait source in a 16:9 box is pillarboxed on screen exactly the way
+     its clips used to be pillarboxed in the file -- and on a laptop that
+     spends most of the window on black. `aspect-ratio` inline because the
+     value is a number known at runtime, which Tailwind's build-time
+     arbitrary-value syntax cannot carry. -->
+<div
+  class="relative mx-auto w-full overflow-hidden rounded-lg bg-black"
+  style="aspect-ratio: {boxAspect}; max-width: {deckMaxWidth(boxAspect, maxHeight)}"
+>
   <video
     bind:this={a}
     class="absolute inset-0 h-full w-full {aIsLive ? 'opacity-100' : 'opacity-0'}"
     playsinline
     muted={false}
+    onloadedmetadata={() => remeasure(a)}
     onerror={() => handleError(a)}
   ></video>
   <video
@@ -333,6 +375,7 @@
     class="absolute inset-0 h-full w-full {aIsLive ? 'opacity-0' : 'opacity-100'}"
     playsinline
     muted={false}
+    onloadedmetadata={() => remeasure(b)}
     onerror={() => handleError(b)}
   ></video>
   {#if loadError}

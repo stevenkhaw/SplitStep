@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { TIMELINE_DECK_HEIGHT, videoAspect } from '../lib/aspect'
   import { debounce } from '../lib/debounce'
   import { isEditableTarget } from '../lib/keyboard'
   import { createToaster, toastToneClasses } from '../lib/toaster.svelte'
@@ -102,6 +103,10 @@
   // and crash on a `.find()!`.
   const rally = $derived(rallies.find((r) => r.id === currentId) ?? rallies[0])
   const source = $derived(detail.sources.find((s) => s.id === rally?.source_id))
+  // The focused rally's source, not the draft's: the deck plays the draft's
+  // span but always from `source` (see the VideoDeck call below), and
+  // pickRally's gate keeps the two the same source anyway.
+  const deckAspect = $derived(videoAspect(source?.width, source?.height))
   // The source an open add was measured against, which is the draft's own
   // and never the focused rally's. Under pickRally's gate these are the
   // same source; reading it from the draft anyway is what makes the scrub
@@ -572,12 +577,12 @@
 <svelte:window onkeydown={onKey} />
 
 {#if rally && source}
-  <!-- Capped so the deck, the status line, both bands and the threshold row
-       share one screen: trimming is a deck-and-band gesture and scrolling
-       between them is the failure this removes. 28rem is what sits below
-       the deck plus the page header; a 16:9 frame at (100vh - 28rem) tall
-       is this wide. On a tall display the cap is never reached. -->
-  <div class="mx-auto w-full max-w-[calc((100vh-28rem)*16/9)]">
+  <!-- The height budget that keeps the deck, the status line, both bands and
+       the threshold row on one screen is handed to the deck rather than
+       applied as a width here: the deck knows its own aspect -- which is now
+       the SOURCE's, not a fixed 16:9 -- and is the only thing that can turn a
+       height into the width it implies. See TIMELINE_DECK_HEIGHT. -->
+  <div class="w-full">
     <!-- While an add is open the deck spans the rest of the FILE, not the
          rally: its out-point is what pauses playback, and watching footage
          the detector proposed nothing for is the entire point of the mode.
@@ -587,6 +592,8 @@
     <VideoDeck
       bind:this={deck}
       src={api.proxyUrl(detail.session.id, source.idx)}
+      aspect={deckAspect}
+      maxHeight={TIMELINE_DECK_HEIGHT}
       startMs={draft ? draft.anchorMs : rally.start_ms}
       endMs={draft ? source.duration_ms : rally.end_ms}
       onended={() => writePlayhead(draft ? source.duration_ms : rally.end_ms)}

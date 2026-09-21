@@ -7,6 +7,8 @@ from splitstep.config import Library
 from splitstep.db.jobs import has_pending_clip
 from splitstep.db.sessions import get_source
 from splitstep.media.clips import clip_relpath, parse_clip_name
+from splitstep.media.probe import ProbeError, probe
+from splitstep.media.transcode import clip_frame
 
 log = logging.getLogger(__name__)
 
@@ -337,3 +339,120 @@ def reconcile_clip_layout(library: Library, conn: sqlite3.Connection) -> int:
     if moved:
         log.info("moved %d clip(s) into per-source folders", moved)
     return moved
+
+
+@dataclass(frozen=True)
+class StaleFrameClip:
+    """A clip whose frame is not the one its source would cut to now.
+
+    Exactly one thing has ever produced these, and it is a one-off: before
+    `transcode.clip_frame`, every clip was conformed to the landscape frame,
+    so a portrait source's clips are 3840x2160 with the picture pillarboxed
+    into the middle 1215px and the numbered reel's counter burned into the
+    black. Six of this library's eleven sources are portrait.
+
+    They are not orphans -- a rally and a reel both still claim these spans,
+    so `find_orphan_clips` will never see them -- and they are not broken
+    either: they play, and the reel they are already in renders. What they
+    are is unmixable with anything cut after the change, and wrong in the
+    way the reviewer complained about. Deleting one costs the re-encode to
+    get it back, and the 4K original is still on the drive for every one.
+
+    `frame` is what the file actually is, `expected` what its source would
+    produce now. Both are reported, because "stale" with no numbers beside
+    it is not something a user can check.
+    """
+
+    path: Path
+    source_idx: int
+    start_ms: int
+    end_ms: int
+    size_bytes: int
+    frame: tuple[int, int]
+    expected: tuple[int, int]
+
+
+def find_stale_frame_clips(
+    library: Library, conn: sqlite3.Connection, session_id: str
+) -> list[StaleFrameClip]:
+    """Clips in this session whose frame disagrees with their source's now.
+
+    One ffprobe per clip, which is why this is a command a human runs and
+    not a check on a request path -- 214 clips on an external drive is about
+    fifteen seconds.
+
+    Expected frame comes from `sources.width/height`, which is the PROXY's
+    frame and therefore already display-oriented (see
+    `set_source_dimensions`): no rotation to re-apply, and no need to open
+    the original. A clip whose source row is missing is skipped rather than
+    guessed at -- `sources` cascades, so this means the row went while the
+    file stayed, which is the orphan sweep's business and not this one's.
+
+    A clip that cannot be probed at all (a spun-down drive, a truncated
+    file) is skipped too, deliberately: this list is about to be handed to
+    `unlink()`, and "I could not read it" is not evidence that it is wrong.
+    """
+    clips_dir = library.clips_dir(session_id)
+    if not clips_dir.is_dir():
+        return []
+
+    expected_by_idx = {
+        row["idx"]: clip_frame(row["width"], row["height"])
+        for row in conn.execute(
+            "SELECT idx, width, height FROM sources WHERE session_id = ?",
+            (session_id,),
+        )
+    }
+
+    stale: list[StaleFrameClip] = []
+    for path in walk_clip_files(clips_dir):
+        parsed = parse_clip_name(str(path.relative_to(clips_dir)))
+        if parsed is None:
+            continue
+        source_idx, start_ms, end_ms = parsed
+        expected = expected_by_idx.get(source_idx)
+        if expected is None:
+            continue
+        try:
+            info = probe(path)
+        except ProbeError:
+            continue
+        if (info.width, info.height) == expected:
+            continue
+        stale.append(StaleFrameClip(
+            path=path, source_idx=source_idx, start_ms=start_ms, end_ms=end_ms,
+            size_bytes=path.stat().st_size,
+            frame=(info.width, info.height), expected=expected,
+        ))
+    return stale
+
+
+def delete_stale_frame_clips(
+    library: Library, conn: sqlite3.Connection, stale: list[StaleFrameClip]
+) -> int:
+    """Delete the given stale clips, clearing `clip_path` first.
+
+    Same list-in, same ordering and the same reasoning as
+    `delete_orphan_clips` -- see its docstring for why the column is cleared
+    before the file goes. Separate from it only because the two answer
+    different questions; the deletion itself is identical, and a clip that
+    is both stale and orphaned is deleted once by whichever sweep runs
+    first, with the other finding nothing.
+
+    Nothing re-queues the cut. The reel builder reads a deleted clip as not
+    cut, and `Cut missing clips` is the one button that starts an encode --
+    the same rule a render already follows.
+    """
+    deleted = 0
+    for clip in stale:
+        conn.execute(
+            "UPDATE rallies SET clip_path = NULL WHERE clip_path = ?",
+            (str(clip.path.relative_to(library.root)),),
+        )
+        conn.commit()
+        try:
+            clip.path.unlink()
+        except FileNotFoundError:
+            continue
+        deleted += 1
+    return deleted

@@ -7,6 +7,7 @@ from splitstep.media.concat import (
     clip_params,
     concat_clips,
     divergences,
+    frame_divergences,
     tolerance_ms,
 )
 from splitstep.media.probe import probe
@@ -324,3 +325,109 @@ def test_tolerance_grows_with_the_input_count():
     # reel silently missing exactly its shortest clip would pass unnoticed.
     assert tolerance_ms(10_000) < 1500
     assert tolerance_ms(10_000) == tolerance_ms(35)
+
+
+# --- frame size: the one divergence the fallback cannot fix -----------------
+
+
+def test_frame_divergences_names_the_odd_shapes_out(tmp_path):
+    parts = [_clip(tmp_path / "a.mp4"),
+             _clip(tmp_path / "b.mp4", size="240x320"),
+             _clip(tmp_path / "c.mp4")]
+    reported = frame_divergences(parts, [clip_params(p) for p in parts])
+    assert len(reported) == 1
+    assert "b.mp4" in reported[0]
+    assert "240x320" in reported[0] and "320x240" in reported[0]
+
+
+def test_a_single_clip_cannot_diverge_on_frame(tmp_path):
+    parts = [_clip(tmp_path / "a.mp4")]
+    assert frame_divergences(parts, [clip_params(p) for p in parts]) == []
+
+
+def test_a_reencode_would_stretch_a_differently_shaped_input(tmp_path):
+    """The measurement the refusal is built on, pinned so it cannot quietly
+    stop being true.
+
+    ffmpeg 9.0.1, a 240x320 clip concatenated after a 320x240 one and
+    re-encoded: exit 0, empty stderr, duration correct to a frame, and the
+    portrait input comes out STRETCHED across the full landscape width
+    rather than padded into it. Nothing in the output says it happened,
+    which is why `concat_clips` refuses ahead of the fallback instead of
+    letting the fallback "fix" it.
+
+    Asserted on pixels: `testsrc`'s top-left cell is white, and after a
+    stretch it still reaches the left edge of a frame twice as wide.
+    """
+    landscape = _clip(tmp_path / "a.mp4", size="320x240")
+    portrait = _clip(tmp_path / "b.mp4", size="240x320")
+    listing = tmp_path / "list.txt"
+    listing.write_text("".join(f"file '{p}'\n" for p in (landscape, portrait)))
+    out = tmp_path / "stretched.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)],
+        check=True, capture_output=True,
+    )
+
+    params = clip_params(out)
+    assert (params.width, params.height) == (320, 240), (
+        "ffmpeg no longer imposes the first input's frame -- re-read "
+        "frame_divergences before trusting its rationale"
+    )
+    # A pixel from the second clip, near the left edge. Padded, it would be
+    # black; stretched, it carries picture.
+    raw = tmp_path / "f.rgb"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-ss", "1.5", "-i", str(out), "-frames:v", "1",
+         "-pix_fmt", "rgb24", "-f", "rawvideo", str(raw)],
+        check=True, capture_output=True,
+    )
+    data = raw.read_bytes()
+    offset = (120 * 320 + 2) * 3
+    assert max(data[offset:offset + 3]) > 40, (
+        "the second clip was padded, not stretched -- which would make the "
+        "refusal in concat_clips unnecessary"
+    )
+
+
+def test_mismatched_frames_are_refused_without_writing_anything(tmp_path, caplog):
+    parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", size="240x320")]
+    dst = tmp_path / "reel.mp4"
+
+    with caplog.at_level("WARNING"), pytest.raises(ConcatError) as exc:
+        concat_clips(parts, dst)
+
+    assert "frame" in str(exc.value)
+    assert "b.mp4" in str(exc.value)
+    # Refused, not half-rendered: a reel file that exists is a reel the UI
+    # will offer to play.
+    assert not dst.exists()
+    assert any("frame mismatch" in r.getMessage() for r in caplog.records)
+
+
+def test_mismatched_frames_are_refused_before_any_ffmpeg_runs(tmp_path, monkeypatch):
+    """Not merely refused -- refused without encoding. The fallback is
+    minutes on a real reel, and this mismatch is knowable from the probes
+    concat_clips has already done."""
+    import splitstep.media.concat as concat_mod
+
+    parts = [_clip(tmp_path / "a.mp4"), _clip(tmp_path / "b.mp4", size="240x320")]
+    calls = []
+    monkeypatch.setattr(
+        concat_mod, "run_ffmpeg",
+        lambda args, timeout=None, on_progress=None, total_ms=None: calls.append(args),
+    )
+
+    with pytest.raises(ConcatError):
+        concat_clips(parts, tmp_path / "reel.mp4")
+    assert calls == []
+
+
+def test_clips_that_share_a_frame_still_concatenate(tmp_path):
+    # The guard must not refuse a uniform portrait reel -- that is the
+    # whole point of cutting portrait sources to a portrait frame.
+    parts = [_clip(tmp_path / f"{i}.mp4", size="240x320") for i in range(3)]
+    dst = tmp_path / "reel.mp4"
+    assert concat_clips(parts, dst) == "copy"
+    assert clip_params(dst).height > clip_params(dst).width

@@ -250,6 +250,36 @@ def divergences(paths: list[Path], params: list[ClipParams] | None = None) -> li
     return reported
 
 
+def frame_divergences(paths: list[Path], params: list[ClipParams]) -> list[str]:
+    """Every input whose FRAME SIZE differs from the first input's.
+
+    Split out of `divergences` because this one subset cannot be answered
+    with a re-encode, and treating it as though it could is measurably
+    wrong. Measured on ffmpeg 9.0.1, concatenating a 360x640 clip after a
+    640x360 one through the demuxer and re-encoding: exit 0, empty stderr,
+    duration correct to a frame -- and the portrait clip comes out STRETCHED
+    across the full 640 width, not padded into it. Sampled pixels at the
+    left edge carry the first-column picture, so nothing about the output
+    says it happened.
+
+    That is the same shape of failure as the sample-aspect and missing-audio
+    cases ClipParams already exists for, with one difference that matters:
+    those two are fixed by the re-encode, and this one is caused by it. So
+    it raises instead. A caller that genuinely wants mixed orientations in
+    one file has to say what to do with the leftover space, and nothing in
+    this app asks that question yet.
+    """
+    if len(paths) < 2:
+        return []
+    first = params[0]
+    return [
+        f"{path.name}: {current.width}x{current.height}, "
+        f"expected {first.width}x{first.height}"
+        for path, current in zip(paths[1:], params[1:])
+        if (current.width, current.height) != (first.width, first.height)
+    ]
+
+
 def _escape(path: Path) -> str:
     """A path as the concat demuxer's `file '...'` directive spells it.
 
@@ -268,10 +298,11 @@ def _escape(path: Path) -> str:
 def _reencode_args(base: list[str], tmp: Path) -> list[str]:
     """The fallback encode, at the locked profile's own settings.
 
-    scale and pad are absent because every input already carries the locked
-    frame -- or, when they do not, because the mismatch is exactly what sent
-    us here and the first input's frame is what the demuxer imposes anyway.
-    The RESULT is still a file that could itself be concatenated.
+    scale and pad are absent because every input reaching here already
+    carries the same frame: `frame_divergences` raises ahead of this rather
+    than letting a size mismatch through, precisely because this encode
+    would stretch the odd one out to fit instead of padding it. The RESULT
+    is still a file that could itself be concatenated.
     """
     return [
         *base,
@@ -294,6 +325,10 @@ def concat_clips(
 
     Returns "copy" if `-c copy` produced a correct file, "reencode" if the
     inputs could not safely be copied or if the copy came out wrong.
+
+    Raises `ConcatError` without writing anything when the inputs do not all
+    share one frame size -- the one mismatch neither branch below can
+    resolve. See `frame_divergences`.
 
     `-c copy` is the whole reason clips are cut at one locked profile: it
     remuxes without touching a pixel, so a twenty-minute reel takes about a
@@ -345,6 +380,18 @@ def concat_clips(
         # -safe 0 because the listing carries absolute paths, which the
         # demuxer refuses by default.
         base = ["-f", "concat", "-safe", "0", "-i", str(listing)]
+
+        # Before either branch: the one divergence the fallback cannot fix,
+        # because the fallback is what causes it. See frame_divergences.
+        frames = frame_divergences(paths, [params for params, _ in probed])
+        if frames:
+            for frame in frames:
+                log.warning("reel input frame mismatch -- %s", frame)
+            raise ConcatError(
+                f"{len(frames)} of {len(paths)} clip(s) do not share the first clip's "
+                f"frame, so they cannot be joined into one file: a re-encode would "
+                f"stretch them to fit rather than refuse. First: {frames[0]}"
+            )
 
         differences = divergences(paths, [params for params, _ in probed])
         if differences:

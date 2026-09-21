@@ -580,10 +580,19 @@
            makes for this exact class of content, and it is what tells
            svelte-check's a11y-media-has-caption check this was a deliberate
            call rather than an oversight, without a blanket ignore comment. -->
+      <!-- No `aspect-video`. A reel cut from portrait sources renders
+           portrait (splitstep/media/transcode.py::clip_frame), and a 16:9
+           box would put back on screen exactly the bars the render no
+           longer bakes into the file. Width-constrained with a height cap
+           instead: `<video>` is a replaced element, so width:100% plus an
+           implicit height:auto keeps its own aspect and the cap shrinks
+           the width proportionally rather than letterboxing. 80vh because
+           a 9:16 reel at full width is otherwise taller than the window on
+           every laptop. -->
       <video
         controls
         muted={false}
-        class="aspect-video w-full rounded bg-black"
+        class="mx-auto block max-h-[80vh] w-full rounded bg-black"
         src={api.reelUrl(detail.reel.slug)}
       ></video>
     </div>

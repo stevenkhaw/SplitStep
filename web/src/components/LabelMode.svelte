@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { videoAspect } from '../lib/aspect'
   import { isEditableTarget } from '../lib/keyboard'
   import {
     FLAG_ORDER,
@@ -137,6 +138,11 @@
   function srcFor(sourceId: string): string {
     const s: Source | undefined = detail.sources.find((x) => x.id === sourceId)
     return s ? api.proxyUrl(detail.session.id, s.idx) : ''
+  }
+
+  function aspectFor(sourceId: string): number {
+    const s: Source | undefined = detail.sources.find((x) => x.id === sourceId)
+    return videoAspect(s?.width, s?.height)
   }
 
   // Paints the fill and the elapsed readout for an absolute timestamp.
@@ -294,6 +300,7 @@
     <VideoDeck
       bind:this={deck}
       src={srcFor(current.source_id)}
+      aspect={aspectFor(current.source_id)}
       startMs={current.det_start_ms}
       endMs={current.det_end_ms}
       onended={() => deck?.replay()}

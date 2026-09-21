@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { videoAspect } from '../lib/aspect'
   import { appmode } from '../lib/appmode.svelte'
   import { emptyQueueCopy } from '../lib/status'
   import { describeExportResult, exportSetLabel } from '../lib/export'
@@ -307,6 +308,15 @@
   function srcFor(sourceId: string): string {
     const s = sourceFor(sourceId)
     return s ? api.proxyUrl(detail.session.id, s.idx) : ''
+  }
+
+  // Passed rather than left to VideoDeck's own measurement: a queue pass
+  // advances every few seconds, and a box that resizes one frame after each
+  // advance is a flinch on every rally. The source row already carries the
+  // proxy's frame, so the right shape is known before the element loads.
+  function aspectFor(sourceId: string): number {
+    const s = sourceFor(sourceId)
+    return videoAspect(s?.width, s?.height)
   }
 
   // The rally's 1-based, session-wide position (Rally.idx from the server),
@@ -754,6 +764,7 @@
       <VideoDeck
         bind:this={deck}
         src={srcFor(current.source_id)}
+        aspect={aspectFor(current.source_id)}
         startMs={current.start_ms}
         endMs={current.end_ms}
         nextSrc={next ? srcFor(next.source_id) : undefined}

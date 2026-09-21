@@ -251,6 +251,12 @@ export interface ReelItem {
    *  the corner of the clip when the reel is rendered numbered. Empty string
    *  when unset -- the server always sends the field, never omits it. */
   note: string
+  /** Whether this item's SOURCE is taller than it is wide, which is what a
+   *  clip cut from it conforms to (splitstep/media/transcode.py::clip_frame).
+   *  A reel that mixes the two cannot be rendered -- joining them stretches
+   *  the minority shape rather than padding it -- so the builder badges the
+   *  odd ones out before Render refuses. */
+  portrait: boolean
 }
 
 /** How a reel addresses an item: a span of a source, never a rally id --

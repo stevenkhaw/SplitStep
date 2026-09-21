@@ -16,9 +16,12 @@ from splitstep.media.transcode import (
     CLIP_CRF,
     CLIP_FPS,
     CLIP_HEIGHT,
+    CLIP_PORTRAIT_HEIGHT,
+    CLIP_PORTRAIT_WIDTH,
     CLIP_WIDTH,
     HLG_PROFILE,
     TranscodeError,
+    clip_frame,
     make_clip,
 )
 
@@ -60,6 +63,10 @@ def test_the_locked_profile_constants_are_what_they_have_always_been():
     mirror of the code.
     """
     assert (CLIP_WIDTH, CLIP_HEIGHT, CLIP_FPS, CLIP_CRF) == (3840, 2160, 30, 20)
+    # The portrait frame is the same budget on its end, and it is a locked
+    # constant for the same reason: every clip in a reel must share one, and
+    # changing this breaks -c copy against every portrait clip already cut.
+    assert (CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT) == (2160, 3840)
     # Colour is the fifth property -- see the colour-metadata spec. The 24
     # clips already on the drive carry exactly these, inherited by accident
     # from a 10-bit HLG iPhone source; pinning them is what makes the
@@ -721,3 +728,135 @@ def test_an_untagged_source_cannot_become_the_profile(library, conn, tmp_path):
         _clip_color_profile(conn, library, _info(range_=None, space=None),
                             tmp_path / "a.mov")
     assert get_color_profile(conn) is None
+
+
+# --- orientation ------------------------------------------------------------
+
+
+def test_clip_frame_reads_the_display_shape_not_the_coded_one():
+    """The library's portrait sources are coded 3840x2160 and carry a display
+    matrix the wizard stored as rotation_deg=90. Reading the coded size alone
+    calls every one of them landscape, which is exactly how they ended up
+    pillarboxed. SAR is folded in for the same reason: an anamorphic source's
+    coded frame is not its display frame either.
+    """
+    landscape = (CLIP_WIDTH, CLIP_HEIGHT)
+    portrait = (CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT)
+
+    assert clip_frame(3840, 2160) == landscape
+    assert clip_frame(2160, 3840) == portrait
+    # The real case: coded landscape, displayed portrait.
+    assert clip_frame(3840, 2160, rotation_deg=90) == landscape[::-1] == portrait
+    assert clip_frame(3840, 2160, rotation_deg=270) == portrait
+    # 180 does not swap axes.
+    assert clip_frame(3840, 2160, rotation_deg=180) == landscape
+    assert clip_frame(2160, 3840, rotation_deg=90) == landscape
+    # Anamorphic: 1080x1080 coded at SAR 2:1 displays 2160x1080.
+    assert clip_frame(1080, 1080, sar=2.0) == landscape
+    assert clip_frame(1080, 1080, sar=0.5) == portrait
+    # A square frame is not a phone held on its end. The tie has to go
+    # somewhere and it goes to landscape.
+    assert clip_frame(2160, 2160) == landscape
+
+
+def _assert_no_bars(dst: Path, tmp_path: Path, width: int, height: int) -> None:
+    """Fail if any edge of the clip is a solid black bar.
+
+    The whole complaint this change answers: a portrait source conformed to
+    the landscape frame is 1215px of picture between two 1312px bars. Checked
+    by pixels, because dimensions alone cannot see a frame that is the right
+    shape and still padded.
+
+    Whole edge LINES, not sampled points: `testsrc` has black regions of its
+    own, so a handful of sampled pixels tests the pattern rather than the
+    padding. A padded column is black down its entire height and a real edge
+    column is not, which makes "does this line contain any ink at all" the
+    question that separates them. Inset by 5 to dodge encoder ringing right
+    at the boundary, the same way
+    test_make_clip_conforms_a_quarter_turn_to_the_locked_frame does.
+    """
+    frame = _rgb24_frame(dst, tmp_path / "bars.rgb", width, height)
+    inset = 5
+
+    def lit(pixels) -> bool:
+        return any(max(p) > 40 for p in pixels)
+
+    for x, edge in ((inset, "left"), (width - 1 - inset, "right")):
+        assert lit(_pixel(frame, width, x, y) for y in range(height)), (
+            f"the {edge} edge column is black down all {height}px: the clip is "
+            f"pillarboxed inside a {width}x{height} frame instead of filling it"
+        )
+    for y, edge in ((inset, "top"), (height - 1 - inset, "bottom")):
+        assert lit(_pixel(frame, width, x, y) for x in range(width)), (
+            f"the {edge} edge row is black across all {width}px: the clip is "
+            f"letterboxed inside a {width}x{height} frame instead of filling it"
+        )
+
+
+def test_make_clip_cuts_a_portrait_source_to_the_portrait_frame(tmp_path, hlg_setparams):
+    """9:16 in, 9:16 out, no bars. Before this the same source came out
+    3840x2160 with the picture squeezed into the middle 1215px -- and the
+    numbered reel burned its counter into the black to the left of it."""
+    src = tmp_path / "portrait.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=1080x1920:rate=30:duration=3",
+         "-vf", hlg_setparams,
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    dst = tmp_path / "clip.mp4"
+    make_clip(src, dst, start_ms=0, end_ms=2000)
+
+    info = probe(dst)
+    assert (info.width, info.height) == (CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT)
+    _assert_no_bars(dst, tmp_path, CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT)
+
+
+def test_make_clip_cuts_a_rotated_iphone_source_to_the_portrait_frame(
+    tmp_path, hlg_setparams
+):
+    """The library's actual shape: coded 3840x2160 with a quarter turn stored
+    on the source row, which is how an iPhone records a portrait video. The
+    rotation is what makes it portrait, so a frame chosen from the coded size
+    gets this one exactly backwards -- and six of the eleven sources on the
+    drive are this."""
+    src = tmp_path / "coded_landscape.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=3840x2160:rate=30:duration=3",
+         "-vf", hlg_setparams,
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)],
+        check=True, capture_output=True,
+    )
+    dst = tmp_path / "clip.mp4"
+    make_clip(src, dst, start_ms=0, end_ms=2000, rotation_deg=90)
+
+    info = probe(dst)
+    assert (info.width, info.height) == (CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT)
+    _assert_no_bars(dst, tmp_path, CLIP_PORTRAIT_WIDTH, CLIP_PORTRAIT_HEIGHT)
+
+
+def test_make_clip_still_pins_square_pixels_in_the_portrait_frame(
+    tmp_path, hlg_setparams
+):
+    """Every property the locked profile pins has to hold in both frames --
+    the frame is the only thing orientation changes. SAR is the one that
+    breaks -c copy silently, so it is the one worth re-asserting here."""
+    src = tmp_path / "portrait.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=1080x1920:rate=30:duration=3",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+         "-vf", hlg_setparams,
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+         str(src)],
+        check=True, capture_output=True,
+    )
+    dst = tmp_path / "clip.mp4"
+    make_clip(src, dst, start_ms=0, end_ms=2000)
+
+    assert _stream_field(dst, "v:0", "sample_aspect_ratio") == "1:1"
+    assert _stream_field(dst, "v:0", "r_frame_rate") == f"{CLIP_FPS}/1"
+    assert _stream_field(dst, "v:0", "pix_fmt") == "yuv420p"
+    assert _stream_field(dst, "a:0", "codec_name") == "aac"

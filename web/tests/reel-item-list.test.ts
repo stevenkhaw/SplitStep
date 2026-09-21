@@ -33,6 +33,7 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
     clip_ready: true,
     rally: null,
     note: '',
+    portrait: false,
     ...overrides,
   }
 }
@@ -114,6 +115,37 @@ describe('ReelItemList', () => {
     flushSync()
     expect(rows()).toHaveLength(1)
     expect(host.textContent).toContain('orphan')
+  })
+
+  it('badges only the minority shape in a mixed reel', () => {
+    // The reel cannot be rendered until these are pulled out, so the badge
+    // has to say WHICH rows -- "a reel is one shape" on the button alone
+    // leaves the reviewer scrolling a 68-item list looking for them.
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000), item(9000), item(20000, { portrait: true })],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn(),
+      },
+    })
+    flushSync()
+    expect(rows()[2].textContent).toContain('vertical')
+    expect(rows()[0].textContent).not.toContain('vertical')
+    expect(rows()[1].textContent).not.toContain('vertical')
+  })
+
+  it('badges nothing when the whole reel is portrait', () => {
+    // The case the change exists for: one shape, nothing to flag.
+    component = mount(ReelItemList, {
+      target: host,
+      props: {
+        items: [item(1000, { portrait: true }), item(9000, { portrait: true })],
+        oncommit: vi.fn(), onremove: vi.fn(), onnote: vi.fn(),
+      },
+    })
+    flushSync()
+    expect(host.textContent).not.toContain('vertical')
+    expect(host.textContent).not.toContain('horizontal')
   })
 
   it('commits a reorder once, on release', () => {

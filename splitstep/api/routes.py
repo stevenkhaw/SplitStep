@@ -84,6 +84,7 @@ from splitstep.reels import (
     delete_rendered_file,
     hr_missing_count,
     missing_clip_count,
+    mixed_orientation,
     plan_reel_export,
     rendered_file,
     resolve_items,
@@ -1815,6 +1816,9 @@ def _item_json(item) -> dict:
         "clip_ready": item.clip_ready,
         "rally": item.rally,
         "note": item.note,
+        # The source's orientation, so the builder can badge the minority
+        # shape before the reviewer presses Render and gets a 409 instead.
+        "portrait": item.portrait,
     }
 
 
@@ -2025,6 +2029,20 @@ def api_render_reel(slug: str, request: Request, body: RenderBody | None = None)
         raise HTTPException(
             status_code=409,
             detail=f"{missing} clip(s) not cut yet. Cut them first.",
+        )
+    # A reel is one shape. Checked here from the sources' own orientation --
+    # no ffprobe on a request thread -- and again inside handle_reel against
+    # the clip files themselves, which is the stricter question and the
+    # slower one. See reels.mixed_orientation for why the two differ.
+    mixed = mixed_orientation(items)
+    if mixed:
+        portrait, landscape = mixed
+        raise HTTPException(
+            status_code=409,
+            detail=f"This reel mixes {portrait} vertical clip(s) with {landscape} "
+                   f"horizontal one(s). They cut to different frames and cannot be "
+                   f"joined without stretching one of them. Split it into one reel "
+                   f"per shape.",
         )
 
     # A double-click must not queue two concats onto one output path.

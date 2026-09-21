@@ -23,6 +23,16 @@ class ReelItem:
     more, which a threshold sweep produces routinely. It renders as orphaned
     and stays playable, cuttable and renderable: the clip on disk is what the
     reel is made of, and a rally is a guess the detector re-makes every sweep.
+
+    `portrait` is the SOURCE's orientation, which is what a clip cut from it
+    now conforms to (transcode.clip_frame). It is deliberately not read from
+    the clip file: that would be an ffprobe per item on a request thread
+    against an external drive, and the builder redraws on every reorder. It
+    therefore answers "would these items cut to one shape", not "do the
+    files on disk have one shape" -- the second question is the render job's
+    (handle_reel probes), and the gap between them is exactly the clips cut
+    from a portrait source before clip_frame landed. `splitstep clips
+    prune-stale` closes that gap once; this field is what keeps it closed.
     """
 
     source_id: str
@@ -35,6 +45,7 @@ class ReelItem:
     clip_ready: bool
     rally: dict | None
     note: str
+    portrait: bool
 
     @property
     def duration_ms(self) -> int:
@@ -61,7 +72,7 @@ def resolve_items(
     sources = {
         r["id"]: r
         for r in conn.execute(
-            "SELECT id, session_id, idx FROM sources WHERE id IN"
+            "SELECT id, session_id, idx, width, height FROM sources WHERE id IN"
             f" ({','.join('?' * len({r['source_id'] for r in rows}))})",
             tuple({r["source_id"] for r in rows}),
         )
@@ -90,12 +101,33 @@ def resolve_items(
             clip_ready=(library.clips_dir(source["session_id"]) / name).exists(),
             rally=dict(rally) if rally is not None else None,
             note=row["note"],
+            # sources.width/height is the PROXY's frame (set_source_dimensions
+            # probes the proxy the wizard's rotation produced), so it is
+            # already display-oriented -- no rotation_deg to re-apply here.
+            portrait=source["height"] > source["width"],
         ))
     return items
 
 
 def missing_clip_count(items: list[ReelItem]) -> int:
     return sum(1 for i in items if not i.clip_ready)
+
+
+def mixed_orientation(items: list[ReelItem]) -> tuple[int, int] | None:
+    """`(portrait_count, landscape_count)` when a reel holds both, else None.
+
+    A reel is session-agnostic, so nothing stops one holding a phone shot on
+    its end and one shot on its side. Those cut to different locked frames,
+    and there is no honest way to join them: padding the minority puts back
+    the bars this app just removed, and stretching them is what ffmpeg does
+    by default and does silently (see concat.frame_divergences). So both the
+    render route and the render job refuse, and this is the count they say
+    it with.
+    """
+    portrait = sum(1 for i in items if i.portrait)
+    if portrait == 0 or portrait == len(items):
+        return None
+    return portrait, len(items) - portrait
 
 
 def rendered_file(library: Library, reel: sqlite3.Row) -> Path | None:

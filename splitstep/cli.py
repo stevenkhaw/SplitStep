@@ -17,6 +17,7 @@ from splitstep.db.schema import connect, migrate
 from splitstep.db.sessions import (
     get_session,
     get_source,
+    list_sessions,
     refresh_session_review_status,
     scoring_rules,
     set_scoring,
@@ -29,7 +30,9 @@ from splitstep.detect.segment import params_for_frames, segment
 from splitstep.export import (
     SETS,
     delete_orphan_clips,
+    delete_stale_frame_clips,
     find_orphan_clips,
+    find_stale_frame_clips,
     plan_export,
     reconcile_clip_layout,
 )
@@ -735,6 +738,72 @@ def cmd_clips_prune(args) -> int:
     return 0
 
 
+def cmd_clips_prune_stale(args) -> int:
+    """Delete clips whose frame is not what their source cuts to now.
+
+    A one-off, and named so: every clip cut from a portrait source before
+    `transcode.clip_frame` landed is pillarboxed into the landscape frame,
+    which is both the wrong shape and where the numbered reel burned its
+    counter. Nothing produces a stale clip any more, so this command exists
+    to close a migration rather than to be run on a schedule.
+
+    Sessions are walked whole when none is named, because the footage was
+    shot before anyone was thinking about this and is spread across them.
+    Dry run without --yes, the same gate `clips prune` carries and for the
+    same reason: a deleted clip is four to eight minutes of re-encode to get
+    back, with no undo. The 4K originals are all still on the drive, which
+    is what makes the trade payable at all.
+    """
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    # Same ordering rule as _load_orphans: a still-flat legacy clip has to be
+    # moved into its nested home before anything walks clips/ and decides
+    # what to do with what it finds there.
+    reconcile_clip_layout(library, conn)
+
+    if args.session_id:
+        if get_session(conn, args.session_id) is None:
+            print(f"session not found: {args.session_id}", file=sys.stderr)
+            return 1
+        session_ids = [args.session_id]
+    else:
+        session_ids = [row["id"] for row in list_sessions(conn)]
+
+    found: list[tuple[str, list]] = []
+    for session_id in session_ids:
+        stale = find_stale_frame_clips(library, conn, session_id)
+        if stale:
+            found.append((session_id, stale))
+
+    if not found:
+        print("no clips disagree with their source's frame")
+        return 0
+
+    total_count = sum(len(stale) for _, stale in found)
+    total_bytes = sum(c.size_bytes for _, stale in found for c in stale)
+    verb = "deleting" if args.yes else "would delete"
+    print(f"{verb} {total_count} stale clip(s), {_fmt_bytes(total_bytes)}:")
+    for session_id, stale in found:
+        print(f"  {session_id}")
+        for clip in stale:
+            fw, fh = clip.frame
+            ew, eh = clip.expected
+            print(f"    {clip.path.name}  source {clip.source_idx:02d}  "
+                  f"{_format_ts(clip.start_ms)}-{_format_ts(clip.end_ms)}  "
+                  f"{fw}x{fh} -> {ew}x{eh}  {_fmt_bytes(clip.size_bytes)}")
+
+    if not args.yes:
+        print("nothing deleted -- re-run with --yes")
+        return 0
+
+    deleted = sum(delete_stale_frame_clips(library, conn, stale) for _, stale in found)
+    print(f"deleted {deleted} stale clip(s), {_fmt_bytes(total_bytes)} reclaimed")
+    print("re-cut them from the reel builder's 'Cut missing clips', "
+          "or with: clips export <session_id>")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -886,6 +955,17 @@ def main(argv: list[str] | None = None) -> int:
     cp.add_argument("--yes", action="store_true",
                     help="actually delete; without it the orphans are only listed")
     cp.set_defaults(func=cmd_clips_prune)
+
+    cs = clips_sub.add_parser(
+        "prune-stale",
+        help="delete clips whose frame is not what their source cuts to now "
+             "(dry run without --yes)",
+    )
+    cs.add_argument("session_id", nargs="?",
+                    help="one session; omitted, every session is swept")
+    cs.add_argument("--yes", action="store_true",
+                    help="actually delete; without it the clips are only listed")
+    cs.set_defaults(func=cmd_clips_prune_stale)
 
     args = parser.parse_args(argv)
     try:

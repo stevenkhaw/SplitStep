@@ -771,3 +771,94 @@ def test_config_reports_and_sets_hr_clips_root(client, tmp_path, monkeypatch):
     body = client.post("/api/config/hr-clips", json={"path": str(root)}).json()
     assert body["hr_clips_root"] == str(root) and body["hr_clips_available"] is True
     assert client.post("/api/config/hr-clips", json={"path": None}).json()["hr_clips_root"] is None
+
+
+# --- orientation ------------------------------------------------------------
+
+
+@pytest.fixture
+def portrait_session(conn):
+    """A second session whose source is a phone held on its end.
+
+    `sources.width/height` is the PROXY's frame, written by
+    `set_source_dimensions` after the wizard's rotation has been applied --
+    so a portrait source is simply a row whose height exceeds its width, and
+    the fixture says it that way rather than carrying a rotation the API
+    never reads.
+    """
+    session_id = find_or_create_session_for_date(conn, "2026-08-28")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-28T10:00:00Z", duration_ms=600_000,
+        width=608, height=1080, fps=30.0, original_name="IMG_9100.MOV",
+    )
+    replace_rallies(conn, session_id, source_id, [Interval(1000, 5000, 0.8)])
+    return {"id": session_id, "source_id": source_id, "idx": idx}
+
+
+def _cut_span(library, session_id, idx, start, end):
+    path = library.clips_dir(session_id) / clip_relpath(idx, start, end)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"fake")
+    return path
+
+
+def test_items_carry_their_source_orientation(client, session, portrait_session):
+    """So the builder can badge the minority shape before Render 409s."""
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [
+        _span(session, 1000, 5000),
+        {"source_id": portrait_session["source_id"], "start_ms": 1000, "end_ms": 5000},
+    ]})
+
+    items = client.get(f"/api/reels/{reel['slug']}").json()["items"]
+    assert [i["portrait"] for i in items] == [False, True]
+
+
+def test_render_refuses_a_reel_that_mixes_orientations(
+    client, conn, session, portrait_session, library
+):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [
+        _span(session, 1000, 5000),
+        {"source_id": portrait_session["source_id"], "start_ms": 1000, "end_ms": 5000},
+    ]})
+    _cut_span(library, session["id"], session["idx"], 1000, 5000)
+    _cut_span(library, portrait_session["id"], portrait_session["idx"], 1000, 5000)
+
+    res = client.post(f"/api/reels/{reel['slug']}/render")
+
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert "1 vertical" in detail and "1 horizontal" in detail
+    # Refused before the job exists, like every other render precondition.
+    assert conn.execute("SELECT COUNT(*) c FROM jobs").fetchone()["c"] == 0
+
+
+def test_render_allows_a_reel_that_is_entirely_portrait(
+    client, conn, portrait_session, library
+):
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [
+        {"source_id": portrait_session["source_id"], "start_ms": 1000, "end_ms": 5000},
+    ]})
+    _cut_span(library, portrait_session["id"], portrait_session["idx"], 1000, 5000)
+
+    assert client.post(f"/api/reels/{reel['slug']}/render").json()["job_id"]
+
+
+def test_the_missing_clip_refusal_still_comes_first(
+    client, session, portrait_session, library
+):
+    """Order matters for the sentence the reviewer reads: a reel that is both
+    mixed AND uncut has one actionable problem at a time, and cutting is the
+    one that might resolve the other (a re-cut portrait clip is what makes a
+    stale landscape one disappear)."""
+    reel = client.post("/api/reels", json={"name": "r"}).json()
+    client.post(f"/api/reels/{reel['slug']}/items", json={"items": [
+        _span(session, 1000, 5000),
+        {"source_id": portrait_session["source_id"], "start_ms": 1000, "end_ms": 5000},
+    ]})
+
+    res = client.post(f"/api/reels/{reel['slug']}/render")
+    assert res.status_code == 409
+    assert "not cut yet" in res.json()["detail"]

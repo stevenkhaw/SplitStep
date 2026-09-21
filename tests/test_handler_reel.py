@@ -309,9 +309,10 @@ def test_handle_reel_numbered_burns_the_score_entering_each_clip(
 
     seen: list[list[list[str]] | None] = []
 
-    def spy(dst, *, counter, note, font, scoreboard=None):
+    def spy(dst, *, counter, note, font, frame, scoreboard=None):
         seen.append(scoreboard)
-        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+        return real(dst, counter=counter, note=note, font=font, frame=frame,
+                    scoreboard=scoreboard)
 
     real = handlers_mod.render_overlay_png
     monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
@@ -351,9 +352,10 @@ def test_handle_reel_numbered_burns_the_anchored_score(
 
     seen: list[list[list[str]] | None] = []
 
-    def spy(dst, *, counter, note, font, scoreboard=None):
+    def spy(dst, *, counter, note, font, frame, scoreboard=None):
         seen.append(scoreboard)
-        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+        return real(dst, counter=counter, note=note, font=font, frame=frame,
+                    scoreboard=scoreboard)
 
     real = handlers_mod.render_overlay_png
     monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
@@ -376,10 +378,118 @@ def test_handle_reel_numbered_has_no_board_for_an_untracked_session(
     seen = []
     real = handlers_mod.render_overlay_png
 
-    def spy(dst, *, counter, note, font, scoreboard=None):
+    def spy(dst, *, counter, note, font, frame, scoreboard=None):
         seen.append(scoreboard)
-        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+        return real(dst, counter=counter, note=note, font=font, frame=frame,
+                    scoreboard=scoreboard)
 
     monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
     handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
     assert seen == [None, None]
+
+
+# --- orientation ------------------------------------------------------------
+
+
+def _portrait_clip(path, seconds=1.0):
+    """A `_real_clip` stood on its end -- same profile, swapped frame."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error",
+         "-f", "lavfi", "-i", f"testsrc=size=240x320:rate=30:duration={seconds}",
+         "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
+         "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p",
+         "-r", "30", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+         "-shortest", str(path)],
+        check=True, capture_output=True,
+    )
+    return path
+
+
+def test_handle_reel_refuses_a_reel_that_mixes_clip_shapes(library, conn, reel_of_two):
+    """A reel is session-agnostic, so it can hold a phone shot on its end and
+    one shot on its side. Joining them stretches the odd one out silently
+    (see concat.frame_divergences), so the reel is refused by shape."""
+    fx = reel_of_two
+    clips = library.clips_dir(fx["session_id"])
+    spans = fx["spans"]
+    _real_clip(clips / clip_relpath(fx["idx"], spans[0][1], spans[0][2]))
+    _portrait_clip(clips / clip_relpath(fx["idx"], spans[1][1], spans[1][2]))
+
+    with pytest.raises(ValueError) as exc:
+        handle_reel(library, {"reel_id": fx["reel"]["id"]})
+
+    assert "mixes clip shapes" in str(exc.value)
+    # Named by count and shape, so the reviewer can tell which items to pull.
+    assert "320x240" in str(exc.value) and "240x320" in str(exc.value)
+    assert not (library.reels_dir / "2026-08-18-points.mp4").exists()
+
+
+def test_handle_reel_refuses_a_mixed_numbered_render_before_encoding_anything(
+    library, conn, reel_of_two, monkeypatch
+):
+    """The reason the check lives in the handler at all rather than only in
+    concat_clips: a numbered render re-encodes every clip FIRST, so reaching
+    concat's own refusal costs an hour on a 68-item reel to learn something
+    knowable in three seconds of probing."""
+    from splitstep.jobs import handlers as handlers_mod
+
+    fx = reel_of_two
+    clips = library.clips_dir(fx["session_id"])
+    spans = fx["spans"]
+    _real_clip(clips / clip_relpath(fx["idx"], spans[0][1], spans[0][2]))
+    _portrait_clip(clips / clip_relpath(fx["idx"], spans[1][1], spans[1][2]))
+
+    def _boom(*a, **k):
+        raise AssertionError("a clip was re-encoded before the shape check ran")
+
+    monkeypatch.setattr(handlers_mod, "make_numbered_intermediate", _boom)
+
+    with pytest.raises(ValueError, match="mixes clip shapes"):
+        handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+
+def test_handle_reel_renders_a_uniformly_portrait_reel(library, conn, reel_of_two):
+    """The case the whole change exists for. One shape, so nothing refuses."""
+    fx = reel_of_two
+    clips = library.clips_dir(fx["session_id"])
+    parts = [
+        _portrait_clip(clips / clip_relpath(fx["idx"], start, end))
+        for _src, start, end in fx["spans"]
+    ]
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"]})
+
+    dst = library.reels_dir / "2026-08-18-points.mp4"
+    out = probe(dst)
+    assert (out.width, out.height) == (240, 320), "the reel lost its orientation"
+    total = sum(probe(p).duration_ms for p in parts)
+    assert abs(out.duration_ms - total) <= 500
+
+
+def test_handle_reel_numbered_draws_the_overlay_at_the_clips_own_frame(
+    library, conn, reel_of_two, monkeypatch
+):
+    """`overlay=0:0` neither scales nor refuses a mismatched second input --
+    it keeps the main input's frame and clips the rest, in silence. So the
+    canvas has to come from the clip, and the handler is the only layer that
+    has probed it."""
+    from splitstep.jobs import handlers as handlers_mod
+
+    fx = reel_of_two
+    clips = library.clips_dir(fx["session_id"])
+    for _src, start, end in fx["spans"]:
+        _portrait_clip(clips / clip_relpath(fx["idx"], start, end))
+
+    seen = []
+    real = handlers_mod.render_overlay_png
+
+    def spy(dst, *, counter, note, font, frame, scoreboard=None):
+        seen.append(frame)
+        return real(dst, counter=counter, note=note, font=font, frame=frame,
+                    scoreboard=scoreboard)
+
+    monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    assert seen == [(240, 320), (240, 320)]

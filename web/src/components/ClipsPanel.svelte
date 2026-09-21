@@ -233,10 +233,17 @@
                            svelte-check's a11y-media-has-caption check this
                            was a deliberate call rather than an oversight,
                            without a blanket ignore comment. -->
+                      <!-- No `aspect-video`: a clip cut from a portrait
+                           source IS portrait (see clip_frame), and a 16:9
+                           box would put the bars back on screen that the
+                           file no longer carries. `<video>` is a replaced
+                           element, so width:100% with an implicit
+                           height:auto keeps its own aspect and the cap
+                           shrinks the width proportionally. -->
                       <video
                         controls
                         muted={false}
-                        class="mt-2 aspect-video w-full rounded bg-black"
+                        class="mt-2 block max-h-[60vh] w-full rounded bg-black"
                         src={clipMediaUrl(sessionId, clip)}
                       ></video>
                     {/if}

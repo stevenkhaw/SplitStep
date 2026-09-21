@@ -81,8 +81,41 @@ export const REEL_POLL_INTERVAL_MS = 15000
 export function renderBlockedReason(items: ReelItem[]): string | null {
   if (items.length === 0) return 'No clips in this reel yet'
   const missing = missingClipCount(items)
-  if (missing === 0) return null
+  if (missing === 0) return mixedOrientationReason(items)
   return `${missing} ${missing === 1 ? 'clip' : 'clips'} not cut yet`
+}
+
+/**
+ * Which items are the minority shape, as a set of span keys -- empty when
+ * the reel is all one shape.
+ *
+ * A reel is session-agnostic, so it can hold a phone shot on its end and one
+ * shot on its side. Those cut to different frames and cannot be joined:
+ * padding the minority puts back the bars the render exists to remove, and
+ * stretching them is what ffmpeg does by default and does silently. The
+ * builder badges the smaller group because that is the one a reviewer would
+ * pull out, and a tie badges the portrait ones -- arbitrary, but a tie has
+ * to land somewhere and "the reel is landscape" is the older assumption.
+ */
+export function minorityShapeKeys(items: ReelItem[]): Set<string> {
+  const portrait = items.filter((i) => i.portrait)
+  if (portrait.length === 0 || portrait.length === items.length) return new Set()
+  const odd = portrait.length <= items.length - portrait.length
+    ? portrait
+    : items.filter((i) => !i.portrait)
+  return new Set(odd.map(spanKey))
+}
+
+/**
+ * Why Render is blocked by shape, or null if it is not. Mirrors the server's
+ * own refusal (`mixed_orientation` in splitstep/reels.py) so the button says
+ * it before the press does.
+ */
+export function mixedOrientationReason(items: ReelItem[]): string | null {
+  const portrait = items.filter((i) => i.portrait).length
+  if (portrait === 0 || portrait === items.length) return null
+  const landscape = items.length - portrait
+  return `${portrait} vertical and ${landscape} horizontal — a reel is one shape`
 }
 
 /**

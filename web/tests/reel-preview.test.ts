@@ -14,6 +14,7 @@ function item(start: number, overrides: Partial<ReelItem> = {}): ReelItem {
     clip_ready: true,
     rally: null,
     note: '',
+    portrait: false,
     ...overrides,
   }
 }

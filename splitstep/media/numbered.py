@@ -29,9 +29,14 @@ from PIL import Image, ImageDraw, ImageFont
 from splitstep.media.transcode import CLIP_CRF, CLIP_FPS, ProgressFn, run_ffmpeg
 
 # Sized against the locked 3840x2160 frame: legible on a phone screen
-# without shouting over the footage.
-_FRAME_WIDTH = 3840
-_FRAME_HEIGHT = 2160
+# without shouting over the footage. The frame itself is no longer fixed --
+# a portrait source cuts to 2160x3840 (see transcode.clip_frame) -- so every
+# position is measured from the frame the caller passes in, and only these
+# type sizes stay absolute. Absolute on purpose: the short edge is 2160
+# either way, so a counter that is 120px tall reads the same size on a phone
+# held in either hand, which is not true of a size expressed as a fraction
+# of the width.
+_LANDSCAPE_WIDTH = 3840
 _MARGIN = 64
 _COUNTER_SIZE = 120
 _NOTE_SIZE = 72
@@ -41,6 +46,11 @@ _BOARD_ROW_GAP = 16
 _BOX_PAD = 24
 _BOX_FILL = (0, 0, 0, 115)  # black at ~45% alpha (115/255)
 _TEXT_FILL = (255, 255, 255, 255)
+# Characters per wrapped note line in the landscape frame -- roughly half of
+# 3840px at _NOTE_SIZE. Scaled by frame width below rather than reused as a
+# constant, so a note occupies the same fraction of the frame whichever way
+# up it is: 48 across 3840, 27 across 2160.
+_NOTE_WRAP_AT_LANDSCAPE = 48
 
 
 def _draw_line(
@@ -67,7 +77,10 @@ def _draw_line(
 
 
 def _draw_scoreboard(
-    draw: ImageDraw.ImageDraw, rows: list[list[str]], font: ImageFont.FreeTypeFont
+    draw: ImageDraw.ImageDraw,
+    rows: list[list[str]],
+    font: ImageFont.FreeTypeFont,
+    frame_height: int,
 ) -> None:
     """A broadcast-style board, bottom-left: one pill, two rows, columns
     sized to their widest cell so the numbers line up under each other.
@@ -91,7 +104,7 @@ def _draw_scoreboard(
     board_w = sum(col_w) + _BOARD_COL_GAP * (ncols - 1)
     board_h = row_h * len(cells) + _BOARD_ROW_GAP * (len(cells) - 1)
     x0 = _MARGIN
-    y0 = _FRAME_HEIGHT - _MARGIN - board_h
+    y0 = frame_height - _MARGIN - board_h
     draw.rounded_rectangle(
         (x0 - _BOX_PAD, y0 - _BOX_PAD, x0 + board_w + _BOX_PAD, y0 + board_h + _BOX_PAD),
         radius=_BOX_PAD,
@@ -116,6 +129,7 @@ def render_overlay_png(
     counter: str,
     note: str,
     font: str,
+    frame: tuple[int, int],
     scoreboard: list[list[str]] | None = None,
 ) -> None:
     """A full-frame transparent PNG carrying the counter and (optional) note.
@@ -124,9 +138,21 @@ def render_overlay_png(
     always `0:0` with no position math on the ffmpeg side, and a mostly-
     transparent 4K PNG compresses to a few KB, so the size cost of not
     cropping is negligible next to a video re-encode.
+
+    `frame` is REQUIRED rather than defaulted to the landscape one, and that
+    is the point of the argument: a default is how this drew a 3840x2160
+    overlay over a 2160x3840 clip. Measured on ffmpeg 9.0.1, `overlay`
+    neither scales nor refuses a mismatched second input -- the output keeps
+    the MAIN input's frame and whatever hangs off the edge is silently
+    clipped. So the counter would land correctly, the scoreboard would be
+    positioned for a frame 1680px shorter than the real one and sit halfway
+    down the picture, and nothing anywhere would say so. The
+    caller knows the clip's frame because it has probed it (`handle_reel`);
+    passing it is cheaper than re-deriving it here and impossible to forget.
     """
+    frame_w, frame_h = frame
     dst.parent.mkdir(parents=True, exist_ok=True)
-    canvas = Image.new("RGBA", (_FRAME_WIDTH, _FRAME_HEIGHT), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
     # ImageFont.truetype loads both .ttf and .ttc (collection index 0, the
@@ -135,11 +161,15 @@ def render_overlay_png(
     if note:
         # Wrapped, not truncated: real notes are coaching sentences (the
         # first live pass measured ~110 characters), and cutting one off
-        # mid-thought defeats why it was written. ~48 chars at _NOTE_SIZE
-        # keeps each line inside roughly half the 3840px frame.
+        # mid-thought defeats why it was written. The wrap scales with the
+        # frame so a line stays inside roughly half of it either way up --
+        # 48 chars across 3840, 27 across 2160. max(1, ...) because
+        # textwrap.wrap raises on a width of zero and a frame narrow enough
+        # to produce one is not worth a second failure mode.
+        wrap_at = max(1, round(_NOTE_WRAP_AT_LANDSCAPE * frame_w / _LANDSCAPE_WIDTH))
         note_font = ImageFont.truetype(font, _NOTE_SIZE)
         y = _MARGIN + _COUNTER_SIZE + 48
-        for line in textwrap.wrap(note, width=48):
+        for line in textwrap.wrap(note, width=wrap_at):
             _draw_line(draw, line, note_font, y)
             y += _NOTE_SIZE + 2 * _BOX_PAD
 
@@ -147,7 +177,7 @@ def render_overlay_png(
         # The score *entering* this clip, like a live broadcast (see
         # splitstep/score.py::score_before). Rows come pre-formatted from
         # scoreboard_rows so this module knows nothing about tennis.
-        _draw_scoreboard(draw, scoreboard, ImageFont.truetype(font, _BOARD_SIZE))
+        _draw_scoreboard(draw, scoreboard, ImageFont.truetype(font, _BOARD_SIZE), frame_h)
 
     canvas.save(dst)
 

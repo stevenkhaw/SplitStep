@@ -1048,3 +1048,97 @@ def test_score_show_says_nothing_about_serving_without_a_first_server(library, c
     main(["--library", str(library.root), "score", "set", session_id, "--players", "Ann", "Bob"])
     main(["--library", str(library.root), "score", "show", session_id])
     assert "serving" not in capsys.readouterr().out
+
+
+# -- clips prune-stale -------------------------------------------------------
+
+
+@pytest.fixture
+def pillarboxed(library, conn):
+    """A portrait source whose clips were cut before `clip_frame` landed.
+
+    One clip at the old landscape frame, one already re-cut at the portrait
+    one, so the sweep has to tell them apart rather than take the session
+    whole. `sources.width/height` is the PROXY's frame, which is why a
+    portrait source is simply a row taller than it is wide.
+    """
+    import subprocess
+
+    from splitstep.db.rallies import replace_rallies
+    from splitstep.detect.segment import Interval
+    from splitstep.media.clips import clip_relpath
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-28")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-28T10:00:00Z", duration_ms=600_000,
+        width=608, height=1080, fps=30.0, original_name="IMG_9100.MOV",
+    )
+    spans = [(1000, 5000), (9000, 14000)]
+    replace_rallies(conn, session_id, source_id, [Interval(a, b, 0.8) for a, b in spans])
+
+    clips_dir = library.clips_dir(session_id)
+    paths = {}
+    for (start_ms, end_ms), size in zip(spans, ("3840x2160", "2160x3840")):
+        path = clips_dir / clip_relpath(idx, start_ms, end_ms)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30:duration=0.2",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+            check=True, capture_output=True,
+        )
+        paths[size] = path
+    conn.close()
+    return {"session_id": session_id, "stale": paths["3840x2160"],
+            "current": paths["2160x3840"]}
+
+
+def test_clips_prune_stale_lists_the_wrong_shape_and_deletes_nothing(
+    library, pillarboxed, capsys
+):
+    rc = main(["--library", str(library.root), "clips", "prune-stale",
+               pillarboxed["session_id"]])
+    assert rc == 0
+    assert pillarboxed["stale"].exists()
+    out = capsys.readouterr().out
+    assert pillarboxed["stale"].name in out
+    # Both shapes named: "stale" with no numbers beside it is not something
+    # a user can check.
+    assert "3840x2160 -> 2160x3840" in out
+    assert "--yes" in out
+
+
+def test_clips_prune_stale_with_yes_deletes_only_the_wrong_shape(
+    library, pillarboxed, capsys
+):
+    rc = main(["--library", str(library.root), "clips", "prune-stale",
+               pillarboxed["session_id"], "--yes"])
+    assert rc == 0
+    assert not pillarboxed["stale"].exists()
+    assert pillarboxed["current"].exists()
+    assert "deleted 1" in capsys.readouterr().out.lower()
+
+
+def test_clips_prune_stale_sweeps_every_session_when_none_is_named(
+    library, pillarboxed, capsys
+):
+    """The footage this migration is for was shot before anyone was thinking
+    about it, so it is spread across sessions."""
+    rc = main(["--library", str(library.root), "clips", "prune-stale", "--yes"])
+    assert rc == 0
+    assert not pillarboxed["stale"].exists()
+    assert pillarboxed["session_id"] in capsys.readouterr().out
+
+
+def test_clips_prune_stale_on_a_clean_library_says_so(library, pillarboxed, capsys):
+    pillarboxed["stale"].unlink()
+    rc = main(["--library", str(library.root), "clips", "prune-stale"])
+    assert rc == 0
+    assert "no clips disagree" in capsys.readouterr().out.lower()
+
+
+def test_clips_prune_stale_on_an_unknown_session_fails(library, conn, capsys):
+    conn.close()
+    rc = main(["--library", str(library.root), "clips", "prune-stale", "nope"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err.lower()

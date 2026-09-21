@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
-  import { normalizedItemNote, spanKey } from '../lib/reels'
+  import { minorityShapeKeys, normalizedItemNote, spanKey } from '../lib/reels'
   import { dropIndex, moveItem } from '../lib/reorder'
   import { formatDuration } from '../lib/time'
   import type { ReelItem } from '../lib/types'
@@ -40,6 +40,11 @@
   // prop otherwise. The parent refetches after a commit, so this hands back
   // over cleanly once the server answers.
   const shown = $derived(dragging === null ? items : order)
+  // Derived from `items`, not `shown`: which items are the odd shape out is
+  // a property of the reel's membership, and a drag changes only the order.
+  // Recomputing it mid-drag would be the same answer at dozens of
+  // pointermoves.
+  const oddShapes = $derived(minorityShapeKeys(items))
 
   function rowMidpoints(): number[] {
     // The component's ONLY DOM read. Everything that decides where a row
@@ -214,6 +219,17 @@
              actually made of, so this is badged, never dropped. -->
         <span class="rounded bg-surface-2 px-2 py-0.5 font-data text-data text-faint">
           orphan
+        </span>
+      {/if}
+
+      {#if oddShapes.has(spanKey(item))}
+        <!-- The minority orientation in a mixed reel. `danger` rather than a
+             neutral badge because, unlike `orphan`, this one BLOCKS the
+             render: the reel cannot be joined until these are pulled out.
+             Named by the shape it is, not by "wrong" -- nothing about the
+             clip is wrong, it just does not belong beside the others. -->
+        <span class="rounded bg-danger/15 px-2 py-0.5 font-data text-caption text-danger">
+          {item.portrait ? 'vertical' : 'horizontal'}
         </span>
       {/if}
 
