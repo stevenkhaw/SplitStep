@@ -1,4 +1,4 @@
-import type { Rally } from './types'
+import type { Rally, ScoreAnchor } from './types'
 
 /**
  * Tennis scoring as a pure function of who won each point.
@@ -37,6 +37,25 @@ export interface ScoreState {
    *  no next point, which is why scoreboardRows drops games and points
    *  there too. */
   server: Player | null
+}
+
+/**
+ * A reviewer's "entering here, the score is X" (migration 017).
+ *
+ * An INPUT to the replay, exactly like a winner is -- never a stored
+ * output. `score` starts from it instead of love-all and every point
+ * after it builds on it. Raw point counts, never labels: 40-40 is [3, 3]
+ * and Ad-40 is [4, 3], the numbers the replay keeps internally, so no
+ * labelled string is ever parsed back.
+ *
+ * Three fields on purpose. inTiebreak, finished, the server and the
+ * service-unit count are all derived from these plus the rules; a stored
+ * copy of any of them could disagree with the numbers it describes.
+ */
+export interface AnchorState {
+  sets: [number, number][]
+  games: [number, number]
+  points: [number, number]
 }
 
 export const DEFAULT_RULES: ScoreRules = {
@@ -85,15 +104,37 @@ function pointLabels(pts: [number, number], inTiebreak: boolean, ad: boolean): [
   return [POINT_LABELS[Math.min(a, 3)], POINT_LABELS[Math.min(b, 3)]]
 }
 
-export function score(winners: Player[], rules: ScoreRules): ScoreState {
+export function score(
+  winners: Player[],
+  rules: ScoreRules,
+  anchor: AnchorState | null = null,
+): ScoreState {
   const setsNeeded = Math.floor(rules.sets / 2) + 1
-  const sets: [number, number][] = []
-  let games: [number, number] = [0, 0]
-  let pts: [number, number] = [0, 0]
+  const sets: [number, number][] = anchor ? anchor.sets.map((s) => [s[0], s[1]]) : []
+  let games: [number, number] = anchor ? [...anchor.games] : [0, 0]
+  let pts: [number, number] = anchor ? [...anchor.points] : [0, 0]
   let inTb = rules.tiebreak === 'only'
   let finished: Player | null = null
   let units = 0 // completed service units: games, plus a whole tiebreak as one
   const setsWonBy = (i: 0 | 1) => sets.filter((s) => s[i] > s[1 - i]).length
+
+  if (anchor) {
+    // Everything else about the anchored state is read off its three
+    // numbers, so an anchor cannot contradict itself: 6-6 under at6 is a
+    // tiebreak by definition, every game of a completed set was a service
+    // unit (a 7-6 set is twelve games plus the tiebreak as one -- thirteen
+    // either way), and a player holding the sets needed has already won.
+    inTb = rules.tiebreak === 'only' || (rules.tiebreak === 'at6' && games[0] === 6 && games[1] === 6)
+    units = sets.reduce((n, s) => n + s[0] + s[1], 0) + games[0] + games[1]
+    for (const i of [0, 1] as const) {
+      const p: Player = i === 0 ? 'a' : 'b'
+      if (rules.tiebreak === 'only') {
+        if (pts[i] >= rules.tiebreakTo && pts[i] - pts[1 - i] >= 2) finished = p
+      } else if (setsWonBy(i) >= setsNeeded) {
+        finished = p
+      }
+    }
+  }
 
   for (const w of winners) {
     // Points after match point are ignored, not rejected: the queue shows
@@ -147,25 +188,82 @@ export function score(winners: Player[], rules: ScoreRules): ScoreState {
   }
 }
 
+/** An anchor placed in the session's rally order: before (slot 0) or
+ *  after (slot 1) the rally at `idx`. Sortable as [idx, slot, at_ms]. */
+interface PlacedAnchor {
+  idx: number
+  slot: 0 | 1
+  anchor: ScoreAnchor
+}
+
+/**
+ * Where each anchor sits in the session's rally order.
+ *
+ * An anchor belongs to the first rally of its source that ends after it
+ * -- the rally containing it, or the next one along if it fell in a gap.
+ * Containing rather than "starting at or after": QueueMode stamps an
+ * anchor at a rally's start_ms, and a re-segment that nudges that
+ * boundary a few hundred milliseconds either way would otherwise hand the
+ * anchor to the neighbouring rally, silently. Past the source's last rally
+ * it sits after that rally, so the next source's points build on it. A
+ * source with no rallies gives it no place in the order, and it is dropped
+ * rather than guessed at.
+ */
+function placeAnchors(ordered: Rally[], anchors: ScoreAnchor[]): PlacedAnchor[] {
+  const placed: PlacedAnchor[] = []
+  for (const anchor of anchors) {
+    const first = ordered.find((r) => r.source_id === anchor.source_id && r.end_ms > anchor.at_ms)
+    if (first) {
+      placed.push({ idx: first.idx, slot: 0, anchor })
+      continue
+    }
+    const last = [...ordered].reverse().find((r) => r.source_id === anchor.source_id)
+    if (last) placed.push({ idx: last.idx, slot: 1, anchor })
+  }
+  return placed
+}
+
+function later(x: PlacedAnchor, y: PlacedAnchor): boolean {
+  if (x.idx !== y.idx) return x.idx > y.idx
+  if (x.slot !== y.slot) return x.slot > y.slot
+  return x.anchor.at_ms > y.anchor.at_ms
+}
+
 /**
  * The state entering `rallyId`, and how many earlier points carry no
  * winner. Replays every non-rejected point with a lower idx, in idx order
  * whatever order `rallies` arrived in -- the caller hands in the whole
  * session, not the source-scoped list the queue shows. An id no rally
  * holds replays everything.
+ *
+ * With anchors, the replay starts from the newest one at or before the
+ * target (see placeAnchors) instead of from love-all, and only the points
+ * after it are replayed. Points the anchor supersedes are not counted as
+ * unscored either: the reviewer has stated the score, so a missing winner
+ * before it is no longer a gap in it.
  */
 export function scoreBefore(
   rallies: Rally[],
   rallyId: string,
   rules: ScoreRules,
+  anchors: ScoreAnchor[] = [],
 ): { state: ScoreState; unscored: number } {
   const target = rallies.find((r) => r.id === rallyId)
-  const earlier = rallies
-    .filter((r) => (target ? r.idx < target.idx : true) && !r.rejected && r.point)
-    .sort((x, y) => x.idx - y.idx)
+  const ordered = [...rallies].sort((x, y) => x.idx - y.idx)
+  // [target.idx, 0] is "before the target itself", which an anchor stamped
+  // on the target's own start_ms is; anything placed after it is not.
+  let chosen: PlacedAnchor | null = null
+  for (const p of placeAnchors(ordered, anchors)) {
+    if (target && (p.idx > target.idx || (p.idx === target.idx && p.slot === 1))) continue
+    if (!chosen || later(p, chosen)) chosen = p
+  }
+  const fromIdx = chosen ? chosen.idx + chosen.slot : -Infinity
+  const earlier = ordered.filter(
+    (r) => r.idx >= fromIdx && (target ? r.idx < target.idx : true) && !r.rejected && r.point,
+  )
   const winners = earlier.map((r) => r.winner).filter((w): w is Player => w !== '')
   const unscored = earlier.filter((r) => r.winner === '').length
-  return { state: score(winners, rules), unscored }
+  return { state: score(winners, rules, chosen?.anchor ?? null), unscored }
 }
 
 export function playerName(rules: ScoreRules, p: Player): string {

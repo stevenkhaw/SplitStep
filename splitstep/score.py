@@ -45,7 +45,99 @@ class ScoreState:
     server: str | None
 
 
+@dataclass(frozen=True)
+class AnchorState:
+    """A reviewer's "entering here, the score is X" (migration 017).
+
+    An anchor is an INPUT to the replay, exactly like a winner is -- not a
+    stored output. score() starts from it instead of love-all, and every
+    point after it builds on it. Raw point counts, never labels: "40-40" is
+    (3, 3) and "Ad-40" is (4, 3), the same numbers the replay keeps
+    internally, so a labelled string never has to be parsed back.
+
+    Deliberately three fields. in_tiebreak, finished, the server and the
+    service-unit count are all derivable from these plus the rules, and a
+    stored copy of any of them could disagree with the numbers it
+    describes -- the same reason det_start_ms IS NULL marks a split rally
+    rather than a boolean beside it.
+    """
+
+    sets: tuple[tuple[int, int], ...]
+    games: tuple[int, int]
+    points: tuple[int, int]
+
+
 DEFAULT_RULES = ScoreRules(("Me", "Opp"), 3, True, "at6", 7, None)
+
+
+def _pair(v, what: str) -> tuple[int, int]:
+    if (not isinstance(v, (list, tuple)) or len(v) != 2
+            or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in v)):
+        raise ValueError(f"{what} must be two non-negative integers")
+    return (v[0], v[1])
+
+
+def anchor_from_dict(d: Mapping) -> AnchorState:
+    """The JSON column's shape -> anchor, validated. Shape only: whether
+    6-4 3-2 is *reachable* under the session's rules is not this
+    function's question -- a reviewer anchoring is correcting the record,
+    and the record is what they say it is."""
+    sets = d.get("sets")
+    if not isinstance(sets, (list, tuple)):
+        raise ValueError("sets must be a list of pairs")  # noqa: TRY004 -- see rules_from_dict
+    return AnchorState(
+        sets=tuple(_pair(s, "each set") for s in sets),
+        games=_pair(d.get("games"), "games"),
+        points=_pair(d.get("points"), "points"),
+    )
+
+
+def anchor_to_dict(a: AnchorState) -> dict:
+    return {"sets": [list(s) for s in a.sets], "games": list(a.games), "points": list(a.points)}
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """An AnchorState placed in a session: at `at_ms` on `source_id`.
+
+    A time on a source, never a rally id, for the reason reel_items is
+    keyed on a span (migration 007): replace_rallies deletes every rally
+    for a source on each sweep, so anything keyed to a rally evaporates on
+    the first re-segment. A time survives it -- the boundaries around it
+    may move, but the footage at that instant does not.
+    """
+
+    source_id: str
+    at_ms: int
+    state: AnchorState
+
+
+def _place_anchors(ordered: Sequence[Mapping], anchors: Sequence[Anchor]) -> list[tuple]:
+    """Where each anchor sits in the session's rally order, as a sortable
+    key: (idx, slot, at_ms). Slot 0 is "before this rally", slot 1 "after
+    it".
+
+    An anchor belongs to the first rally of its source that ends after it
+    -- the rally containing it, or the next one along if it fell in a gap.
+    Containing rather than "starting at or after": the UI stamps an anchor
+    at a rally's start_ms, and a re-segment that nudges that boundary a few
+    hundred milliseconds either way would otherwise hand the anchor to the
+    neighbouring rally, silently. Past the source's last rally it sits
+    after that rally, so the next source's points build on it. A source
+    with no rallies gives it no place in the order at all, and it is
+    dropped rather than guessed at.
+    """
+    placed = []
+    for a in anchors:
+        first = next((r for r in ordered
+                      if r["source_id"] == a.source_id and r["end_ms"] > a.at_ms), None)
+        if first is not None:
+            placed.append((first["idx"], 0, a.at_ms, a))
+            continue
+        last = next((r for r in reversed(ordered) if r["source_id"] == a.source_id), None)
+        if last is not None:
+            placed.append((last["idx"], 1, a.at_ms, a))
+    return placed
 
 
 def rules_from_dict(d: Mapping) -> ScoreRules:
@@ -121,8 +213,11 @@ def _point_labels(pts: list[int], in_tiebreak: bool, ad: bool) -> tuple[str, str
     return (_POINT_LABELS[min(a, 3)], _POINT_LABELS[min(b, 3)])
 
 
-def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
-    """Replay `winners` ('a' / 'b' per point) into a scoreboard state.
+def score(
+    winners: Sequence[str], rules: ScoreRules, anchor: AnchorState | None = None
+) -> ScoreState:
+    """Replay `winners` ('a' / 'b' per point) into a scoreboard state,
+    from love-all or from `anchor` (see AnchorState).
 
     Points after the match is decided are ignored rather than rejected: a
     reviewer who keeps scoring warm-down rallies has made no error the
@@ -135,6 +230,25 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
     in_tb = rules.tiebreak == "only"
     finished: str | None = None
     units = 0   # completed service units: games, plus a whole tiebreak as one
+
+    if anchor is not None:
+        sets = list(anchor.sets)
+        games = list(anchor.games)
+        pts = list(anchor.points)
+        # Everything else about the anchored state is read off those three
+        # numbers, so the anchor cannot contradict itself. 6-6 under at6 is
+        # a tiebreak by definition; every game in a completed set was a
+        # service unit (a 7-6 set is twelve games plus the tiebreak, which
+        # counted as one -- thirteen either way); and a player holding the
+        # sets needed has already won, so nothing after the anchor scores.
+        in_tb = rules.tiebreak == "only" or (rules.tiebreak == "at6" and games == [6, 6])
+        units = sum(a + b for a, b in sets) + games[0] + games[1]
+        for i, p in enumerate(("a", "b")):
+            if rules.tiebreak == "only":
+                if pts[i] >= rules.tiebreak_to and pts[i] - pts[1 - i] >= 2:
+                    finished = p
+            elif sum(1 for s in sets if s[i] > s[1 - i]) >= sets_needed:
+                finished = p
 
     for w in winners:
         if finished is not None:
@@ -190,23 +304,44 @@ def score(winners: Sequence[str], rules: ScoreRules) -> ScoreState:
 
 
 def score_before(
-    rallies: Sequence[Mapping], rally_id: str, rules: ScoreRules
+    rallies: Sequence[Mapping], rally_id: str, rules: ScoreRules,
+    anchors: Sequence[Anchor] = (),
 ) -> tuple[ScoreState, int]:
     """The state entering `rally_id`, and how many earlier points carry no
     winner. Replays every non-rejected point with idx below the target's,
     in idx order regardless of the order `rallies` arrived in. An id no row
     holds (an orphaned reel item) replays everything -- the board on such a
-    clip is the best information there is, and never a crash."""
+    clip is the best information there is, and never a crash.
+
+    With anchors, the replay starts from the newest one at or before the
+    target (see _place_anchors) instead of from love-all, and only the
+    points after it are replayed. Points the anchor supersedes are not
+    counted as unscored either: the reviewer has stated the score, so a
+    missing winner before it is no longer a gap in it.
+    """
     target = next((r for r in rallies if r["id"] == rally_id), None)
     limit = target["idx"] if target is not None else None
-    earlier = sorted(
-        (r for r in rallies
-         if (limit is None or r["idx"] < limit) and not r["rejected"] and r["point"]),
-        key=lambda r: r["idx"],
-    )
+    ordered = sorted(rallies, key=lambda r: r["idx"])
+
+    # (limit, 0) is "before the target itself", which an anchor stamped on
+    # the target's own start_ms is; anything placed after it is not.
+    placed = [p for p in _place_anchors(ordered, anchors)
+              if limit is None or (p[0], p[1]) <= (limit, 0)]
+    chosen = max(placed, key=lambda p: p[:3]) if placed else None
+    start: AnchorState | None = None
+    from_idx = float("-inf")
+    if chosen is not None:
+        start = chosen[3].state
+        from_idx = chosen[0] + chosen[1]   # slot 1 = after that rally
+
+    earlier = [
+        r for r in ordered
+        if r["idx"] >= from_idx and (limit is None or r["idx"] < limit)
+        and not r["rejected"] and r["point"]
+    ]
     winners = [r["winner"] for r in earlier if r["winner"]]
     unscored = sum(1 for r in earlier if not r["winner"])
-    return score(winners, rules), unscored
+    return score(winners, rules, start), unscored
 
 
 def scoreboard_rows(state: ScoreState, rules: ScoreRules) -> list[list[str]]:

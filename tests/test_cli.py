@@ -1024,6 +1024,22 @@ def test_score_set_records_a_first_server_and_show_names_them(library, conn, cap
     assert "Ann serving" in capsys.readouterr().out
 
 
+def test_score_show_replays_from_an_anchor(library, conn, capsys):
+    from splitstep.db.anchors import set_anchor
+    from splitstep.score import AnchorState
+
+    session_id = _scored_session(conn)
+    rows = list_rallies(conn, session_id)
+    # Entering the second rally the score is 6-4 3-2; it then goes to Ann.
+    set_anchor(conn, rows[1]["source_id"], rows[1]["start_ms"],
+               AnchorState(((6, 4),), (3, 2), (0, 0)))
+    conn.close()
+    main(["--library", str(library.root), "score", "set", session_id, "--players", "Ann", "Bob"])
+    assert main(["--library", str(library.root), "score", "show", session_id]) == 0
+    out = capsys.readouterr().out
+    assert "Ann" in out and "6" in out and "3" in out and "15" in out
+
+
 def test_score_show_says_nothing_about_serving_without_a_first_server(library, conn, capsys):
     # Absent is unknown, not player A: the board stays silent rather than
     # naming someone the reviewer never told it about.

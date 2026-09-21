@@ -8,6 +8,7 @@ from pathlib import Path
 from splitstep import resources
 from splitstep.config import Library
 from splitstep.db import jobs as jobq
+from splitstep.db.anchors import list_anchors
 from splitstep.db.rallies import list_rallies, replace_rallies, set_clip_path
 from splitstep.db.reels import get_reel, mark_rendered
 from splitstep.db.schema import connect, migrate
@@ -580,7 +581,7 @@ def handle_reel(library: Library, payload: dict,
         # per item would be N queries for one answer. An orphan item (no
         # rally) or an untracked session gets no board -- the counter and
         # note still burn as before.
-        session_cache: dict[str, tuple[list, object] | None] = {}
+        session_cache: dict[str, tuple[list, object, list] | None] = {}
 
         def board_for(item) -> list[list[str]] | None:
             if item.rally is None:
@@ -590,13 +591,14 @@ def handle_reel(library: Library, payload: dict,
                 session_cache[item.session_id] = (
                     None if rules is None
                     else ([dict(r) for r in list_rallies(conn, item.session_id)],
-                          rules_from_dict(rules))
+                          rules_from_dict(rules),
+                          list_anchors(conn, item.session_id))
                 )
             cached = session_cache[item.session_id]
             if cached is None:
                 return None
-            rallies, parsed = cached
-            state, _unscored = score_before(rallies, item.rally["id"], parsed)
+            rallies, parsed, anchors = cached
+            state, _unscored = score_before(rallies, item.rally["id"], parsed, anchors)
             return scoreboard_rows(state, parsed)
 
         try:

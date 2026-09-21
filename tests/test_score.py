@@ -5,7 +5,9 @@ import pytest
 
 from splitstep.score import (
     DEFAULT_RULES,
+    Anchor,
     ScoreRules,
+    anchor_from_dict,
     rules_from_dict,
     rules_to_dict,
     score,
@@ -24,7 +26,11 @@ def _rules(case: dict) -> ScoreRules:
 def test_engine_matches_the_shared_cases(case):
     # One case file, two engines (see web/tests/score.test.ts). A case that
     # passes here and fails there is the drift the shared file exists to catch.
-    state = score(list(case["winners"]), _rules(case))
+    # `anchor`, when a case carries one, is the state the replay starts
+    # from instead of love-all -- a reviewer's "entering here the score is
+    # X" (migration 017). Raw point counts, never labels.
+    anchor = anchor_from_dict(case["anchor"]) if "anchor" in case else None
+    state = score(list(case["winners"]), _rules(case), anchor)
     e = case["expect"]
     assert [list(s) for s in state.sets] == e["sets"]
     assert list(state.games) == e["games"]
@@ -69,8 +75,17 @@ def test_rules_from_dict_rejects_bad_values():
         rules_from_dict({**rules_to_dict(DEFAULT_RULES), "players": ["", "Bob"]})
 
 
-def _rally(idx, *, point=1, winner="", rejected=0):
-    return {"id": f"r{idx}", "idx": idx, "point": point, "winner": winner, "rejected": rejected}
+def _rally(idx, *, point=1, winner="", rejected=0, source_id="src", start_ms=None, end_ms=None):
+    # Ten seconds apart, eight long, unless a test places the rally itself.
+    start = idx * 10_000 if start_ms is None else start_ms
+    end = start + 8_000 if end_ms is None else end_ms
+    return {"id": f"r{idx}", "idx": idx, "point": point, "winner": winner, "rejected": rejected,
+            "source_id": source_id, "start_ms": start, "end_ms": end}
+
+
+def _anchor(at_ms, sets=(), games=(0, 0), points=(0, 0), source_id="src"):
+    return Anchor(source_id, at_ms, anchor_from_dict(
+        {"sets": [list(s) for s in sets], "games": list(games), "points": list(points)}))
 
 
 def test_score_before_replays_only_earlier_scored_points_in_idx_order():
@@ -106,6 +121,117 @@ def test_score_before_unknown_rally_is_the_full_replay():
     rallies = [_rally(1, winner="a"), _rally(2, winner="a")]
     state, _ = score_before(rallies, "nope", DEFAULT_RULES)
     assert state.points == ("30", "0")
+
+
+def test_an_anchor_resets_the_replay_and_later_rallies_build_on_it():
+    rallies = [_rally(i, winner="a") for i in range(1, 6)]
+    # Without the anchor, r4 would be entered at 40-0 (three points to a).
+    anchor = _anchor(rallies[2]["start_ms"], sets=[(6, 4)], games=(2, 3), points=(0, 1))
+    state, _ = score_before(rallies, "r3", DEFAULT_RULES, [anchor])
+    assert state.sets == ((6, 4),)
+    assert state.games == (2, 3)
+    assert state.points == ("0", "15")
+    # r3 and r4 both go to a on top of the anchor: 15-15, 30-15 entering r5.
+    state, _ = score_before(rallies, "r5", DEFAULT_RULES, [anchor])
+    assert state.games == (2, 3)
+    assert state.points == ("30", "15")
+
+
+def test_rallies_before_an_anchor_are_untouched_by_it():
+    rallies = [_rally(i, winner="a") for i in range(1, 6)]
+    anchor = _anchor(rallies[3]["start_ms"], games=(5, 5))
+    state, _ = score_before(rallies, "r3", DEFAULT_RULES, [anchor])
+    assert state.games == (0, 0)
+    assert state.points == ("30", "0")
+
+
+def test_the_newest_anchor_at_or_before_the_rally_wins():
+    rallies = [_rally(i, winner="a") for i in range(1, 6)]
+    early = _anchor(rallies[0]["start_ms"], games=(1, 0))
+    late = _anchor(rallies[2]["start_ms"], games=(4, 4))
+    state, _ = score_before(rallies, "r4", DEFAULT_RULES, [late, early])
+    assert state.games == (4, 4)
+    assert state.points == ("15", "0")
+    # Two anchors inside one rally's span: the later time wins.
+    twin = _anchor(rallies[2]["start_ms"] + 500, games=(2, 2))
+    state, _ = score_before(rallies, "r4", DEFAULT_RULES, [late, twin, early])
+    assert state.games == (2, 2)
+
+
+def test_an_anchor_inside_a_rally_applies_to_that_rally():
+    # The anchor is a time, and a rally straddling it is the rally it
+    # names -- so a re-segment that nudges the boundary either side of the
+    # anchor keeps it on the same footage.
+    rallies = [_rally(i, winner="a") for i in range(1, 4)]
+    mid = (rallies[1]["start_ms"] + rallies[1]["end_ms"]) // 2
+    state, _ = score_before(rallies, "r2", DEFAULT_RULES, [_anchor(mid, games=(3, 0))])
+    assert state.games == (3, 0)
+    assert state.points == ("0", "0")
+
+
+def test_an_anchor_in_a_gap_applies_to_the_next_rally():
+    rallies = [_rally(i, winner="a") for i in range(1, 4)]
+    gap = rallies[0]["end_ms"] + 1_000
+    state, _ = score_before(rallies, "r2", DEFAULT_RULES, [_anchor(gap, games=(3, 0))])
+    assert state.games == (3, 0)
+    state, _ = score_before(rallies, "r1", DEFAULT_RULES, [_anchor(gap, games=(3, 0))])
+    assert state.games == (0, 0)
+
+
+def test_anchors_on_different_sources_do_not_leak():
+    # Two sources, session idx running across both. An anchor on the second
+    # source at a time that also exists on the first must not fire there.
+    rallies = [
+        _rally(1, winner="a", source_id="one", start_ms=1_000, end_ms=5_000),
+        _rally(2, winner="a", source_id="one", start_ms=9_000, end_ms=14_000),
+        _rally(3, winner="a", source_id="two", start_ms=1_000, end_ms=5_000),
+        _rally(4, winner="a", source_id="two", start_ms=9_000, end_ms=14_000),
+    ]
+    anchor = _anchor(1_000, games=(5, 5), source_id="two")
+    state, _ = score_before(rallies, "r2", DEFAULT_RULES, [anchor])
+    assert state.games == (0, 0)
+    assert state.points == ("15", "0")
+    state, _ = score_before(rallies, "r4", DEFAULT_RULES, [anchor])
+    assert state.games == (5, 5)
+    assert state.points == ("15", "0")
+
+
+def test_an_anchor_after_a_sources_last_rally_carries_into_the_next_source():
+    rallies = [
+        _rally(1, winner="a", source_id="one", start_ms=1_000, end_ms=5_000),
+        _rally(2, winner="a", source_id="two", start_ms=1_000, end_ms=5_000),
+    ]
+    anchor = _anchor(50_000, games=(2, 2), source_id="one")
+    state, _ = score_before(rallies, "r2", DEFAULT_RULES, [anchor])
+    assert state.games == (2, 2)
+    assert state.points == ("0", "0")
+
+
+def test_an_anchor_on_a_source_with_no_rallies_is_ignored():
+    # Nothing places it in the session's order, so it cannot honestly
+    # apply anywhere.
+    rallies = [_rally(1, winner="a")]
+    state, _ = score_before(rallies, "", DEFAULT_RULES, [_anchor(0, games=(3, 3), source_id="x")])
+    assert state.games == (0, 0)
+    assert state.points == ("15", "0")
+
+
+def test_the_full_replay_honours_anchors_too():
+    rallies = [_rally(i, winner="a") for i in range(1, 4)]
+    anchor = _anchor(rallies[1]["start_ms"], games=(1, 1))
+    state, unscored = score_before(rallies, "", DEFAULT_RULES, [anchor])
+    assert state.games == (1, 1)
+    assert state.points == ("30", "0")
+    assert unscored == 0
+
+
+def test_unscored_counts_only_points_after_the_anchor():
+    # Points the anchor supersedes are no longer provisional: the reviewer
+    # has stated the score, so a missing winner before it is not a gap.
+    rallies = [_rally(1), _rally(2, winner="a"), _rally(3)]
+    anchor = _anchor(rallies[1]["start_ms"])
+    _, unscored = score_before(rallies, "", DEFAULT_RULES, [anchor])
+    assert unscored == 1
 
 
 def test_scoreboard_rows_name_sets_games_points():

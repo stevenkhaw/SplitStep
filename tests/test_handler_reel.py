@@ -326,6 +326,46 @@ def test_handle_reel_numbered_burns_the_score_entering_each_clip(
     ]
 
 
+def test_handle_reel_numbered_burns_the_anchored_score(
+    library, conn, reel_of_two, monkeypatch
+):
+    # The reel is the second reader of score_before (the panel is the
+    # first); an anchor the panel honours and the burn ignores would put
+    # two different scores on the same clip.
+    from splitstep.db.anchors import set_anchor
+    from splitstep.db.rallies import set_winner
+    from splitstep.db.sessions import set_scoring
+    from splitstep.jobs import handlers as handlers_mod
+    from splitstep.score import AnchorState
+
+    fx = reel_of_two
+    set_scoring(conn, fx["session_id"], {
+        "players": ["Me", "Opp"], "sets": 3, "ad": True, "tiebreak": "at6", "tiebreakTo": 7,
+    })
+    rows = list_rallies(conn, fx["session_id"])
+    set_winner(conn, rows[0]["id"], "a")
+    set_winner(conn, rows[1]["id"], "b")
+    set_anchor(conn, rows[1]["source_id"], rows[1]["start_ms"],
+               AnchorState(((6, 4),), (3, 2), (0, 0)))
+    _cut_all(library, fx)
+
+    seen: list[list[list[str]] | None] = []
+
+    def spy(dst, *, counter, note, font, scoreboard=None):
+        seen.append(scoreboard)
+        return real(dst, counter=counter, note=note, font=font, scoreboard=scoreboard)
+
+    real = handlers_mod.render_overlay_png
+    monkeypatch.setattr(handlers_mod, "render_overlay_png", spy)
+
+    handle_reel(library, {"reel_id": fx["reel"]["id"], "numbered": True})
+
+    assert seen == [
+        [["Me", "0", "0"], ["Opp", "0", "0"]],
+        [["Me", "6", "3", "0"], ["Opp", "4", "2", "0"]],
+    ]
+
+
 def test_handle_reel_numbered_has_no_board_for_an_untracked_session(
     library, conn, reel_of_two, monkeypatch
 ):

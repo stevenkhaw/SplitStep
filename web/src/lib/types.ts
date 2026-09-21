@@ -1,4 +1,4 @@
-import type { ScoreRules } from './score'
+import type { AnchorState, ScoreRules } from './score'
 
 export interface Session {
   id: string
@@ -96,6 +96,19 @@ export interface Rally {
   winner: '' | 'a' | 'b'
 }
 
+/**
+ * A reviewer's "entering here, the score is X", as `GET /api/sessions/{id}`
+ * serves it: the state flattened beside where it sits. Keyed on a TIME on
+ * a source, never a rally id -- replace_rallies deletes every rally on a
+ * sweep, so a rally id expires and a time does not (the same reason
+ * reel_items is keyed on a span). See migration 017 and lib/score.ts's
+ * scoreBefore for how one lands on a rally.
+ */
+export interface ScoreAnchor extends AnchorState {
+  source_id: string
+  at_ms: number
+}
+
 export interface SessionDetail {
   // The list-only fields are omitted because /api/sessions/{id} genuinely
   // does not return them: the counts are computed per row by the list
@@ -105,6 +118,8 @@ export interface SessionDetail {
   session: Omit<Session, 'rally_count' | 'starred_count' | 'point_count' | 'thumb_idx'>
   sources: Source[]
   rallies: Rally[]
+  /** Every anchor on every source in the session, in (source, time) order. */
+  anchors: ScoreAnchor[]
 }
 
 export interface ScoreSeries {

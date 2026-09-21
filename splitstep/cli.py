@@ -9,6 +9,7 @@ from pathlib import Path
 from splitstep import appconfig, resources
 from splitstep.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from splitstep.db import jobs as jobq
+from splitstep.db.anchors import list_anchors
 from splitstep.db.labels import latest_labels, parse_flags
 from splitstep.db.presets import create_preset, get_preset, list_presets
 from splitstep.db.rallies import list_rallies, list_rallies_for_source, replace_rallies
@@ -562,7 +563,8 @@ def cmd_score_show(args) -> int:
     parsed = rules_from_dict(rules)
     # An id no rally holds replays every scored point: the current score.
     state, unscored = score_before(
-        [dict(r) for r in list_rallies(conn, args.session_id)], "", parsed
+        [dict(r) for r in list_rallies(conn, args.session_id)], "", parsed,
+        list_anchors(conn, args.session_id),
     )
     for row in scoreboard_rows(state, parsed):
         print("  ".join(f"{cell:>4}" if i else f"{cell:<12}" for i, cell in enumerate(row)))

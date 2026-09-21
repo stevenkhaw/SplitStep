@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from splitstep import appconfig
 from splitstep.accel import detect_accel
 from splitstep.db import jobs as jobq
+from splitstep.db.anchors import anchor_json, delete_anchor, list_anchors, set_anchor
 from splitstep.db.labels import (
     FLAG_ORDER,
     VERDICTS,
@@ -87,7 +88,7 @@ from splitstep.reels import (
     rendered_file,
     resolve_items,
 )
-from splitstep.score import rules_from_dict, rules_to_dict
+from splitstep.score import AnchorState, anchor_from_dict, rules_from_dict, rules_to_dict
 from splitstep.setup import queue_setup
 from splitstep.watcher import VIDEO_SUFFIXES, is_ingestible_name
 
@@ -110,6 +111,28 @@ class PointBody(BaseModel):
 
 class WinnerBody(BaseModel):
     winner: Literal["", "a", "b"]
+
+
+class AnchorBody(BaseModel):
+    """Where the anchor sits and the score entering it. Validation is
+    splitstep.score.anchor_from_dict's, surfaced as a 422 -- one validator
+    for the column and the route, as ScoringBody does for the rules."""
+
+    at_ms: int = Field(ge=0)
+    sets: list
+    games: list
+    points: list
+
+    def state(self) -> AnchorState:
+        return anchor_from_dict({"sets": self.sets, "games": self.games, "points": self.points})
+
+    @model_validator(mode="after")
+    def check_state(self):
+        try:
+            self.state()
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class ScoringBody(BaseModel):
@@ -544,7 +567,36 @@ def api_get_session(session_id: str, request: Request):
         "session": _session_json(session),
         "sources": [_source_json(conn, library, r) for r in list_sources(conn, session_id)],
         "rallies": [dict(r) for r in list_rallies(conn, session_id)],
+        "anchors": [anchor_json(a) for a in list_anchors(conn, session_id)],
     }
+
+
+def _anchors_of(conn, source) -> dict:
+    return {"anchors": [anchor_json(a) for a in list_anchors(conn, source["session_id"])]}
+
+
+@router.post("/api/sources/{source_id}/anchors")
+def api_set_anchor(source_id: str, body: AnchorBody, request: Request):
+    """Anchor the score at a time on this source (migration 017). Returns
+    the session's whole anchor list, because that is what the client
+    replays over -- one anchor's effect depends on every other."""
+    conn = _conn(request)
+    source = get_source(conn, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    set_anchor(conn, source_id, body.at_ms, body.state())
+    return _anchors_of(conn, source)
+
+
+@router.delete("/api/sources/{source_id}/anchors/{at_ms}")
+def api_delete_anchor(source_id: str, at_ms: int, request: Request):
+    conn = _conn(request)
+    source = get_source(conn, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if not delete_anchor(conn, source_id, at_ms):
+        raise HTTPException(status_code=404, detail="No anchor at that time")
+    return _anchors_of(conn, source)
 
 
 @router.post("/api/sessions/{session_id}/scoring")
