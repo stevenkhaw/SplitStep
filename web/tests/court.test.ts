@@ -65,7 +65,28 @@ describe('courtPaths', () => {
   })
 
   it('emits no NaN', () => {
-    const all = [geo.runoff, geo.surface, geo.net, ...geo.lines, ...geo.posts]
+    const all = [geo.runoff, geo.surface, geo.net, ...[...geo.lines, ...geo.posts].map((p) => p.d)]
     expect(all.some((d) => d.includes('NaN'))).toBe(false)
+  })
+})
+
+// CourtGround keys its {#each} blocks on these names. It used to key on the
+// path string itself, and at a zero-size viewport -- a hidden window, which
+// is how the Tauri shell autoboots -- every point collapses onto one pixel,
+// eleven markings serialise to the same `d`, and Svelte's
+// each_key_duplicate aborted the whole app before the Library route asked
+// for a single session.
+describe('courtPaths keys', () => {
+  it.each([
+    [0, 0],
+    [1, 1],
+    [1200, 520],
+  ])('are unique at %ix%i', (width, height) => {
+    const g = courtPaths({ width, height })
+    for (const group of [g.lines, g.posts]) {
+      const names = group.map((p) => p.name)
+      expect(names.every((n) => typeof n === 'string' && n.length > 0)).toBe(true)
+      expect(new Set(names).size).toBe(names.length)
+    }
   })
 })

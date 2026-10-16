@@ -55,12 +55,24 @@ export interface CourtOptions {
   runoffWidthFt?: number
 }
 
+/**
+ * One stroked marking. `name` is what CourtGround keys its `{#each}` on, and
+ * it exists because `d` cannot be a key: at a zero-size viewport (a hidden
+ * window, which is how the Tauri shell autoboots) every point projects onto
+ * the same pixel, eleven markings serialise to one identical `d`, and
+ * Svelte's each_key_duplicate aborts the entire app on first paint.
+ */
+export interface CourtPath {
+  name: string
+  d: string
+}
+
 export interface CourtGeometry {
   runoff: string
   surface: string
-  lines: string[]
+  lines: CourtPath[]
   net: string
-  posts: string[]
+  posts: CourtPath[]
 }
 
 /**
@@ -123,24 +135,36 @@ export function courtPaths(opts: CourtOptions): CourtGeometry {
     runoff: d(ring(-runoffWidthFt, RUNOFF_FWD_FT, runoffWidthFt, RUNOFF_BACK_FT), true),
     surface: d(ring(-dw, 0, dw, LENGTH), true),
     lines: [
-      d(segment([-dw, 0], [dw, 0])), // near baseline
-      d(segment([-dw, LENGTH], [dw, LENGTH])), // far baseline
-      d(segment([-dw, 0], [-dw, LENGTH])), // doubles sidelines
-      d(segment([dw, 0], [dw, LENGTH])),
-      d(segment([-s, 0], [-s, LENGTH])), // singles sidelines
-      d(segment([s, 0], [s, LENGTH])),
-      d(segment([-s, NET_Z - SERVICE_OFFSET], [s, NET_Z - SERVICE_OFFSET])),
-      d(segment([-s, NET_Z + SERVICE_OFFSET], [s, NET_Z + SERVICE_OFFSET])),
-      d(segment([0, NET_Z - SERVICE_OFFSET], [0, NET_Z + SERVICE_OFFSET])),
-      d(segment([0, 0], [0, CENTRE_MARK_FT])), // centre marks
-      d(segment([0, LENGTH - CENTRE_MARK_FT], [0, LENGTH])),
+      { name: 'baseline-near', d: d(segment([-dw, 0], [dw, 0])) },
+      { name: 'baseline-far', d: d(segment([-dw, LENGTH], [dw, LENGTH])) },
+      { name: 'doubles-left', d: d(segment([-dw, 0], [-dw, LENGTH])) },
+      { name: 'doubles-right', d: d(segment([dw, 0], [dw, LENGTH])) },
+      { name: 'singles-left', d: d(segment([-s, 0], [-s, LENGTH])) },
+      { name: 'singles-right', d: d(segment([s, 0], [s, LENGTH])) },
+      {
+        name: 'service-near',
+        d: d(segment([-s, NET_Z - SERVICE_OFFSET], [s, NET_Z - SERVICE_OFFSET])),
+      },
+      {
+        name: 'service-far',
+        d: d(segment([-s, NET_Z + SERVICE_OFFSET], [s, NET_Z + SERVICE_OFFSET])),
+      },
+      {
+        name: 'centre-service',
+        d: d(segment([0, NET_Z - SERVICE_OFFSET], [0, NET_Z + SERVICE_OFFSET])),
+      },
+      { name: 'centre-mark-near', d: d(segment([0, 0], [0, CENTRE_MARK_FT])) },
+      { name: 'centre-mark-far', d: d(segment([0, LENGTH - CENTRE_MARK_FT], [0, LENGTH])) },
     ],
     net: d(segment([-NET_HALF_W, NET_Z], [NET_HALF_W, NET_Z])),
-    posts: [-NET_HALF_W, NET_HALF_W].map((x) => {
+    posts: [-NET_HALF_W, NET_HALF_W].map((x): CourtPath => {
       const [bx, by] = project(x, NET_Z)
       const top = by - (NET_HEIGHT_FT * FOCAL) / ((NET_Z - CAMERA_Z_FT) * Math.cos(PITCH_RAD))
       const px = (bx * scale + ox).toFixed(1)
-      return `M${px} ${(by * scale + oy).toFixed(1)} L${px} ${(top * scale + oy).toFixed(1)}`
+      return {
+        name: x < 0 ? 'post-left' : 'post-right',
+        d: `M${px} ${(by * scale + oy).toFixed(1)} L${px} ${(top * scale + oy).toFixed(1)}`,
+      }
     }),
   }
 }

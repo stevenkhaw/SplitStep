@@ -48,9 +48,9 @@
     </defs>
     <path d={geo.runoff} fill="var(--color-court-run)" />
     <path d={geo.surface} fill="var(--color-court)" />
-    {#each geo.lines as line (line)}
+    {#each geo.lines as line (line.name)}
       <path
-        d={line}
+        d={line.d}
         fill="none"
         stroke="var(--color-court-line)"
         stroke-opacity="0.7"
@@ -59,8 +59,8 @@
       />
     {/each}
     <path d={geo.net} fill="none" stroke="var(--color-court-line)" stroke-opacity="0.45" stroke-width="2" />
-    {#each geo.posts as post (post)}
-      <path d={post} fill="none" stroke="var(--color-court-line)" stroke-opacity="0.5" stroke-width="3" />
+    {#each geo.posts as post (post.name)}
+      <path d={post.d} fill="none" stroke="var(--color-court-line)" stroke-opacity="0.5" stroke-width="3" />
     {/each}
     <rect width={w} height={h} fill="url(#court-scrim)" />
   </svg>

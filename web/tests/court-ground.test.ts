@@ -1,4 +1,4 @@
-import { mount, unmount } from 'svelte'
+import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 import CourtGround from '../src/components/CourtGround.svelte'
 
@@ -41,5 +41,31 @@ describe('CourtGround', () => {
     const review = render({ tier: 'review' })
     const reviewOpacity = Number(getComputedStyle(review.firstElementChild!).opacity)
     expect(reviewOpacity).toBeLessThan(browseOpacity)
+  })
+
+  // A hidden window reports innerWidth 0, and the Tauri shell autoboots into
+  // one. Keyed on path strings, the collapsed court threw each_key_duplicate
+  // and took the whole app down with it, so the Library route sat on
+  // "Loading..." forever.
+  it('survives a zero-size window and redraws once it has a size', () => {
+    const saved = { w: window.innerWidth, h: window.innerHeight }
+    const size = (w: number, h: number) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: w })
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: h })
+    }
+    try {
+      size(0, 0)
+      const el = render({ tier: 'browse' })
+      flushSync()
+      expect(el.querySelectorAll('path').length).toBe(16)
+
+      size(1024, 768)
+      window.dispatchEvent(new Event('resize'))
+      flushSync()
+      expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1024 768')
+      expect(el.querySelectorAll('path').length).toBe(16)
+    } finally {
+      size(saved.w, saved.h)
+    }
   })
 })
