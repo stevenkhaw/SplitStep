@@ -98,3 +98,21 @@ def test_the_packaged_font_is_a_static_bold(monkeypatch):
     face = TTFont(resources.overlay_font())
     assert face["OS/2"].usWeightClass == 700
     assert "fvar" not in face, "still variable: would render Regular"
+
+
+def test_fence_model_is_package_data():
+    # The migrations lesson: a file read at runtime by path ships only if it
+    # is declared. The model must resolve inside the package, and the glob
+    # in pyproject.toml must cover it, or a wheel (and the freeze built from
+    # the installed package) carries no model and every fence source fails
+    # to segment.
+    import fnmatch
+    import tomllib
+
+    found = resources.fence_model()
+    assert found.is_file()
+    assert found.parts[-3:] == ("splitstep", "assets", "fence_model.json")
+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    globs = tomllib.loads(pyproject.read_text())["tool"]["setuptools"]["package-data"]
+    assert any(fnmatch.fnmatch("assets/fence_model.json", g) for g in globs["splitstep"])

@@ -13,3 +13,11 @@ depending on how it was rendered.
 Instanced rather than shipped variable: `media/numbered.py` calls
 `ImageFont.truetype` without selecting a variation, so a variable file would
 silently render Regular.
+
+`fence_model.json` is the fence-mount play model: a logistic regression's
+feature list, standardisation, weights and segmentation constants. It is
+written by `splitstep fence train` from the truth lists in
+`tests/fixtures/truth/`, deterministically, so re-running the command
+reproduces it; `tests/test_fence_train.py` fails if the two drift. Edit the
+training, never the file. It is "fitted on one session" until a second
+truth list exists (spec, Validation 3).

@@ -58,6 +58,14 @@ if ! find packaging/dist/splitstep-server -name "font.ttf" | grep -q .; then
 fi
 echo "    overlay font present"
 
+# And the fence model: without it every fence-mount source fails to segment,
+# and only once someone has picked Fence + Singles -- long after the build.
+if ! find packaging/dist/splitstep-server -name "fence_model.json" | grep -q .; then
+  echo "FATAL: the freeze carries no fence_model.json" >&2
+  exit 1
+fi
+echo "    fence model present"
+
 # Third of the same family, and the one that has actually shipped broken:
 # matplotlib is imported at module level by ultralytics.models, which
 # ultralytics resolves lazily, so a freeze without it starts, serves, and

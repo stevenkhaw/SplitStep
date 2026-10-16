@@ -120,3 +120,12 @@ def overlay_font() -> str:
     raise RuntimeError(
         "No font for the numbered overlay. Set SPLITSTEP_FONT to a .ttf or .ttc path."
     )
+
+
+def fence_model() -> Path:
+    """The committed fence model, fitted by `splitstep fence train`.
+
+    Package data, like the migrations and the font, so it sits at the same
+    path relative to this module in a checkout, a wheel and the freeze.
+    """
+    return Path(__file__).parent / "assets" / "fence_model.json"

@@ -6,6 +6,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
 from splitstep import appconfig, resources
 from splitstep.config import Library, LibraryAlreadyInitialized, LibraryNotMounted
 from splitstep.db import jobs as jobq
@@ -24,9 +26,14 @@ from splitstep.db.sessions import (
     set_source_preset,
     set_source_segment_threshold,
 )
+from splitstep.detect import fence_train
+from splitstep.detect.boxes import read_boxes
+from splitstep.detect.court import Court
 from splitstep.detect.features import read_features
+from splitstep.detect.fence import FenceModel, fence_probs, fence_segment
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, segment
+from splitstep.detect.truth import format_report, load_truth
 from splitstep.export import (
     SETS,
     delete_orphan_clips,
@@ -804,6 +811,84 @@ def cmd_clips_prune_stale(args) -> int:
     return 0
 
 
+# Where the committed truth lists and their fixture slices live in a
+# checkout. `fence train` and `fence score` are developer tools; a frozen
+# app has no tests/ tree and does not need one.
+_FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+
+
+def _print_reports(name: str, raw, folded, suffix: str = "") -> None:
+    print(format_report(name, "raw", raw) + suffix)
+    print(format_report(name, "folded", folded) + suffix)
+
+
+def cmd_fence_train(args) -> int:
+    """Fit the fence model on every truth file, print the held-out report, write the model.
+
+    The held-out lines are the bar (spec, Settled 1): each 4-minute block is
+    predicted by a model fitted without it. The written model is then fitted
+    on everything, so it is never scored by this command.
+    """
+    files = fence_train.discover(Path(args.fixtures))
+    files += [fence_train.TruthFiles(*map(Path, paths)) for paths in args.set or []]
+    if not files:
+        print(f"no truth file with corners, boxes and features under {args.fixtures}",
+              file=sys.stderr)
+        return 1
+    sets = [fence_train.training_set(f.boxes, f.features, f.truth, f.corners) for f in files]
+    for name, (raw, folded) in fence_train.held_out(sets).items():
+        _print_reports(name, raw, folded, " (held-out)")
+    model = fence_train.fit(sets)
+    out = Path(args.out)
+    model.save(out)
+    print(f"wrote {out} (trained on {', '.join(model.trained_on)}, "
+          f"threshold {model.threshold:g})")
+    return 0
+
+
+def cmd_fence_score(args) -> int:
+    """Apply the committed fence model to a library source and score it against its truth.
+
+    In-sample whenever the source's truth file trained the model -- a quick
+    check that the app cuts what training measured, never the bar.
+    """
+    library = _library(args)
+    conn = connect(library.db_path)
+    migrate(conn)
+    source = _source_or_fail(conn, args.source_id)
+    if source is None:
+        return 1
+    src_dir = library.source_dir(source["session_id"], source["idx"])
+    boxes = src_dir / "boxes.jsonl"
+    if not boxes.exists():
+        print(f"source {args.source_id} has no boxes.jsonl; re-run detection to use fence mode",
+              file=sys.stderr)
+        return 1
+    if not source["court_corners"]:
+        print(f"source {args.source_id} has no court corners; draw them in the setup wizard",
+              file=sys.stderr)
+        return 1
+
+    model = FenceModel.load(Path(args.model) if args.model else resources.fence_model())
+    frames = read_boxes(boxes)
+    hits = [f.hits for f in read_features(src_dir / "features.jsonl")]
+    court = Court.from_json(source["court_corners"])
+    probs = fence_probs(frames, hits, court, model)
+    t_ms = np.array([t for t, _ in frames])
+    print(f"{len(fence_segment(t_ms, probs, model))} clips at threshold {model.threshold:g}")
+
+    session = get_session(conn, source["session_id"])
+    name = f"{session['played_on']}_source{source['idx']:02d}"
+    truth = Path(args.truth) if args.truth else _FIXTURES / "truth" / f"{name}.tsv"
+    if not truth.is_file():
+        print(f"no truth file for {name} (looked for {truth}); nothing to score against")
+        return 0
+    raw, folded = fence_train.reports(t_ms, probs, model, load_truth(truth))
+    suffix = " (in-sample)" if truth.stem in model.trained_on else ""
+    _print_reports(truth.stem, raw, folded, suffix)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -966,6 +1051,29 @@ def main(argv: list[str] | None = None) -> int:
     cs.add_argument("--yes", action="store_true",
                     help="actually delete; without it the clips are only listed")
     cs.set_defaults(func=cmd_clips_prune_stale)
+
+    p = sub.add_parser("fence", help="fit or score the fence-mount model")
+    fence_sub = p.add_subparsers(dest="fence_command", required=True)
+
+    ft = fence_sub.add_parser(
+        "train", help="fit on every truth file, print the held-out report, write the model",
+    )
+    ft.add_argument("--out", default=str(resources.fence_model()),
+                    help="where to write the model (default: the committed package file)")
+    ft.add_argument("--fixtures", default=str(_FIXTURES),
+                    help="directory holding truth/, boxes/ and features/")
+    ft.add_argument("--set", nargs=4, action="append",
+                    metavar=("BOXES", "FEATURES", "TRUTH", "CORNERS"),
+                    help="one more training set from explicit paths (repeatable)")
+    ft.set_defaults(func=cmd_fence_train)
+
+    fs = fence_sub.add_parser(
+        "score", help="apply the committed model to a source and score it against its truth",
+    )
+    fs.add_argument("source_id")
+    fs.add_argument("--truth", help="truth file (default: tests/fixtures/truth/<date>_sourceNN.tsv)")
+    fs.add_argument("--model", help="model file (default: the committed package file)")
+    fs.set_defaults(func=cmd_fence_score)
 
     args = parser.parse_args(argv)
     try:
