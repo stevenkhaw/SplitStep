@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { movePoint, pointFromClient, polygonClipPath } from '../lib/quad'
+  import { clampQuad, movePoint, pointFromClient, polygonClipPath } from '../lib/quad'
   import { formatTs, frameStep } from '../lib/time'
 
   interface Props {
@@ -20,6 +20,11 @@
     // wrong there). Defaults to the proxy wording since QuadEditor is the
     // older, more common caller.
     frameErrorHint?: string
+    // One name per handle, drawn beside it and used as its accessible name.
+    // Court corners pass CORNER_LABELS: the server refuses an out-of-order
+    // set, so the reviewer has to be able to see which handle is which. A
+    // play region passes nothing -- its corners have no order to get wrong.
+    labels?: readonly string[]
   }
 
   let {
@@ -32,6 +37,7 @@
     onpoints,
     onseek,
     frameErrorHint = 'the proxy may still be transcoding',
+    labels,
   }: Props = $props()
 
   let dragging = $state<number | null>(null)
@@ -63,6 +69,12 @@
   }
 
   const polygon = $derived(polygonClipPath(points))
+  // Where the handles sit. A server-derived "Court from corners" preset puts
+  // corners outside the frame, and a handle drawn at left:-70% is a handle
+  // nobody can reach -- so the handles are pinned to the frame edge while
+  // the shaded polygon (clipped to the frame by clip-path anyway) keeps the
+  // true shape. See clampQuad for why a drag then commits the clamped quad.
+  const handles = $derived(clampQuad(points))
 
   function at(e: PointerEvent): [number, number] {
     if (!wrap) return [0, 0]
@@ -85,7 +97,10 @@
 
   function onHandleMove(e: PointerEvent, i: number) {
     if (dragging !== i) return
-    onpoints(movePoint(points, i, at(e)))
+    // From the clamped quad, not `points`: once a reviewer drags, the shape
+    // is theirs and must be saveable, and POST /api/court_presets refuses
+    // the off-frame corners a derived preset carries.
+    onpoints(movePoint(handles, i, at(e)))
   }
 
   function endDrag() {
@@ -130,7 +145,7 @@
     class="pointer-events-none absolute inset-0 bg-fg/15"
     style={`clip-path: ${polygon}`}
   ></div>
-  {#each points as p, i (i)}
+  {#each handles as p, i (i)}
     <button
       class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full
              border-2 border-bg bg-fg touch-none"
@@ -139,8 +154,23 @@
       onpointermove={(e) => onHandleMove(e, i)}
       onpointerup={endDrag}
       onpointercancel={endDrag}
-      aria-label={`corner ${i + 1}`}
+      aria-label={labels ? `${labels[i]} corner` : `corner ${i + 1}`}
     ></button>
+    {#if labels}
+      <!-- Beside the handle, not on it, so the name never hides the line
+           the handle is being placed on. bg-surface: caption text may not
+           sit on bare footage any more than on bare court. Toward the
+           frame's middle, so a right-hand corner's name does not hang off
+           the frame's right edge. -->
+      <span
+        class="pointer-events-none absolute -translate-y-1/2 whitespace-nowrap rounded bg-surface
+               px-1 font-data text-caption text-fg {p[0] > 0.5 ? '-ml-3 -translate-x-full' : 'ml-3'}"
+        style={`left:${p[0] * 100}%;top:${p[1] * 100}%`}
+        aria-hidden="true"
+      >
+        {labels[i]}
+      </span>
+    {/if}
   {/each}
 </div>
 

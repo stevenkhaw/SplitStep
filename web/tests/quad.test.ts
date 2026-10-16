@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_QUAD_POINTS,
   assignedPresetLabel,
+  clampQuad,
   clonePoints,
   defaultPresetName,
   movePoint,
@@ -134,5 +135,30 @@ describe('quadPolygonPoints', () => {
 
   it('is empty for no corners, so the caller renders nothing rather than a broken polygon', () => {
     expect(quadPolygonPoints([], 40, 24)).toBe('')
+  })
+})
+
+describe('clampQuad', () => {
+  it('pulls a derived "Court from corners" quad inside the frame', () => {
+    // The shape region_from_corners produces on the 2026-10-12 camera: the
+    // near corners leave the frame, which POST /api/court_presets refuses.
+    expect(
+      clampQuad([
+        [-0.7, 1.12],
+        [1.6, 1.12],
+        [0.75, 0.3],
+        [0.25, 0.3],
+      ]),
+    ).toEqual([
+      [0, 1],
+      [1, 1],
+      [0.75, 0.3],
+      [0.25, 0.3],
+    ])
+  })
+
+  it('leaves an in-frame quad exactly as it was', () => {
+    const q: [number, number][] = [[0.35, 0.35], [0.65, 0.35], [0.98, 1], [0.02, 1]]
+    expect(clampQuad(q)).toEqual(q)
   })
 })

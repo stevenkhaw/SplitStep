@@ -105,3 +105,20 @@ export function assignedPresetLabel(presetId: string | null, presets: Preset[]):
   const preset = presets.find((p) => p.id === presetId)
   return preset ? preset.name : presetId
 }
+
+/**
+ * Every corner pulled inside the frame, coordinate by coordinate.
+ *
+ * For quads the reviewer did not draw. A "Court from corners" preset is
+ * derived server-side by expanding the court outward (region_from_corners),
+ * so its near corners routinely sit outside the frame -- (-0.70, 1.12) on
+ * the 2026-10-12 camera -- and POST /api/court_presets refuses any point
+ * outside 0-1. Clamping is not clipping (it moves an off-frame corner along
+ * both axes, which changes the shape), and that is acceptable for exactly
+ * the case it serves: the moment a reviewer drags one corner, the quad is
+ * theirs and must be expressible as a preset they can save, and the
+ * clamped shape is what the handles were already showing them.
+ */
+export function clampQuad(points: [number, number][]): [number, number][] {
+  return points.map(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))])
+}

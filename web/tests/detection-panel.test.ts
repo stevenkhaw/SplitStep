@@ -357,4 +357,64 @@ describe('DetectionPanel', () => {
     await vi.waitFor(() => expect(mockApi.scores).toHaveBeenCalledTimes(1))
     expect(mockApi.scores).toHaveBeenCalledWith('src1', 0.5)
   })
+
+  // -- a changed mount, format or court --------------------------------------
+
+  /** 2026-10-12 after Fence + Singles and corners were saved on the session page. */
+  const fence = (overrides: Partial<Source> = {}) =>
+    source({
+      mount: 'fence',
+      play_format: 'singles',
+      scorer_now: 'fence',
+      detected_scorer: 'pair',
+      has_boxes: true,
+      segment_threshold: 0.45,
+      ...overrides,
+    })
+
+  it('re-cuts with fence mode from cached boxes, at the fence model\'s own threshold', async () => {
+    render(fence())
+    expect(primary().textContent).toMatch(/Re-segment with fence mode · instant/)
+    primary().click()
+    flushSync()
+    // Not 0.45: that is the pair profile's scale, and the fence model's
+    // probability cut there would discard most of the play.
+    await vi.waitFor(() => expect(mockApi.resegment).toHaveBeenCalledWith('src1', undefined))
+  })
+
+  it('prices the full run when fence needs boxes this source never saved', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(fence({ has_boxes: false }))
+    expect(primary().textContent).toMatch(/Run detection · ~15 min/)
+    primary().click()
+    flushSync()
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/for fence mode/)
+    expect(mockApi.detectSource).toHaveBeenCalledWith('src1', undefined)
+  })
+
+  it('shows the untuned note for a fence source that is not singles', () => {
+    render(source({ mount: 'fence', play_format: 'drills' }))
+    expect(target.querySelector('[data-role="untuned-note"]')?.textContent).toMatch(
+      /Not tuned for fence \+ drills/,
+    )
+  })
+
+  it('renders the server\'s sentence when /scores cannot score a fence source yet', async () => {
+    const { ApiError } = await import('../src/lib/errors')
+    const detail = 'Fence mode needs the court corners — draw them in setup, then detect.'
+    mockApi.scores.mockRejectedValue(
+      new ApiError('GET /api/sources/src1/scores -> 409', {
+        status: 409,
+        method: 'GET',
+        path: '/api/sources/src1/scores',
+        detail,
+      }),
+    )
+    render(fence())
+    await expand()
+    await vi.waitFor(() =>
+      expect(target.querySelector('[data-role="scores-error"]')?.textContent).toContain(detail),
+    )
+  })
 })
+

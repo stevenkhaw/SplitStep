@@ -5,10 +5,12 @@ import {
   detectionActionLabel,
   detectionActionNote,
   planDetection,
+  redetectConfirmMessage,
   regionAssignedNow,
   regionInEffect,
   regionStateLabel,
   sameRegion,
+  scorerSwitch,
 } from '../src/lib/resegment'
 import type { Source } from '../src/lib/types'
 
@@ -404,5 +406,76 @@ describe('NO_CURVE_NOTE', () => {
     // false claim; nothing has looked yet.
     expect(NO_CURVE_NOTE).toContain('No score curve yet')
     expect(NO_CURVE_NOTE).toContain('camera profile')
+  })
+})
+
+describe('planDetection: a changed mount, format or court', () => {
+  // 2026-10-12 as it stands after Steven picks Fence + Singles and draws the
+  // corners on the session page: same region, same threshold, but the rallies
+  // were cut by the pair/subject auto profile.
+  const fenceNow = (overrides: Partial<Source> = {}) =>
+    detected({ scorer_now: 'fence', detected_scorer: 'pair', has_boxes: true, ...overrides })
+
+  it('re-segments with fence mode when cached boxes suffice', () => {
+    const plan = planDetection(fenceNow(), { region: SAME_CORNERS, threshold: 0.15 })
+    expect(plan.action).toBe('resegment')
+    expect(plan.scorerSwitch).toBe('fence')
+    expect(detectionActionLabel(plan.action, plan.scorerSwitch)).toBe(
+      'Re-segment with fence mode · instant',
+    )
+    expect(detectionActionNote(plan)).toContain('cached person boxes')
+  })
+
+  it('prices the full run when fence needs boxes the source never saved', () => {
+    const plan = planDetection(fenceNow({ has_boxes: false }), {
+      region: SAME_CORNERS,
+      threshold: 0.15,
+    })
+    expect(plan.action).toBe('redetect')
+    expect(detectionActionLabel(plan.action, plan.scorerSwitch)).toBe('Run detection · ~15 min')
+    expect(detectionActionNote(plan)).toContain('did not save')
+  })
+
+  it('outranks an unchanged threshold -- the old scale cannot block the switch', () => {
+    // threshold === recorded, so without the switch this plan is `none`.
+    const plan = planDetection(fenceNow(), { region: SAME_CORNERS, threshold: 0.15 })
+    expect(plan.thresholdChanged).toBe(false)
+    expect(plan.action).toBe('resegment')
+  })
+
+  it('still lets a moved region win and say "region"', () => {
+    const plan = planDetection(fenceNow(), { region: MOVED_CORNERS, threshold: 0.15 })
+    expect(plan.action).toBe('redetect')
+    expect(detectionActionNote(plan)).toContain('play region')
+  })
+
+  it('uses plain re-segment wording for a switch to Ground', () => {
+    const plan = planDetection(
+      detected({ scorer_now: 'subject', detected_scorer: 'pair', has_boxes: false }),
+      { region: SAME_CORNERS, threshold: 0.15 },
+    )
+    expect(plan.action).toBe('resegment')
+    expect(plan.scorerSwitch).toBe('subject')
+    expect(detectionActionLabel(plan.action, plan.scorerSwitch)).toBe('Re-segment · instant')
+    expect(detectionActionNote(plan)).toContain('subject profile')
+  })
+
+  it('owes nothing when the scorer already matches, or the server did not say', () => {
+    expect(
+      planDetection(fenceNow({ detected_scorer: 'fence' }), {
+        region: SAME_CORNERS,
+        threshold: 0.15,
+      }).action,
+    ).toBe('none')
+    // A payload with no fence keys (an older server) is the plan it always was.
+    expect(scorerSwitch(detected())).toBeNull()
+    expect(planDetection(detected(), { region: SAME_CORNERS, threshold: 0.15 }).action).toBe(
+      'none',
+    )
+  })
+
+  it('names fence mode, not a region, in the re-detect confirm', () => {
+    expect(redetectConfirmMessage('fence')).toContain('for fence mode')
+    expect(redetectConfirmMessage()).toContain('with the new play region')
   })
 })

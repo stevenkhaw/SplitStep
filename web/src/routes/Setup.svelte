@@ -1,13 +1,15 @@
 <script lang="ts">
   import ErrorNote from '../components/ErrorNote.svelte'
   import Mark from '../components/Mark.svelte'
+  import MountFormatPicker from '../components/MountFormatPicker.svelte'
   import QuadCanvas from '../components/QuadCanvas.svelte'
   import { api } from '../lib/api'
+  import { CORNER_LABELS, DEFAULT_CORNER_POINTS, needsCorners, parseCorners } from '../lib/mount'
   import { previewTimestamps } from '../lib/preview'
-  import { DEFAULT_QUAD_POINTS, clonePoints, defaultPresetName } from '../lib/quad'
+  import { DEFAULT_QUAD_POINTS, clampQuad, clonePoints, defaultPresetName } from '../lib/quad'
   import { navigate } from '../lib/router.svelte'
   import { clamp, formatTs, lastSafeFrameMs } from '../lib/time'
-  import type { Preset, Source } from '../lib/types'
+  import type { Mount, PlayFormat, Preset, Source } from '../lib/types'
 
   let { id }: { id: string } = $props()
 
@@ -27,11 +29,22 @@
   // a subsequent Confirm can't silently reuse a preset the user has since
   // diverged from.
   let selectedPresetId = $state<string | null>(null)
+  // The two questions that pick a detector, answered here beside rotation.
+  let mount = $state<Mount>('')
+  let format = $state<PlayFormat>('')
+  // Court corners, kept apart from `points` so flipping the mount back and
+  // forth loses neither drawing. Null until a handle moves or the source
+  // already has corners stored: the default shape is a starting point, and
+  // a court nobody placed must not be sendable.
+  let corners = $state<[number, number][] | null>(null)
   let busy = $state(false)
   let error = $state<unknown>(null)
 
   const timestamps = $derived(source ? previewTimestamps(source.duration_ms, source.fps) : [])
   const maxMs = $derived(source ? lastSafeFrameMs(source.duration_ms, source.fps) : 0)
+  // A fence mount is drawn as court corners and the server derives the play
+  // region from them -- one drawing, so the two cannot disagree.
+  const cornersMode = $derived(needsCorners(mount, format))
 
   $effect(() => {
     let cancelled = false
@@ -51,12 +64,27 @@
     // over different footage.
     points = null
     selectedPresetId = null
+    // And the answers, for the same reason as the quad: carried over, the
+    // previous source's Fence + Singles and its court corners would be one
+    // click from a fence setup against footage nobody drew them on.
+    mount = ''
+    format = ''
+    corners = null
 
-    api
-      .getSource(id)
-      .then((s) => {
+    // Defaults alongside the source, not after: the selectors render with
+    // the source, and a default landing after a click would overwrite the
+    // reviewer's own answer. A failed defaults call costs only the
+    // pre-selection, never the wizard.
+    Promise.all([api.getSource(id), api.setupDefaults().catch(() => null)])
+      .then(([s, defaults]) => {
         if (cancelled) return null
         source = s
+        // The source's own answers first (a re-run of setup), then the
+        // library's most recent ones -- normally Fence + Singles, so
+        // Steven only confirms.
+        mount = s.mount || defaults?.mount || ''
+        format = s.play_format || defaults?.play_format || ''
+        corners = parseCorners(s.court_corners)
         rotation = s.rotation_deg
         // The working frame starts at the first grid timestamp rather than
         // t=0 for the same reason the grid skips it: phone footage opens on
@@ -102,10 +130,24 @@
   }
 
   async function start() {
-    if (!source || !points || busy) return
+    if (!source || busy) return
+    if (cornersMode ? !corners : !points) return
     busy = true
     error = null
     try {
+      if (cornersMode && corners) {
+        // Corners only: the server derives the play region from them
+        // (region_from_corners) and writes that preset itself. Its points
+        // leave the frame, which is why no client path creates it.
+        await api.setup(source.id, rotation, null, {
+          mount,
+          play_format: format,
+          court_corners: corners,
+        })
+        window.location.hash = `/s/${source.session_id}`
+        return
+      }
+      if (!points) return
       // Reuse the preset the current points came from verbatim; only
       // create a new row when the user never picked one, or picked one and
       // then dragged a corner (usePoints/onpoints both clear
@@ -113,9 +155,13 @@
       // preset's coordinates).
       let presetId = selectedPresetId
       if (!presetId) {
+        // Clamped: a derived "Court from corners" preset can be loaded
+        // here verbatim and carries off-frame points, which this route
+        // refuses. QuadCanvas already commits a clamped quad on any drag;
+        // this makes "never sent back" hold on every path, not most.
         const created = await api.createPreset(
           defaultPresetName(source.session_id, source.idx),
-          points,
+          clampQuad(points),
         )
         if (!created.id) throw new Error('createPreset did not return an id')
         presetId = created.id
@@ -127,7 +173,7 @@
         // retry reuses the row this attempt already created.
         selectedPresetId = presetId
       }
-      await api.setup(source.id, rotation, presetId)
+      await api.setup(source.id, rotation, presetId, { mount, play_format: format })
       window.location.hash = `/s/${source.session_id}`
     } catch (e) {
       error = e
@@ -159,7 +205,8 @@
          the page it sits. `fg`, just above, is the one token exempted for
          headings; this is body copy and needs the card. -->
     <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-body text-dim">
-      Pick the rotation and drag the play region over a real frame, then start detection.
+      Pick the rotation, say where the camera is and what is being played, and outline the
+      court over a real frame, then start detection.
     </p>
     {#if source.status === 'ready'}
       <p class="mt-2 rounded bg-danger/10 p-3 text-caption text-danger">
@@ -196,6 +243,18 @@
       </button>
     </div>
 
+    <!-- The same surface card as rotation above, for the same reason: the
+         row labels are `dim`, which may not cross bare court. -->
+    <div class="mt-3 rounded-lg border border-line bg-surface p-3">
+      <MountFormatPicker
+        {mount}
+        {format}
+        onmount={(m) => (mount = m)}
+        onformat={(f) => (format = f)}
+        disabled={busy}
+      />
+    </div>
+
     <!--
       Nine tiles at a real, readable size -- not thumbnails -- because the
       whole point of this grid is to make a wrong rotation obvious at a
@@ -220,55 +279,78 @@
     </div>
   </section>
 
-  <section class="mt-6">
-    <h2 class="text-body font-semibold">Play region</h2>
-    <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-caption text-dim">
-      Drag the four corners to cover the area both players move in, extended to the bottom of
-      frame.
-    </p>
+  {#if cornersMode}
+    <section class="mt-6">
+      <h2 class="text-body font-semibold">Court corners</h2>
+      <!-- The copy says which lines, because "the court" is ambiguous on a
+           doubles court and the homography needs the doubles outline. -->
+      <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-caption text-dim">
+        Drag the four handles onto the court's corners — doubles sidelines and both baselines.
+      </p>
+      <QuadCanvas
+        frameSrc={api.previewUrl(source.session_id, source.idx, workingMs, rotation)}
+        timeMs={scrubMs}
+        {maxMs}
+        fps={source.fps}
+        points={corners ?? DEFAULT_CORNER_POINTS}
+        labels={CORNER_LABELS}
+        onpoints={(p) => (corners = p)}
+        onseek={seek}
+        alt="source {source.idx} at {formatTs(workingMs)}"
+        frameErrorHint="the original may still be processing"
+      />
+    </section>
+  {:else}
+    <section class="mt-6">
+      <h2 class="text-body font-semibold">Play region</h2>
+      <p class="mt-1 inline-block rounded bg-surface px-2 py-1 text-caption text-dim">
+        Drag the four corners to cover the area both players move in, extended to the bottom of
+        frame.
+      </p>
 
-    <div class="mt-3 flex flex-wrap items-center gap-2">
-      <button
-        class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2 motion-safe:transition-colors"
-        onclick={() => usePoints(DEFAULT_QUAD_POINTS)}
-        aria-label="use default play region"
-      >
-        use default play region
-      </button>
-      {#each presets as p (p.id)}
+      <div class="mt-3 flex flex-wrap items-center gap-2">
         <button
           class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2 motion-safe:transition-colors"
-          onclick={() => usePoints(p.points, p.id)}
-          aria-label="use preset {p.name}"
+          onclick={() => usePoints(DEFAULT_QUAD_POINTS)}
+          aria-label="use default play region"
         >
-          {p.name}
+          use default play region
         </button>
-      {/each}
-    </div>
+        {#each presets as p (p.id)}
+          <button
+            class="rounded border border-line px-2 py-0.5 text-caption hover:bg-surface-2 motion-safe:transition-colors"
+            onclick={() => usePoints(p.points, p.id)}
+            aria-label="use preset {p.name}"
+          >
+            {p.name}
+          </button>
+        {/each}
+      </div>
 
-    <QuadCanvas
-      frameSrc={api.previewUrl(source.session_id, source.idx, workingMs, rotation)}
-      timeMs={scrubMs}
-      {maxMs}
-      fps={source.fps}
-      points={points ?? DEFAULT_QUAD_POINTS}
-      onpoints={(p) => {
-        points = p
-        // A dragged corner no longer matches the preset it may have
-        // started from -- Confirm must create a new preset, not silently
-        // overwrite the one the user reused.
-        selectedPresetId = null
-      }}
-      onseek={seek}
-      alt="source {source.idx} at {formatTs(workingMs)}"
-      frameErrorHint="the original may still be processing"
-    />
-  </section>
+      <QuadCanvas
+        frameSrc={api.previewUrl(source.session_id, source.idx, workingMs, rotation)}
+        timeMs={scrubMs}
+        {maxMs}
+        fps={source.fps}
+        points={points ?? DEFAULT_QUAD_POINTS}
+        onpoints={(p) => {
+          points = p
+          // A dragged corner no longer matches the preset it may have
+          // started from -- Confirm must create a new preset, not silently
+          // overwrite the one the user reused.
+          selectedPresetId = null
+        }}
+        onseek={seek}
+        alt="source {source.idx} at {formatTs(workingMs)}"
+        frameErrorHint="the original may still be processing"
+      />
+    </section>
+  {/if}
 
   <button
     class="mt-6 rounded bg-fg px-4 py-1.5 text-body font-medium text-bg hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
     onclick={start}
-    disabled={!points || busy}
+    disabled={(cornersMode ? !corners : !points) || busy}
     aria-label="start detection"
   >
     {busy ? 'working…' : 'start detection'}

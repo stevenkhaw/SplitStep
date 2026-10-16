@@ -235,7 +235,10 @@ export const api = {
       span_end_ms: end_ms,
     }),
 
-  resegment: (sourceId: string, threshold: number) =>
+  // Optional for a scorer switch: the slider's value is on the old scorer's
+  // scale, so the panel omits it and the server resolves the new scorer's
+  // own. JSON.stringify drops an undefined key, which the route reads as None.
+  resegment: (sourceId: string, threshold?: number) =>
     post(`/api/sources/${sourceId}/resegment`, { threshold }),
   scores: (sourceId: string, threshold?: number) =>
     req<ScoreSeries>(`/api/sources/${sourceId}/scores`

@@ -3,10 +3,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  CORNER_LABELS,
+  DEFAULT_CORNER_POINTS,
   FORMATS,
   MOUNTS,
   detectionOwed,
   needsCorners,
+  parseCorners,
   scorerFor,
   untunedNote,
 } from '../src/lib/mount'
@@ -96,5 +99,48 @@ describe('detectionOwed', () => {
   })
   it('a source from an older server owes nothing', () => {
     expect(detectionOwed({})).toBe('none')
+  })
+})
+
+describe('court corners', () => {
+  it('labels the handles in the server\'s storage order', () => {
+    expect(CORNER_LABELS).toEqual(['near-left', 'near-right', 'far-right', 'far-left'])
+  })
+
+  it('starts the handles on a shape the server would accept', () => {
+    // Same turning test as validate_corners: image y points down, so every
+    // cross product z is negative for near-left -> ... -> far-left.
+    const p = DEFAULT_CORNER_POINTS
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = p[(i + 3) % 4]
+      const [bx, by] = p[i]
+      const [cx, cy] = p[(i + 1) % 4]
+      expect((bx - ax) * (cy - by) - (by - ay) * (cx - bx)).toBeLessThan(0)
+    }
+    for (const [x, y] of p) {
+      expect(x).toBeGreaterThanOrEqual(0)
+      expect(x).toBeLessThanOrEqual(1)
+      expect(y).toBeGreaterThanOrEqual(0)
+      expect(y).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('parses the stored JSON string', () => {
+    expect(parseCorners('[[0.1,0.9],[0.9,0.9],[0.7,0.4],[0.3,0.4]]')).toEqual([
+      [0.1, 0.9],
+      [0.9, 0.9],
+      [0.7, 0.4],
+      [0.3, 0.4],
+    ])
+  })
+
+  it('answers null, never a throw, for nothing stored or anything malformed', () => {
+    expect(parseCorners(null)).toBeNull()
+    expect(parseCorners(undefined)).toBeNull()
+    expect(parseCorners('')).toBeNull()
+    expect(parseCorners('not json')).toBeNull()
+    expect(parseCorners('[[0,0],[1,0],[1,1]]')).toBeNull()
+    expect(parseCorners('[[0,0],[1,0],[1,1],[0,"1"]]')).toBeNull()
+    expect(parseCorners('{"a":1}')).toBeNull()
   })
 })

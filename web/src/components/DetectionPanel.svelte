@@ -3,6 +3,7 @@
   import { api } from '../lib/api'
   import { debounce } from '../lib/debounce'
   import { describeApiError } from '../lib/errors'
+  import { untunedNote } from '../lib/mount'
   import { quadPolygonPoints } from '../lib/quad'
   import {
     NO_CURVE_NOTE,
@@ -19,6 +20,7 @@
     regionStateLabel,
     resegmentConfirmMessage,
     resegmentLossPhrase,
+    scorerSwitch,
     seedThreshold,
     splitCount,
   } from '../lib/resegment'
@@ -61,7 +63,12 @@
   // slider once mounted, and the prop churn from its own re-segment
   // (Session refetches the session and hands back fresh Source objects)
   // must not yank a value the reviewer is still looking at.
-  let threshold = $state<number | null>(seedThreshold(untrack(() => source)))
+  //
+  // Null as well when a scorer switch is owed: the recorded threshold is on
+  // the old scorer's scale, so /scores is asked for the new one's instead.
+  let threshold = $state<number | null>(
+    untrack(() => (scorerSwitch(source) ? null : seedThreshold(source))),
+  )
   let busy = $state(false)
   let lastCount = $state<number | null>(null)
   let queued = $state<string | null>(null)
@@ -77,6 +84,10 @@
   // only a reviewer already doing the thing it warns against.
   let open = $state(false)
   let scores = $state<number[]>([])
+  // Why the curve could not be drawn. /scores answers 409 with a sentence
+  // for a fence source it cannot score yet (no saved boxes, no corners), and
+  // that sentence is the answer -- swallowing it left an empty chart.
+  let scoresError = $state<unknown>(null)
   let scoreStepMs = $state(200)
 
   // One plan, read by the button, its label and its sentence, so the three
@@ -87,6 +98,23 @@
     planDetection(source, { region: source.court_preset_points, threshold }),
   )
   const inEffect = $derived(regionInEffect(source))
+  // From the stored answers, not `scorer_now`: what the reviewer chose is
+  // the claim the note qualifies (lib/mount.ts).
+  const untuned = $derived(untunedNote(source.mount ?? '', source.play_format ?? ''))
+
+  // A switch owed (mount, format or corners changed) or settled. On either
+  // edge the slider's number belongs to the other scorer's scale: going
+  // into a switch it is dropped so /scores resolves the new scorer's own;
+  // coming out of one -- the re-cut just landed -- it re-seeds from the
+  // threshold the server recorded for it. A plain variable, not state:
+  // this only remembers the last edge it acted on.
+  let lastSwitch = untrack(() => scorerSwitch(source))
+  $effect(() => {
+    const now = scorerSwitch(source)
+    if (now === lastSwitch) return
+    lastSwitch = now
+    threshold = now ? null : seedThreshold(untrack(() => source))
+  })
   const assigned = $derived(regionAssignedNow(source))
 
   // Spec 6: stars and rejections carry across by overlap (server side, see
@@ -110,6 +138,7 @@
     api
       .scores(id, th ?? undefined)
       .then((s) => {
+        scoresError = null
         scores = s.scores
         scoreStepMs = s.step_ms
         // Only adopt the server's echoed threshold when we asked it to
@@ -119,8 +148,9 @@
         // snap it backward.
         if (th === null) threshold = s.threshold
       })
-      .catch(() => {
+      .catch((e) => {
         scores = []
+        scoresError = e
       })
   }
 
@@ -163,7 +193,8 @@
   async function apply() {
     if (busy || plan.action === 'none') return
     if (plan.action === 'redetect') {
-      if (!confirm(redetectConfirmMessage())) return
+      const why = plan.scorerSwitch === 'fence' && !plan.regionChanged ? 'fence' : 'region'
+      if (!confirm(redetectConfirmMessage(why))) return
       busy = true
       error = null
       try {
@@ -186,9 +217,11 @@
       return
     }
 
-    // `resegment`. The plan only reaches it with a non-null threshold, so
-    // this is a type narrowing against a stale click, not an expected path.
-    if (threshold === null) return
+    // `resegment`. A threshold change only plans this with a non-null
+    // threshold, so the guard is a narrowing against a stale click. A scorer
+    // switch plans it with null by design (see the seed above) and sends no
+    // threshold, letting the new scorer resolve its own.
+    if (threshold === null && !plan.scorerSwitch) return
     if (editedCount > 0 || splits > 0) {
       if (!confirm(resegmentConfirmMessage(editedCount, splits))) return
     }
@@ -196,7 +229,7 @@
     error = null
     queued = null
     try {
-      const res = await api.resegment(source.id, threshold)
+      const res = await api.resegment(source.id, threshold ?? undefined)
       lastCount = res.count ?? null
       onresegmented()
     } catch (e) {
@@ -278,13 +311,16 @@
       onclick={apply}
       disabled={busy || plan.action === 'none'}
     >
-      {busy ? 'working…' : detectionActionLabel(plan.action)}
+      {busy ? 'working…' : detectionActionLabel(plan.action, plan.scorerSwitch)}
     </button>
   </div>
 
   <p data-role="action-note" class="mt-2 max-w-3xl text-caption text-dim">
     {detectionActionNote(plan)}
   </p>
+  {#if untuned}
+    <p data-role="untuned-note" class="mt-1 max-w-3xl text-caption text-dim">{untuned}</p>
+  {/if}
 
   <!--
     Both regions, side by side, outside the collapse. "How do i know what
@@ -321,6 +357,13 @@
              The threshold's scale depends on a camera profile detection
              works out from features that do not exist yet. -->
         <p class="text-caption text-dim">{NO_CURVE_NOTE}</p>
+      {:else if scoresError}
+        <!-- The server's own sentence (errors.ts passes a 4xx detail
+             through), e.g. that a fence source needs its corners first.
+             `dim`, not `danger`: like a stale region, it is work to do. -->
+        <p data-role="scores-error" class="text-caption text-dim">
+          {describeApiError(scoresError, 'source').message}
+        </p>
       {:else}
         <div class="flex items-center gap-3">
           <input

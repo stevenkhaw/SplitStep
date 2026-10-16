@@ -22,6 +22,7 @@ const mockApi = {
   frameUrl: () => 'about:blank',
   getSource: vi.fn(),
   setup: vi.fn(),
+  setupDefaults: vi.fn().mockResolvedValue({ mount: '', play_format: '' }),
   previewUrl: () => 'about:blank',
   getSessionClips: vi.fn().mockResolvedValue([]),
   labelSample: vi.fn(),
@@ -364,6 +365,37 @@ describe('Setup.svelte load effect does not carry state across an id change', ()
     flushSync()
 
     expect(startBtn().disabled).toBe(true)
+  })
+
+  it('drops the previous id’s fence answers and court corners', async () => {
+    // The same hazard as the quad: Fence + Singles with corners drawn on
+    // source 1 would arrive on source 2 with `start detection` live,
+    // queueing a fence setup over corners placed on different footage.
+    mockApi.getSource
+      .mockResolvedValueOnce({
+        ...sourceWith('src1', 1),
+        mount: 'fence',
+        play_format: 'singles',
+        court_corners: '[[0.1,0.9],[0.9,0.9],[0.7,0.4],[0.3,0.4]]',
+      })
+      .mockResolvedValueOnce(sourceWith('src2', 2))
+
+    instance = mount(SetupHarness, { target }) as unknown as { setId: (id: string) => void }
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Set up source 1/))
+    expect(target.textContent).toMatch(/Court corners/)
+
+    instance.setId('src2')
+    flushSync()
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Set up source 2/))
+    await settle()
+    flushSync()
+
+    expect(target.textContent).not.toMatch(/Court corners/)
+    const start = target.querySelector(
+      'button[aria-label="start detection"]',
+    ) as HTMLButtonElement
+    expect(start.disabled).toBe(true)
   })
 
   it('ignores a superseded id’s rejection that arrives late', async () => {

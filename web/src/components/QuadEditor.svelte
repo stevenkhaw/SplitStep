@@ -2,10 +2,18 @@
   import { describeApiError } from '../lib/errors'
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
+  import { CORNER_LABELS, DEFAULT_CORNER_POINTS, needsCorners, parseCorners } from '../lib/mount'
   import { redetectConfirmMessage } from '../lib/resegment'
-  import { DEFAULT_QUAD_POINTS, assignedPresetLabel, clonePoints, defaultPresetName } from '../lib/quad'
+  import {
+    DEFAULT_QUAD_POINTS,
+    assignedPresetLabel,
+    clampQuad,
+    clonePoints,
+    defaultPresetName,
+  } from '../lib/quad'
   import { DEFAULT_SCRUB_MS, clamp, formatTs, lastSafeFrameMs } from '../lib/time'
-  import type { Preset, Source } from '../lib/types'
+  import type { Mount, PlayFormat, Preset, Source } from '../lib/types'
+  import MountFormatPicker from './MountFormatPicker.svelte'
   import QuadCanvas from './QuadCanvas.svelte'
 
   interface Props {
@@ -53,6 +61,30 @@
   }
 
   let points = $state<[number, number][]>(clonePoints(DEFAULT_QUAD_POINTS))
+
+  // Mount, format and court corners for a source that is already processed.
+  // A draft, written by one Save through POST /choices -- never /setup,
+  // which would rebuild a proxy that does not depend on any of the three.
+  // One Save and not one per button because the server judges the trio
+  // together: Fence + Singles without corners is refused, so on a source
+  // that has none yet (2026-10-12) the mount, the format and the corners
+  // have to arrive in the same request.
+  //
+  // Snapshots, like `sourceId`: a refetch after this panel's own save must
+  // not reset a drag still in progress on screen.
+  let mount = $state<Mount>(untrack(() => sources[0]?.mount ?? ''))
+  let format = $state<PlayFormat>(untrack(() => sources[0]?.play_format ?? ''))
+  // Null until a handle moves or corners are stored, so Save cannot send
+  // the default shape as though someone had placed it.
+  let corners = $state<[number, number][] | null>(
+    untrack(() => parseCorners(sources[0]?.court_corners)),
+  )
+  const cornersMode = $derived(needsCorners(mount, format))
+  // Only meaningful outside corners mode, where the region editor below
+  // owns the main button and the answers need a Save of their own.
+  const choicesDirty = $derived(
+    !!source && (mount !== (source.mount ?? '') || format !== (source.play_format ?? '')),
+  )
   let name = $state('')
   let presets = $state<Preset[]>([])
   let status = $state<string | null>(null)
@@ -100,6 +132,9 @@
     status = null
     error = null
     offerDetect = false
+    mount = next?.mount ?? ''
+    format = next?.play_format ?? ''
+    corners = parseCorners(next?.court_corners)
   }
 
   // True after an assignment succeeds: the one moment "run detection again"
@@ -137,9 +172,12 @@
     status = null
     error = null
     try {
+      // Clamped: "reuse" can load a server-derived "Court from corners"
+      // preset whose corners leave the frame, and this route refuses them.
+      // The handles already showed the clamped shape (QuadCanvas).
       const created = await api.createPreset(
         name.trim() || defaultPresetName(sessionId, source.idx),
-        points,
+        clampQuad(points),
       )
       if (!created.id) throw new Error('createPreset did not return an id')
       await api.setPreset(source.id, created.id)
@@ -152,6 +190,34 @@
         'Saved and assigned. Existing rallies were detected without this region — ' +
         'run detection again for it to take effect.'
       offerDetect = true
+      onassigned()
+    } catch (e) {
+      error = e
+    } finally {
+      busy = false
+    }
+  }
+
+  async function saveChoices() {
+    if (!source || busy) return
+    if (cornersMode && !corners) return
+    busy = true
+    status = null
+    error = null
+    offerDetect = false
+    try {
+      await api.setChoices(source.id, {
+        mount,
+        play_format: format,
+        // Left out (kept) outside corners mode: switching a source to Ground
+        // must not throw away corners it may want back.
+        ...(cornersMode && corners ? { court_corners: corners } : {}),
+      })
+      // No re-run offered here, unlike a region assignment: what the change
+      // costs depends on what is cached (a fence re-cut from saved boxes is
+      // instant, without them it is the full run), and the Detection panel
+      // is the one place that prices it.
+      status = `Saved. The Detection panel for source ${source.idx} shows what the rallies need now.`
       onassigned()
     } catch (e) {
       error = e
@@ -186,24 +252,18 @@
 </script>
 
 <details bind:open class="mt-6 rounded-lg border border-line">
-  <summary class="cursor-pointer select-none p-4 text-body font-semibold">Play region</summary>
+  <summary class="cursor-pointer select-none p-4 text-body font-semibold">Camera and court</summary>
 
   <!-- `{#if open}` rather than letting <details> merely hide a mounted
        subtree: hidden children still load, and QuadCanvas' frame request
        makes the server extract a frame with ffmpeg. -->
   {#if open}
     <div class="px-4 pb-4">
-      <p class="text-caption text-dim">
-        Drag the four corners to cover the area both players move in, extended to the bottom of
-        frame. Without this, adjacent public courts stay visible to detection and can be picked as
-        the far player.
-      </p>
-
       {#if sources.length > 1}
         <select
           value={sourceId}
           onchange={(e) => onSourceChange(e.currentTarget.value)}
-          class="mt-3 rounded border border-line bg-surface px-2 py-1 text-body"
+          class="rounded border border-line bg-surface px-2 py-1 text-body"
           aria-label="source to edit"
         >
           {#each sources as s (s.id)}
@@ -213,6 +273,71 @@
       {/if}
 
       {#if source}
+        <!-- bg-surface for the same reason as every other `dim` line in
+             here: this panel has no card of its own under its body. -->
+        <div class="mt-3 flex flex-wrap items-end justify-between gap-3 rounded-lg bg-surface p-3">
+          <MountFormatPicker
+            {mount}
+            {format}
+            onmount={(m) => (mount = m)}
+            onformat={(f) => (format = f)}
+            disabled={busy}
+          />
+          {#if !cornersMode && choicesDirty}
+            <button
+              class="rounded border border-fg px-3 py-1 text-body font-medium hover:bg-surface-2
+                     disabled:opacity-40 motion-safe:transition-colors"
+              onclick={saveChoices}
+              disabled={busy}
+            >
+              {busy ? 'working…' : 'Save'}
+            </button>
+          {/if}
+        </div>
+      {/if}
+
+      {#if source && cornersMode}
+        <p class="mt-3 text-caption text-dim">
+          Drag the four handles onto the court's corners — doubles sidelines and both baselines.
+          Fence mode reads the court from these, not from a play region.
+        </p>
+        <QuadCanvas
+          frameSrc={api.frameUrl(sessionId, source.idx, frameMs)}
+          timeMs={scrubMs}
+          maxMs={maxMs}
+          fps={source.fps}
+          points={corners ?? DEFAULT_CORNER_POINTS}
+          labels={CORNER_LABELS}
+          onpoints={(p) => (corners = p)}
+          onseek={seek}
+          alt="source {source.idx} at {formatTs(frameMs)}"
+        />
+        <div class="mt-3 flex items-center gap-3">
+          <button
+            class="rounded bg-fg px-3 py-1 text-body font-medium text-bg hover:bg-fg/90
+                   disabled:opacity-40 motion-safe:transition-colors"
+            onclick={saveChoices}
+            disabled={busy || !corners}
+          >
+            {busy ? 'working…' : 'Save corners'}
+          </button>
+          {#if !corners}
+            <span class="text-caption text-dim">Move the handles onto the court to save.</span>
+          {/if}
+        </div>
+        {#if status}
+          <p class="mt-2 font-data text-caption text-fg">{status}</p>
+        {/if}
+        {#if error}
+          <p class="mt-2 font-data text-data text-danger">{describeApiError(error, 'source').message}</p>
+        {/if}
+      {:else if source}
+        <p class="mt-3 text-caption text-dim">
+          Drag the four corners to cover the area both players move in, extended to the bottom of
+          frame. Without this, adjacent public courts stay visible to detection and can be picked as
+          the far player.
+        </p>
+
         <p class="mt-2 font-data text-caption text-faint">
           currently assigned: {assignedLabel}
         </p>

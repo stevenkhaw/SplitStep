@@ -1,4 +1,5 @@
-import type { Rally, Source } from './types'
+import { detectionOwed } from './mount'
+import type { Rally, ScorerChoice, Source } from './types'
 
 /**
  * Rallies on `sourceId` whose live boundaries have diverged from what the
@@ -136,6 +137,25 @@ export interface DetectionPlan {
    *  and the action its button takes are resolved from one call and cannot
    *  describe different sources. */
   cutAt: string
+  /** The scorer the reviewer's mount/format now picks, when it is not the
+   *  one that cut the rallies below -- see `scorerSwitch`. Null otherwise. */
+  scorerSwitch: ScorerChoice | null
+}
+
+/**
+ * The scorer a source's rallies must be re-cut with because its mount or
+ * format changed (or its court corners moved), or null when nothing is owed.
+ *
+ * A thin reading of `detectionOwed` (lib/mount.ts) rather than a second
+ * rule: that function owns the mapping, including that `auto` is satisfied
+ * by whatever it produced and that unknown is never a change. Exported for
+ * the panel, which must drop a threshold seeded on the old scorer's scale
+ * the moment a switch is owed (0.45 on pair means nothing to the fence
+ * model, and sending it would cut at a number nobody chose).
+ */
+export function scorerSwitch(source: Source | undefined): ScorerChoice | null {
+  if (!source || detectionOwed(source) === 'none') return null
+  return source.scorer_now ?? null
 }
 
 /**
@@ -157,7 +177,14 @@ export interface DetectionPlan {
  *    null (or absent) means the comparison cannot be made, and claiming a
  *    change would offer fifteen minutes of GPU on no evidence -- across an
  *    entire pre-016 library, which is how a warning gets trained away.
- * 4. **Unknown DOES count as changed, for the threshold, and the asymmetry
+ * 4. **A changed scorer comes next** -- mount, format or corners moved since
+ *    the rallies were cut (`detectionOwed`). It outranks the threshold
+ *    because the threshold is on the scorer's own scale: a slider position
+ *    on the old scorer's scale is not a number the new one can use, so the
+ *    switch is applied with the threshold the new scorer resolves. It is a
+ *    re-segment when cached boxes or features suffice, and the full run
+ *    when the fence model needs boxes this source never saved.
+ * 5. **Unknown DOES count as changed, for the threshold, and the asymmetry
  *    is deliberate.** A re-segment costs 200 ms and is behind a confirm,
  *    while suppressing it would leave every source segmented before
  *    migration 015 permanently unable to re-cut from this panel: its
@@ -172,7 +199,7 @@ export function planDetection(
   const cutAt = cutAtPhrase(source)
   if (!source) {
     return { action: 'none', regionChanged: false, thresholdChanged: false,
-             curveAvailable: false, cutAt }
+             curveAvailable: false, cutAt, scorerSwitch: null }
   }
 
   const builtUnder = source.features_preset_points
@@ -186,11 +213,20 @@ export function planDetection(
     draft.threshold !== null && (recorded === null || draft.threshold !== recorded)
 
   const curveAvailable = hasFeatures(source)
+  const owed = detectionOwed(source)
+  const switchTo = scorerSwitch(source)
 
   let action: DetectionActionKind = 'none'
   if (regionChanged) action = 'redetect'
+  else if (owed === 'redetect') action = 'redetect'
+  // `curveAvailable` again: detectionOwed reads boxes and the recorded
+  // scorer, and a re-segment still replays features.jsonl, so a source
+  // missing it (deleted by hand) gets the run that rebuilds it, not a 409.
+  else if (owed === 'resegment') action = curveAvailable ? 'resegment' : 'redetect'
   else if (thresholdChanged) action = curveAvailable ? 'resegment' : 'redetect'
-  return { action, regionChanged, thresholdChanged, curveAvailable, cutAt }
+  return {
+    action, regionChanged, thresholdChanged, curveAvailable, cutAt, scorerSwitch: switchTo,
+  }
 }
 
 /**
@@ -232,9 +268,13 @@ export function cutAtPhrase(source: Source | undefined): string {
  * the same thing; two copies would drift, and a reviewer who learned the
  * cost in one place would be told something different in the other.
  */
-export function redetectConfirmMessage(): string {
+export function redetectConfirmMessage(reason: 'region' | 'fence' = 'region'): string {
+  // The fence wording exists because the only scorer switch that costs the
+  // full run is to fence (it needs person boxes an older detect never
+  // saved); "the new play region" would name a change nobody made.
+  const what = reason === 'fence' ? 'for fence mode' : 'with the new play region'
   return (
-    'Re-detect this video with the new play region? Starred and rejected ' +
+    `Re-detect this video ${what}? Starred and rejected ` +
     'carry over; manual boundary edits and split rallies are lost. ' +
     'Detection takes a while — the jobs badge tracks it.'
   )
@@ -314,12 +354,18 @@ export function recordedThresholdNote(
  * reading "Re-segment" that cannot be pressed looks broken, while one
  * reading "Nothing to apply" has said why.
  */
-export function detectionActionLabel(action: DetectionActionKind): string {
+export function detectionActionLabel(
+  action: DetectionActionKind,
+  switchTo: ScorerChoice | null = null,
+): string {
   switch (action) {
     case 'redetect':
       return 'Run detection · ~15 min'
     case 'resegment':
-      return 'Re-segment · instant'
+      // Named for fence alone: it is the one scorer a reviewer chose by
+      // name, and the label is where they see their choice being applied.
+      // A switch to subject (Ground) reads as the plain re-cut it is.
+      return switchTo === 'fence' ? 'Re-segment with fence mode · instant' : 'Re-segment · instant'
     case 'none':
       return 'Nothing to apply'
   }
@@ -348,6 +394,19 @@ export function detectionActionNote(plan: DetectionPlan): string {
   }
   if (!plan.curveAvailable) {
     return 'This video has no cached features to re-cut, so the full run builds them first.'
+  }
+  // After the region, in `planDetection`'s order: a switch outranks a moved
+  // threshold, so when both are pending this names the switch.
+  if (plan.scorerSwitch === 'fence') {
+    return plan.action === 'redetect'
+      ? 'Fence mode scores person boxes this video’s last detection did not save, so ' +
+          'the full run builds them.'
+      : 'Fence mode re-scores this video’s cached person boxes against the court ' +
+          'corners — no GPU, no re-encode.'
+  }
+  if (plan.scorerSwitch === 'subject') {
+    return 'Ground mount re-cuts with the subject profile from cached features — no GPU, ' +
+      'no re-encode.'
   }
   return 'Re-cuts the rallies from this video’s cached features — no GPU, no re-encode.'
 }

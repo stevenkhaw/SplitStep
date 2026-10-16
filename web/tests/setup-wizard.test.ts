@@ -26,6 +26,7 @@ const mockApi = {
   listPresets: vi.fn().mockResolvedValue([]),
   createPreset: vi.fn().mockResolvedValue({ id: 'p1' }),
   setup: vi.fn().mockResolvedValue({ job_id: 'j1' }),
+  setupDefaults: vi.fn().mockResolvedValue({ mount: '', play_format: '' }),
   previewUrl: (s: string, i: number, at: number, rot: number) =>
     `/media/${s}/${i}/preview.jpg?at_ms=${at}&rot=${rot}`,
 }
@@ -55,6 +56,9 @@ const FAKE_RECT: DOMRect = {
   x: 0, y: 0, toJSON: () => ({}),
 }
 
+/** What every non-fence test sends: the answers left at Not set. */
+const NOT_SET = { mount: '', play_format: '' }
+
 describe('Setup wizard', () => {
   let target: HTMLDivElement
   let instance: unknown
@@ -66,6 +70,7 @@ describe('Setup wizard', () => {
     mockApi.listPresets.mockResolvedValue([])
     mockApi.createPreset.mockResolvedValue({ id: 'p1' })
     mockApi.setup.mockResolvedValue({ job_id: 'j1' })
+    mockApi.setupDefaults.mockResolvedValue({ mount: '', play_format: '' })
     target = document.createElement('div')
     document.body.appendChild(target)
     rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(FAKE_RECT)
@@ -81,7 +86,10 @@ describe('Setup wizard', () => {
   async function open() {
     instance = mount(Setup, { target, props: { id: 'src1' } })
     flushSync()
-    await vi.waitFor(() => expect(mockApi.getSource).toHaveBeenCalled())
+    // On the rendered source, not on getSource having been called: the
+    // wizard now waits for setup defaults alongside the source, so the
+    // render lands a few microtasks after the call.
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Set up source/))
     flushSync()
   }
 
@@ -100,9 +108,9 @@ describe('Setup wizard', () => {
   // pointerdown/pointermove/pointerup events, the way a user actually
   // changes the play region -- as opposed to clicking a preset button,
   // which only replaces `points` wholesale.
-  function dragFirstCorner() {
-    const handle = target.querySelector('button[aria-label="corner 1"]') as HTMLButtonElement
-    if (!handle) throw new Error('corner 1 handle not found')
+  function dragFirstCorner(label = 'corner 1') {
+    const handle = target.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement
+    if (!handle) throw new Error(`${label} handle not found`)
     handle.setPointerCapture = vi.fn()
     handle.releasePointerCapture = vi.fn()
     handle.dispatchEvent(
@@ -157,7 +165,7 @@ describe('Setup wizard', () => {
     click('start detection')                // double-click must not double-post
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
     expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
-    expect(mockApi.setup).toHaveBeenCalledWith('src1', 0, 'p1')
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 0, 'p1', NOT_SET)
   })
 
   // Finding: a preset created by this attempt's createPreset() call lived
@@ -177,8 +185,8 @@ describe('Setup wizard', () => {
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(2))
 
     expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
-    expect(mockApi.setup).toHaveBeenNthCalledWith(1, 'src1', 90, 'p1')
-    expect(mockApi.setup).toHaveBeenNthCalledWith(2, 'src1', 90, 'p1')
+    expect(mockApi.setup).toHaveBeenNthCalledWith(1, 'src1', 90, 'p1', NOT_SET)
+    expect(mockApi.setup).toHaveBeenNthCalledWith(2, 'src1', 90, 'p1', NOT_SET)
   })
 
   // Finding: Confirm always called createPreset, even when the user just
@@ -197,7 +205,7 @@ describe('Setup wizard', () => {
     click('start detection')
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
     expect(mockApi.createPreset).not.toHaveBeenCalled()
-    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, existingPreset.id)
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, existingPreset.id, NOT_SET)
   })
 
   it('confirming after dragging a corner creates a new preset', async () => {
@@ -208,7 +216,7 @@ describe('Setup wizard', () => {
     click('start detection')
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
     expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
-    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1')
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1', NOT_SET)
   })
 
   it('clicking a preset then dragging a corner creates a new preset rather than silently overwriting the reused one', async () => {
@@ -222,7 +230,109 @@ describe('Setup wizard', () => {
     click('start detection')
     await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
     expect(mockApi.createPreset).toHaveBeenCalledTimes(1)
-    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1')
-    expect(mockApi.setup).not.toHaveBeenCalledWith('src1', 90, existingPreset.id)
+    expect(mockApi.setup).toHaveBeenCalledWith('src1', 90, 'p1', NOT_SET)
+    expect(mockApi.setup).not.toHaveBeenCalledWith('src1', 90, existingPreset.id, NOT_SET)
+  })
+
+  describe('mount, format and court corners', () => {
+    it('pre-selects the library\'s latest answers and asks for corners on a fence', async () => {
+      mockApi.setupDefaults.mockResolvedValue({ mount: 'fence', play_format: 'singles' })
+      await open()
+      expect(
+        target.querySelector('button[aria-label="mount Fence"]')?.getAttribute('aria-pressed'),
+      ).toBe('true')
+      expect(
+        target.querySelector('button[aria-label="format Singles"]')?.getAttribute('aria-pressed'),
+      ).toBe('true')
+      expect(target.textContent).toMatch(/doubles sidelines and both baselines/)
+      // Every handle named, in the order the server stores and validates.
+      for (const name of ['near-left', 'near-right', 'far-right', 'far-left']) {
+        expect(target.querySelector(`button[aria-label="${name} corner"]`)).not.toBeNull()
+      }
+      // No region presets in corners mode: the server derives the region.
+      expect(target.querySelector('button[aria-label="use default play region"]')).toBeNull()
+    })
+
+    it('will not start on the default corners, then sends corners and no preset', async () => {
+      mockApi.setupDefaults.mockResolvedValue({ mount: 'fence', play_format: 'singles' })
+      await open()
+      const start = () =>
+        target.querySelector('button[aria-label="start detection"]') as HTMLButtonElement
+      expect(start().disabled).toBe(true)
+
+      dragFirstCorner('near-left corner')
+      click('start detection')
+      await vi.waitFor(() => expect(mockApi.setup).toHaveBeenCalledTimes(1))
+      expect(mockApi.createPreset).not.toHaveBeenCalled()
+      const [id, rotation, presetId, extra] = mockApi.setup.mock.calls[0]
+      expect([id, rotation, presetId]).toEqual(['src1', 90, null])
+      expect(extra.mount).toBe('fence')
+      expect(extra.play_format).toBe('singles')
+      // FAKE_RECT is 1000x800; the drag ended at (200, 150).
+      expect(extra.court_corners[0]).toEqual([0.2, 0.1875])
+      expect(extra.court_corners).toHaveLength(4)
+    })
+
+    it('prefers the source\'s own answers and corners over the library default', async () => {
+      mockApi.setupDefaults.mockResolvedValue({ mount: 'ground', play_format: 'drills' })
+      mockApi.getSource.mockResolvedValue({
+        ...source,
+        mount: 'fence',
+        play_format: 'singles',
+        court_corners: '[[0.1,0.9],[0.9,0.9],[0.7,0.4],[0.3,0.4]]',
+      })
+      await open()
+      expect(
+        target.querySelector('button[aria-label="mount Fence"]')?.getAttribute('aria-pressed'),
+      ).toBe('true')
+      // Stored corners count as placed: start is live without a drag.
+      const start = target.querySelector(
+        'button[aria-label="start detection"]',
+      ) as HTMLButtonElement
+      expect(start.disabled).toBe(false)
+    })
+
+    it('says out loud when fence is chosen for play it was not tuned on', async () => {
+      await open()
+      expect(target.querySelector('[data-role="untuned-note"]')).toBeNull()
+      click('mount Fence')
+      click('format Doubles')
+      expect(target.querySelector('[data-role="untuned-note"]')?.textContent).toMatch(
+        /Not tuned for fence \+ doubles/,
+      )
+    })
+
+    it('never sends a derived preset\'s off-frame corners back as a new preset', async () => {
+      mockApi.listPresets.mockResolvedValue([
+        {
+          id: 'derived',
+          name: 'Court from corners',
+          points: [
+            [0.25, 0.3],
+            [0.75, 0.3],
+            [1.6, 1.12],
+            [-0.7, 1.12],
+          ],
+          created_at: '2026-10-16T00:00:00Z',
+        },
+      ])
+      await open()
+      await vi.waitFor(() =>
+        expect(
+          target.querySelector('button[aria-label="use preset Court from corners"]'),
+        ).not.toBeNull(),
+      )
+      click('use preset Court from corners')
+      dragFirstCorner()
+      click('start detection')
+      await vi.waitFor(() => expect(mockApi.createPreset).toHaveBeenCalledTimes(1))
+      const sent = mockApi.createPreset.mock.calls[0][1] as [number, number][]
+      for (const [x, y] of sent) {
+        expect(x).toBeGreaterThanOrEqual(0)
+        expect(x).toBeLessThanOrEqual(1)
+        expect(y).toBeGreaterThanOrEqual(0)
+        expect(y).toBeLessThanOrEqual(1)
+      }
+    })
   })
 })

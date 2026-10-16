@@ -66,3 +66,53 @@ export function detectionOwed(
   if (detected === null) return 'none'
   return 'resegment'
 }
+
+/**
+ * The four court corners in storage order -- `CORNER_NAMES` in
+ * splitstep/detect/court.py. The server refuses an out-of-order set rather
+ * than reordering it (a homography through crossed corners is exact at the
+ * corners and wrong everywhere else), so every handle carries its name and
+ * the order is never left to the reviewer's guess.
+ */
+export const CORNER_LABELS = ['near-left', 'near-right', 'far-right', 'far-left'] as const
+
+/**
+ * Where the corner handles start before anything was drawn: a court in
+ * perspective, near baseline wide and low, far baseline narrow and high, in
+ * the stored turning order so the shape the server validates is the shape
+ * on screen. It is a starting shape and never an answer -- callers keep
+ * Save disabled until a handle has moved (or stored corners were loaded),
+ * because a court placed by default is a court nobody looked at.
+ */
+export const DEFAULT_CORNER_POINTS: [number, number][] = [
+  [0.15, 0.85],
+  [0.85, 0.85],
+  [0.7, 0.45],
+  [0.3, 0.45],
+]
+
+/**
+ * `sources.court_corners` as stored (a JSON string, or null) to four points,
+ * or null when there is nothing usable. Anything malformed is null rather
+ * than a throw: this runs while a route renders, and a bad row must cost an
+ * empty editor, not the page.
+ */
+export function parseCorners(raw: string | null | undefined): [number, number][] | null {
+  if (!raw) return null
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(value) || value.length !== 4) return null
+  const out: [number, number][] = []
+  for (const p of value) {
+    if (!Array.isArray(p) || p.length !== 2) return null
+    const [x, y] = p
+    if (typeof x !== 'number' || typeof y !== 'number') return null
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    out.push([x, y])
+  }
+  return out
+}
