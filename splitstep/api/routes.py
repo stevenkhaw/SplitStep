@@ -67,12 +67,12 @@ from splitstep.db.sessions import (
     scoring_rules,
     set_scoring,
     set_source_preset,
+    set_source_scorer,
     set_source_segment_threshold,
 )
 from splitstep.db.settings import get_hr_clips_root, set_hr_clips_root
-from splitstep.detect.features import read_features
 from splitstep.detect.geometry import Quad
-from splitstep.detect.segment import params_for_frames, sample_interval_ms, score_series, segment
+from splitstep.detect.scorer import FenceUnavailable, resolve_scorer, segment_source
 from splitstep.export import SETS, column_for, plan_export, walk_clip_files
 from splitstep.label_sample import DEFAULT_WINDOW_MS, sample_windows
 from splitstep.media.clips import parse_clip_name
@@ -278,9 +278,9 @@ class DetectBody(BaseModel):
     float would otherwise sail through and blow up the JSON renderer later.
 
     None is not "unset, use 0.25". It is the instruction to let
-    `params_for_frames` resolve per source: the two camera profiles put the
-    threshold on different scales (0.25 subject, 0.45 pair) and a constant
-    here would be wrong for half of every library. The route passes the None
+    `scorer.segment_source` resolve per source: the scorers put the
+    threshold on different scales (0.25 subject, 0.45 pair, the fence
+    model's own) and a constant here would be wrong for most of a library. The route passes the None
     straight through to the job payload for that reason.
 
     The whole body is optional, not just the field. The shipped client posts
@@ -513,6 +513,16 @@ def _source_json(conn, library, source: sqlite3.Row) -> dict:
         "features_at": _features_at(library, source),
         "court_preset_points": _preset_points(conn, source["court_preset_id"]),
         "features_preset_points": _preset_points(conn, source["features_preset_id"]),
+        # mount, play_format, court_corners and detected_scorer ride in on
+        # dict(source) above. scorer_now is what those choices select today
+        # ("auto" where the footage decides); set beside detected_scorer, it
+        # is how the Detection panel sees rallies cut by a scorer no longer
+        # in force. has_boxes says whether fence mode can run without a
+        # fresh detect -- sources detected before boxes.jsonl existed cannot.
+        "scorer_now": resolve_scorer(source["mount"], source["play_format"]),
+        "has_boxes": (
+            library.source_dir(source["session_id"], source["idx"]) / "boxes.jsonl"
+        ).exists(),
     }
 
 
@@ -1180,22 +1190,25 @@ def api_resegment(source_id: str, body: ResegmentBody, request: Request):
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    path = library.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
-    if not path.exists():
+    src_dir = library.source_dir(source["session_id"], source["idx"])
+    if not (src_dir / "features.jsonl").exists():
         raise HTTPException(status_code=409, detail="Source has not been detected yet")
 
-    frames = read_features(path)
     # Held rather than inlined: `body.threshold` is None on a default run and
-    # params_for_frames is what resolves it per source (0.25 subject, 0.45
-    # pair), so `params.threshold` is the only honest record of what these
-    # rallies were cut at -- recording the request body would store None for
-    # exactly the runs the reviewer most needs a number for (migration 015).
-    params = params_for_frames(frames, threshold=body.threshold)
-    intervals = segment(frames, params)
-    count = replace_rallies(conn, source["session_id"], source_id, intervals)
-    # After replace_rallies: the column describes the rallies now in the
-    # table, so it must not be written ahead of a rewrite that could fail.
-    set_source_segment_threshold(conn, source_id, params.threshold)
+    # the scorer is what resolves it per source (0.25 subject, 0.45 pair, the
+    # fence model's own), so `cut.threshold` is the only honest record of
+    # what these rallies were cut at -- recording the request body would
+    # store None for exactly the runs the reviewer most needs a number for
+    # (migration 015).
+    try:
+        cut = segment_source(source, src_dir, threshold=body.threshold)
+    except FenceUnavailable as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    count = replace_rallies(conn, source["session_id"], source_id, cut.intervals)
+    # After replace_rallies: the columns describe the rallies now in the
+    # table, so they must not be written ahead of a rewrite that could fail.
+    set_source_segment_threshold(conn, source_id, cut.threshold)
+    set_source_scorer(conn, source_id, cut.scorer)
     # replace_rallies inserts every new rally with reviewed_at NULL and
     # carries starred/rejected across by overlap, but never reviewed_at --
     # so a session that read "reviewed" before this call would otherwise
@@ -1264,17 +1277,22 @@ def api_scores(source_id: str, request: Request,
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    path = library.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
-    if not path.exists():
+    src_dir = library.source_dir(source["session_id"], source["idx"])
+    if not (src_dir / "features.jsonl").exists():
         raise HTTPException(status_code=409, detail="Source has not been detected yet")
 
-    frames = read_features(path)
-    params = params_for_frames(frames, threshold=threshold)
-    step_ms = sample_interval_ms(frames)
+    # Through the same dispatcher as /resegment, so the curve and the
+    # threshold are on the scale of the scorer that would cut: for a fence
+    # source that is the model's smoothed probability and its own threshold,
+    # and a slider opened on the old 0.45 there would cut nothing.
+    try:
+        cut = segment_source(source, src_dir, threshold=threshold)
+    except FenceUnavailable as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return {
-        "step_ms": step_ms,
-        "threshold": params.threshold,
-        "scores": [round(s, 4) for s in score_series(frames, params)],
+        "step_ms": cut.step_ms,
+        "threshold": cut.threshold,
+        "scores": [round(s, 4) for s in cut.scores],
     }
 
 

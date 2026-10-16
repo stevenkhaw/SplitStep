@@ -364,6 +364,26 @@ def _fold(clips: list[list[float]], max_ms: float, within_ms: float) -> list[lis
     return out
 
 
+def fence_curve(
+    t_ms: Sequence[int], probs: np.ndarray, model: FenceModel
+) -> tuple[float, np.ndarray]:
+    """(frame step in ms, smoothed probabilities): the curve the threshold cuts.
+
+    Public so the score graph can draw exactly what `fence_segment` compares
+    against the threshold -- the raw probabilities flicker across a line the
+    segmenter never sees them cross.
+    """
+    t = np.asarray(t_ms, dtype=float)
+    p = np.nan_to_num(np.asarray(probs, dtype=float), nan=0.0)
+    if len(t) != len(p):
+        raise ValueError(f"Got {len(t)} timestamps but {len(p)} probabilities.")
+    if len(t) == 0:
+        return 200.0, p
+    step = _frame_ms(t)
+    w = max(1, round(model.smooth_s * 1000 / step))
+    return step, _centred(p, w)
+
+
 def fence_segment(
     t_ms: Sequence[int],
     probs: np.ndarray,
@@ -372,16 +392,10 @@ def fence_segment(
 ) -> list[Interval]:
     """Smooth, threshold, close gaps, drop short runs, pad, then fold faults."""
     t = np.asarray(t_ms, dtype=float)
-    p = np.nan_to_num(np.asarray(probs, dtype=float), nan=0.0)
-    if len(t) != len(p):
-        raise ValueError(f"Got {len(t)} timestamps but {len(p)} probabilities.")
+    step, smooth = fence_curve(t_ms, probs, model)
     if len(t) == 0:
         return []
     th = model.threshold if threshold is None else threshold
-    step = _frame_ms(t)
-
-    w = max(1, round(model.smooth_s * 1000 / step))
-    smooth = _centred(p, w)
     on = smooth >= th
 
     # Runs of frames over threshold, as [start_ms, end_ms, conf]; a frame

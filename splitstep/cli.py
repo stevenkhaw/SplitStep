@@ -24,6 +24,7 @@ from splitstep.db.sessions import (
     scoring_rules,
     set_scoring,
     set_source_preset,
+    set_source_scorer,
     set_source_segment_threshold,
 )
 from splitstep.detect import fence_train
@@ -32,7 +33,7 @@ from splitstep.detect.court import Court
 from splitstep.detect.features import read_features
 from splitstep.detect.fence import FenceModel, fence_probs, fence_segment
 from splitstep.detect.geometry import Quad
-from splitstep.detect.segment import params_for_frames, segment
+from splitstep.detect.scorer import FenceUnavailable, segment_source
 from splitstep.detect.truth import format_report, load_truth
 from splitstep.export import (
     SETS,
@@ -304,7 +305,7 @@ def cmd_detect(args) -> int:
     conn = connect(lib.db_path)
     migrate(conn)
     # Mirrors the API route: an absent --threshold is None, and None is the
-    # instruction to let params_for_frames resolve per profile rather than a
+    # instruction to let segment_source resolve per scorer rather than a
     # stand-in for any particular number. HTTP and terminal must not drift on
     # this the way they must not drift on validation (setup.py::queue_setup).
     payload = {
@@ -331,16 +332,19 @@ def cmd_segment(args) -> int:
         print(f"no such source: {args.source_id}", file=sys.stderr)
         return 1
 
-    path = lib.source_dir(source["session_id"], source["idx"]) / "features.jsonl"
-    frames = read_features(path)
-    params = params_for_frames(frames, threshold=args.threshold)
-    intervals = segment(frames, params)
+    src_dir = lib.source_dir(source["session_id"], source["idx"])
+    try:
+        cut = segment_source(source, src_dir, threshold=args.threshold)
+    except FenceUnavailable as e:
+        print(f"source {args.source_id}: {e}", file=sys.stderr)
+        return 1
+    intervals = cut.intervals
 
     if args.dry_run:
         for i, iv in enumerate(intervals, 1):
             print(f"{i:3d}  {_format_ts(iv.start_ms):>9} → {_format_ts(iv.end_ms):>9}"
                   f"  ({(iv.end_ms-iv.start_ms)/1000:5.1f}s)  conf {iv.confidence:.2f}")
-        print(f"\n{len(intervals)} rallies at threshold {params.threshold}")
+        print(f"\n{len(intervals)} rallies at threshold {cut.threshold} ({cut.scorer})")
         return 0
 
     replace_rallies(conn, source["session_id"], args.source_id, intervals)
@@ -350,7 +354,8 @@ def cmd_segment(args) -> int:
     # describing some earlier run's rallies, which is the same false claim
     # migration 015 exists to remove -- just reached from the terminal. Not
     # written on --dry-run above, which persists no rallies to describe.
-    set_source_segment_threshold(conn, args.source_id, params.threshold)
+    set_source_segment_threshold(conn, args.source_id, cut.threshold)
+    set_source_scorer(conn, args.source_id, cut.scorer)
     # Mirrors api_resegment too: replace_rallies inserts every new rally with
     # reviewed_at NULL, so a session that read 'reviewed' before this call now
     # contains nothing anyone has seen. Without the refresh the Library keeps
@@ -432,13 +437,16 @@ def cmd_labels_score(args) -> int:
         print(f"source has not been detected yet: {args.source_id}", file=sys.stderr)
         return 1
 
-    frames = read_features(path)
-    params = params_for_frames(frames, threshold=args.threshold)
-    intervals = segment(frames, params)
+    try:
+        cut = segment_source(source, path.parent, threshold=args.threshold)
+    except FenceUnavailable as e:
+        print(f"source {args.source_id}: {e}", file=sys.stderr)
+        return 1
+    intervals = cut.intervals
     labels = rows_to_labels(latest_labels(conn, args.source_id))
     score = score_against_labels(intervals, labels)
 
-    print(f"{len(intervals)} candidate rallies at threshold {params.threshold:.2f}"
+    print(f"{len(intervals)} candidate rallies at threshold {cut.threshold:.2f} ({cut.scorer})"
           f" against {len(labels)} labelled spans")
     print(f"  precision                        {_fmt_pct(score.precision)}"
           f"  ({score.matched_play} play / {score.matched_play + score.matched_not_play} decided)")

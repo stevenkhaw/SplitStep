@@ -188,6 +188,35 @@ def test_segment_without_dry_run_writes_rallies(library, conn, seeded_source, ca
     assert len(rows) == 1
 
 
+def test_segment_records_the_scorer_it_cut_with(library, conn, seeded_source):
+    from splitstep.db.sessions import get_source
+
+    main(["--library", str(library.root), "segment", seeded_source["source_id"]])
+    row = get_source(conn, seeded_source["source_id"])
+    assert row["detected_scorer"] == "pair"
+
+
+def test_segment_dry_run_records_nothing(library, conn, seeded_source):
+    from splitstep.db.sessions import get_source
+
+    main(["--library", str(library.root), "segment", seeded_source["source_id"], "--dry-run"])
+    assert get_source(conn, seeded_source["source_id"])["detected_scorer"] is None
+
+
+def test_segment_fence_source_without_boxes_says_what_to_do(
+    library, conn, seeded_source, capsys
+):
+    from splitstep.db.sessions import set_source_setup
+
+    set_source_setup(conn, seeded_source["source_id"], 0, None, mount="fence",
+                     play_format="singles",
+                     court_corners=[(0.2, 0.6), (0.9, 0.6), (0.6, 0.45), (0.45, 0.45)])
+    for argv in (["segment", seeded_source["source_id"], "--dry-run"],
+                 ["labels", "score", seeded_source["source_id"]]):
+        assert main(["--library", str(library.root), *argv]) == 1
+        assert "re-run detection to use fence mode" in capsys.readouterr().err
+
+
 # -- ingest / detect (argparse wiring) --------------------------------------
 
 def test_ingest_queues_a_job(library, conn, tmp_path, capsys):

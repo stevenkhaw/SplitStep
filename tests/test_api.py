@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import sqlite3
@@ -1030,3 +1031,89 @@ def test_reveal_endpoint_does_not_shell_out_on_non_darwin(client, library, monke
     assert r.status_code == 200
     assert r.json() == {"ok": False, "reason": "reveal is only supported on macOS"}
     assert calls == []
+
+
+# -- Fence mode: every segmenting route goes through scorer.segment_source --
+
+_FX = Path(__file__).parent / "fixtures"
+_FENCE_CORNERS = json.loads((_FX / "truth/2026-10-12_source01.corners.json").read_text())
+
+
+def _fence_source(library, conn, seeded, *, boxes: bool):
+    import shutil
+
+    from splitstep.db.sessions import set_source_setup
+
+    set_source_setup(conn, seeded["source_id"], 0, None, mount="fence",
+                     play_format="singles", court_corners=_FENCE_CORNERS)
+    src_dir = library.source_dir(seeded["session_id"], seeded["idx"])
+    src_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(_FX / "features/2026-10-12_source01_0-16min.jsonl",
+                src_dir / "features.jsonl")
+    if boxes:
+        shutil.copy(_FX / "boxes/2026-10-12_source01_0-16min.jsonl", src_dir / "boxes.jsonl")
+
+
+def test_resegment_fence_without_boxes_is_409_with_sentence(client, library, conn, seeded):
+    # Review Focus 1: a Fence + Singles source detected before fence mode
+    # existed has features.jsonl but no boxes.jsonl. A 500 there would read as
+    # the app being broken; the reviewer needs to be told what to do.
+    _fence_source(library, conn, seeded, boxes=False)
+    before = [dict(r) for r in list_rallies(conn, seeded["session_id"])]
+
+    r = client.post(f"/api/sources/{seeded['source_id']}/resegment", json={})
+    assert r.status_code == 409
+    assert "re-run detection to use fence mode" in r.json()["detail"]
+    assert [dict(r) for r in list_rallies(conn, seeded["session_id"])] == before
+
+    r = client.get(f"/api/sources/{seeded['source_id']}/scores")
+    assert r.status_code == 409
+    assert "re-run detection to use fence mode" in r.json()["detail"]
+
+
+def test_scores_for_a_fence_source_are_on_the_model_scale(client, library, conn, seeded):
+    from splitstep import resources
+    from splitstep.detect.fence import FenceModel
+
+    _fence_source(library, conn, seeded, boxes=True)
+    model = FenceModel.load(resources.fence_model())
+
+    body = client.get(f"/api/sources/{seeded['source_id']}/scores").json()
+    assert body["threshold"] == model.threshold
+    assert body["step_ms"] == 200
+    assert len(body["scores"]) == 4800
+    assert all(s == round(s, 4) for s in body["scores"])
+
+    body = client.get(f"/api/sources/{seeded['source_id']}/scores",
+                      params={"threshold": 0.4}).json()
+    assert body["threshold"] == 0.4
+
+
+def test_resegment_records_the_scorer_and_its_threshold(client, library, conn, seeded):
+    from splitstep import resources
+    from splitstep.db.sessions import get_source
+    from splitstep.detect.fence import FenceModel
+
+    _fence_source(library, conn, seeded, boxes=True)
+    r = client.post(f"/api/sources/{seeded['source_id']}/resegment", json={})
+    assert r.status_code == 200
+    assert r.json()["count"] > 0
+    row = get_source(conn, seeded["source_id"])
+    assert row["detected_scorer"] == "fence"
+    assert row["segment_threshold"] == FenceModel.load(resources.fence_model()).threshold
+
+
+def test_source_json_reports_boxes_and_the_scorer_its_choices_select(
+    client, library, conn, seeded
+):
+    _fence_source(library, conn, seeded, boxes=False)
+    body = client.get(f"/api/sources/{seeded['source_id']}").json()
+    assert body["has_boxes"] is False
+    assert body["scorer_now"] == "fence"
+    assert body["mount"] == "fence"
+    assert body["play_format"] == "singles"
+    assert json.loads(body["court_corners"]) == _FENCE_CORNERS
+    assert body["detected_scorer"] is None
+
+    _fence_source(library, conn, seeded, boxes=True)
+    assert client.get(f"/api/sources/{seeded['source_id']}").json()["has_boxes"] is True

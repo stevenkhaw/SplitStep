@@ -1,0 +1,62 @@
+[
+ {
+  "mount": "",
+  "play_format": "",
+  "scorer": "auto"
+ },
+ {
+  "mount": "",
+  "play_format": "singles",
+  "scorer": "auto"
+ },
+ {
+  "mount": "",
+  "play_format": "doubles",
+  "scorer": "auto"
+ },
+ {
+  "mount": "",
+  "play_format": "drills",
+  "scorer": "auto"
+ },
+ {
+  "mount": "fence",
+  "play_format": "",
+  "scorer": "auto"
+ },
+ {
+  "mount": "fence",
+  "play_format": "singles",
+  "scorer": "fence"
+ },
+ {
+  "mount": "fence",
+  "play_format": "doubles",
+  "scorer": "auto"
+ },
+ {
+  "mount": "fence",
+  "play_format": "drills",
+  "scorer": "auto"
+ },
+ {
+  "mount": "ground",
+  "play_format": "",
+  "scorer": "subject"
+ },
+ {
+  "mount": "ground",
+  "play_format": "singles",
+  "scorer": "subject"
+ },
+ {
+  "mount": "ground",
+  "play_format": "doubles",
+  "scorer": "subject"
+ },
+ {
+  "mount": "ground",
+  "play_format": "drills",
+  "scorer": "subject"
+ }
+]

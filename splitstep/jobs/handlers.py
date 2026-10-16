@@ -25,14 +25,15 @@ from splitstep.db.sessions import (
     set_session_status,
     set_source_detection,
     set_source_dimensions,
+    set_source_scorer,
     set_source_status,
 )
 from splitstep.db.settings import get_color_profile, get_hr_clips_root, lock_color_profile
 from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
 from splitstep.detect.boxes import write_boxes
-from splitstep.detect.features import read_features, write_features
+from splitstep.detect.features import write_features
 from splitstep.detect.geometry import Quad
-from splitstep.detect.segment import params_for_frames, segment
+from splitstep.detect.scorer import segment_source
 from splitstep.detect.vision import build_features, iter_detections, persons_as_boxes
 from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
@@ -327,7 +328,6 @@ def handle_detect(library: Library, payload: dict,
     # badge the only surface that knew anything had failed.
     try:
         if payload.get("reuse_features") and features_path.exists():
-            frames = read_features(features_path)
             # The features on disk were shaped by whatever region built them,
             # which is what the column already says. The source's *current*
             # court_preset_id may well be newer -- that divergence is exactly
@@ -361,20 +361,22 @@ def handle_detect(library: Library, payload: dict,
 
         # Held rather than inlined: the resolved threshold is recorded below
         # so the re-segment slider can open on the number these rallies were
-        # actually cut at. params_for_frames picks the profile per source, so
-        # the value differs by source and a constant here would be wrong for
-        # half of them (migration 015) -- which is also why an absent
-        # payload threshold is passed through as None rather than defaulted
-        # here: None is the instruction to resolve per profile, and the route
-        # serialises "the reviewer did not choose" as exactly that.
-        params = params_for_frames(frames, threshold=payload.get("threshold"))
-        intervals = segment(frames, params)
-        replace_rallies(conn, source["session_id"], source["id"], intervals)
+        # actually cut at. The scorer resolves it per source, so the value
+        # differs by source and a constant here would be wrong for most of
+        # them (migration 015) -- which is also why an absent payload
+        # threshold is passed through as None rather than defaulted here:
+        # None is the instruction to resolve per scorer, and the route
+        # serialises "the reviewer did not choose" as exactly that. A Fence +
+        # Singles source fence mode cannot cut raises FenceUnavailable, whose
+        # sentence fails the job through the except below.
+        cut = segment_source(source, src_dir, threshold=payload.get("threshold"))
+        replace_rallies(conn, source["session_id"], source["id"], cut.intervals)
         # After replace_rallies, never before: the columns describe the
         # rallies now in the table, and a write that landed ahead of a failed
         # rewrite would describe rallies that were never replaced. Both in
         # one call because they are one answer -- see set_source_detection.
-        set_source_detection(conn, source["id"], params.threshold, features_preset_id)
+        set_source_detection(conn, source["id"], cut.threshold, features_preset_id)
+        set_source_scorer(conn, source["id"], cut.scorer)
     except Exception:
         set_source_status(conn, source["id"], "failed")
         # See _session_should_fail: don't strand a sibling source's

@@ -263,9 +263,10 @@ def set_source_segment_threshold(
     column always describes the rallies that are actually in the table rather
     than the last threshold anyone happened to try.
 
-    Pass `params.threshold` off the SegmentParams that were scored against,
-    never the caller's own argument: a default run passes None and
-    `params_for_frames` resolves it per source (0.25 subject, 0.45 pair), and
+    Pass `Segmentation.threshold` -- the threshold actually cut at -- never
+    the caller's own argument: a default run passes None and
+    `scorer.segment_source` resolves it per source (0.25 subject, 0.45 pair,
+    the fence model's own), and
     recording the unresolved None would put this column straight back into
     the "nobody knows" state it exists to leave (migration 015).
     """
@@ -292,10 +293,10 @@ def set_source_detection(
     the panel stating half of that with no way to tell which half. They
     describe the same run or neither does.
 
-    `threshold` is `params.threshold` off the SegmentParams actually scored
-    against, never the caller's own argument, for the reason
-    set_source_segment_threshold spells out: a default run passes None and
-    only `params_for_frames` resolves it per profile.
+    `threshold` is `Segmentation.threshold`, the one actually cut at, never
+    the caller's own argument, for the reason set_source_segment_threshold
+    spells out: a default run passes None and only `scorer.segment_source`
+    resolves it per source.
 
     `features_preset_id` is genuinely nullable and None means unknown, not
     "no region": whole-frame detection has no preset row, and a

@@ -1152,3 +1152,41 @@ def test_detect_retry_after_a_failure_brings_the_source_back_to_ready(
 
     assert get_source(conn, source["id"])["status"] == "ready"
     assert len(list_rallies(conn, session_id)) == 1
+
+
+def test_detect_records_scorer(library, conn, ground_features):
+    """The detect handler records which concrete scorer cut the rallies,
+    beside the threshold, so the Detection panel can tell whether the rallies
+    on screen came from the scorer the source's choices now select."""
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T19:00:00Z", duration_ms=240_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_2373.MOV",
+    )
+    write_features(library.source_dir(session_id, idx) / "features.jsonl", ground_features)
+    HANDLERS["detect"](library, {"source_id": source_id, "reuse_features": True})
+
+    row = get_source(conn, source_id)
+    assert row["detected_scorer"] == "subject"
+    assert row["segment_threshold"] == 0.25
+
+
+def test_detect_fails_a_fence_source_without_boxes_with_a_sentence(
+    library, conn, ground_features
+):
+    from splitstep.db.sessions import set_source_setup
+    from splitstep.detect.scorer import FenceUnavailable
+
+    session_id = find_or_create_session_for_date(conn, "2026-08-18")
+    source_id, idx = add_source(
+        conn, session_id, recorded_at="2026-08-18T19:00:00Z", duration_ms=240_000,
+        width=1920, height=1080, fps=30.0, original_name="IMG_2373.MOV",
+    )
+    set_source_setup(conn, source_id, 0, None, mount="fence", play_format="singles",
+                     court_corners=[(0.2, 0.6), (0.9, 0.6), (0.6, 0.45), (0.45, 0.45)])
+    write_features(library.source_dir(session_id, idx) / "features.jsonl", ground_features)
+
+    with pytest.raises(FenceUnavailable, match="re-run detection to use fence mode"):
+        HANDLERS["detect"](library, {"source_id": source_id, "reuse_features": True})
+    assert get_source(conn, source_id)["status"] == "failed"
+    assert get_source(conn, source_id)["detected_scorer"] is None
