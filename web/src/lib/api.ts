@@ -1,5 +1,7 @@
 import { ApiError } from './errors'
 import type {
+  Mount,
+  PlayFormat,
   AppConfig,
   AppMode,
   Clip,
@@ -22,7 +24,6 @@ import type {
   SpanRef,
 } from './types'
 import type { AnchorState, ScoreRules } from './score'
-import type { Mount, PlayFormat } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {

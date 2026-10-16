@@ -61,9 +61,8 @@ export function detectionOwed(
   if (wanted === undefined || wanted === 'auto') return 'none'
   if (wanted === detected) return 'none'
   if (wanted === 'fence') return source.has_boxes ? 'resegment' : 'redetect'
-  // wanted subject. Pair features carry the same per-frame boxes subject
-  // scores, so cached features suffice. Fence output is a different feature
-  // shape: re-detect.
+  // wanted subject. Every full detect writes features.jsonl whatever the
+  // mount, so subject scoring always reuses cached features: a re-cut at most.
   if (detected === null) return 'none'
-  return detected === 'pair' ? 'resegment' : 'redetect'
+  return 'resegment'
 }

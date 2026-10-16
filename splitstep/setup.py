@@ -85,6 +85,28 @@ def validate_choices(
     return mount, play_format, corners
 
 
+def _forget_scorer_if_corners_moved(conn, source, corners) -> None:
+    """Clear `detected_scorer` when the stored court corners really change.
+
+    A fence source reads its corners, not the play-region preset, so a redrawn
+    court changes nothing the client could compare: scorer_now stays 'fence'
+    and detected_scorer stays 'fence', and the panel would call the rallies
+    current over a court they were not cut under. NULL is "unknown", which
+    the client's `detectionOwed` already turns into a re-cut when fence is
+    wanted and boxes are cached. Compared by parsed value, never by string:
+    re-saving the same four corners (the wizard does, on every save) is not a
+    change and must not cost a re-cut.
+    """
+    stored = source["court_corners"]
+    before = json.loads(stored) if stored else None
+    norm = None if corners is None else [list(map(float, p)) for p in corners]
+    if before is not None:
+        before = [list(map(float, p)) for p in before]
+    if before != norm:
+        conn.execute("UPDATE sources SET detected_scorer = NULL WHERE id = ?", (source["id"],))
+        conn.commit()
+
+
 def queue_setup(
     conn: sqlite3.Connection,
     source_id: str,
@@ -127,6 +149,7 @@ def queue_setup(
         # PresetCreateBody's validator would refuse.
         preset_id = create_preset(conn, "Court from corners", derived_quad)
     # All validation passed. Write every column in one statement.
+    _forget_scorer_if_corners_moved(conn, source, corners)
     set_source_setup(
         conn, source_id, rotation_deg, preset_id,
         mount=mount, play_format=play_format,
@@ -157,6 +180,7 @@ def apply_choices(
     if source["status"] in BUSY_STATUSES:
         raise RuntimeError(f"source is {source['status']}; wait for that job to finish")
     mount, play_format, corners = validate_choices(source, mount, play_format, court_corners)
+    _forget_scorer_if_corners_moved(conn, source, corners)
     set_source_choices(
         conn, source_id, mount=mount, play_format=play_format,
         court_corners=None if corners is None else [tuple(p) for p in corners],

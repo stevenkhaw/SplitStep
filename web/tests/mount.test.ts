@@ -88,8 +88,11 @@ describe('detectionOwed', () => {
     expect(owed('subject', 'subject')).toBe('none')
     expect(owed('subject', null)).toBe('none')
   })
-  it('ground over a fence run needs fresh features', () => {
-    expect(owed('subject', 'fence')).toBe('redetect')
+  it('ground over a fence run is a re-cut, features are always cached', () => {
+    expect(owed('subject', 'fence')).toBe('resegment')
+  })
+  it('a redrawn fence court (server nulls detected_scorer) is a re-cut', () => {
+    expect(owed('fence', null, true)).toBe('resegment')
   })
   it('a source from an older server owes nothing', () => {
     expect(detectionOwed({})).toBe('none')

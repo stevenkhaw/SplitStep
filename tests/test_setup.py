@@ -222,3 +222,33 @@ def test_apply_choices_refuses_fence_singles_without_corners_and_a_busy_source(c
         apply_choices(conn, source_id, mount="ground")
     with pytest.raises(LookupError):
         apply_choices(conn, "nope")
+
+
+def test_a_redrawn_court_forgets_the_detected_scorer_but_a_resave_does_not(conn):
+    from splitstep.db.sessions import set_source_scorer
+    from splitstep.setup import apply_choices
+
+    source_id, preset_id = _source(conn, "ready"), _preset(conn)
+    queue_setup(conn, source_id, 0, preset_id, mount="fence", play_format="singles",
+                court_corners=CORNERS)
+    set_source_status(conn, source_id, "ready")
+    set_source_scorer(conn, source_id, "fence")
+
+    def detected():
+        return get_source(conn, source_id)["detected_scorer"]
+
+    # Identical corners, and omitted corners, are not a change.
+    apply_choices(conn, source_id, court_corners=[list(p) for p in CORNERS])
+    apply_choices(conn, source_id, play_format="doubles")
+    assert detected() == "fence"
+    # A moved corner is.
+    moved = [(CORNERS[0][0] + 0.01, CORNERS[0][1]), *CORNERS[1:]]
+    apply_choices(conn, source_id, court_corners=moved)
+    assert detected() is None
+    # queue_setup is the second write site.
+    set_source_scorer(conn, source_id, "fence")
+    queue_setup(conn, source_id, 0, preset_id, court_corners=moved)
+    assert detected() == "fence"
+    set_source_status(conn, source_id, "ready")
+    queue_setup(conn, source_id, 0, preset_id, court_corners=CORNERS)
+    assert detected() is None
