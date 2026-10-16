@@ -85,7 +85,7 @@ def mocked_expensive_stage(monkeypatch):
         seen["quad"] = quad
         return _pair_frames()
 
-    monkeypatch.setattr(handlers, "iter_person_boxes", lambda *a, **k: iter(()))
+    monkeypatch.setattr(handlers, "iter_detections", lambda *a, **k: iter(()))
     monkeypatch.setattr(handlers, "_audio_grid", lambda *a, **k: [])
     monkeypatch.setattr(handlers, "build_features", fake_build_features)
     return seen

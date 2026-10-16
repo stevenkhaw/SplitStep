@@ -8,6 +8,13 @@ import numpy as np
 
 from splitstep import resources
 from splitstep.accel import detect_accel
+from splitstep.detect.boxes import (
+    BALL,
+    DETECT_CONF,
+    LEGACY_PERSON_CONF,
+    PERSON,
+    Detection,
+)
 from splitstep.detect.features import FeatureFrame, Player
 from splitstep.detect.geometry import Quad
 from splitstep.media.probe import probe
@@ -136,13 +143,34 @@ def _run_frames(cmd: Sequence[str], frame_bytes: int) -> Iterator[bytes]:
             raise RuntimeError(f"frame decode failed: {stderr.strip()}")
 
 
+def persons_as_boxes(dets: Sequence[Detection]) -> list[Box]:
+    """Today's `Box` list from a frame's detections: persons at the legacy
+    confidence only, so `build_features` and every non-fence source see
+    exactly the boxes they saw before every box was kept."""
+    return [
+        Box(cx=d.cx, cy=(d.y1 + d.y2) / 2, w=d.w, h=d.h)
+        for d in dets if d.cls == PERSON and d.conf >= LEGACY_PERSON_CONF
+    ]
+
+
 def iter_person_boxes(
     proxy: Path,
     *,
     sample_fps: int = 5,
     imgsz: int = 960,
 ) -> Iterator[list[Box]]:
-    """Decode the proxy at sample_fps and yield person boxes per frame.
+    """The legacy per-frame person boxes, as a filter over `iter_detections`."""
+    for dets in iter_detections(proxy, sample_fps=sample_fps, imgsz=imgsz):
+        yield persons_as_boxes(dets)
+
+
+def iter_detections(
+    proxy: Path,
+    *,
+    sample_fps: int = 5,
+    imgsz: int = 960,
+) -> Iterator[list[Detection]]:
+    """Decode the proxy at sample_fps and yield every person and ball box.
 
     YOLO inference itself is not unit tested here -- it is mocked everywhere
     else, and model inference in CI is slow and non-deterministic across
@@ -167,16 +195,16 @@ def iter_person_boxes(
     for raw in _run_frames(cmd, frame_bytes):
         frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
         result = model.predict(
-            frame, imgsz=imgsz, classes=[0], device=accel.torch_device,
-            verbose=False,
+            frame, imgsz=imgsz, classes=[PERSON, BALL], conf=DETECT_CONF,
+            device=accel.torch_device, verbose=False,
         )[0]
 
-        boxes: list[Box] = []
-        for x1, y1, x2, y2 in result.boxes.xyxy.tolist():
-            boxes.append(Box(
-                cx=((x1 + x2) / 2) / width,
-                cy=((y1 + y2) / 2) / height,
-                w=(x2 - x1) / width,
-                h=(y2 - y1) / height,
-            ))
-        yield boxes
+        yield [
+            Detection(int(cls), float(conf), x1 / width, y1 / height,
+                      x2 / width, y2 / height)
+            for (x1, y1, x2, y2), conf, cls in zip(
+                result.boxes.xyxy.tolist(),
+                result.boxes.conf.tolist(),
+                result.boxes.cls.tolist(),
+            )
+        ]

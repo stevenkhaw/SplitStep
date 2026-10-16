@@ -29,10 +29,11 @@ from splitstep.db.sessions import (
 )
 from splitstep.db.settings import get_color_profile, get_hr_clips_root, lock_color_profile
 from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
+from splitstep.detect.boxes import write_boxes
 from splitstep.detect.features import read_features, write_features
 from splitstep.detect.geometry import Quad
 from splitstep.detect.segment import params_for_frames, segment
-from splitstep.detect.vision import build_features, iter_person_boxes
+from splitstep.detect.vision import build_features, iter_detections, persons_as_boxes
 from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
 from splitstep.media.concat import clip_params, concat_clips
@@ -347,7 +348,14 @@ def handle_detect(library: Library, payload: dict,
             # stale. NULL where there is no preset: detection ran whole-frame
             # (DEFAULT_QUAD), which has no row to point at.
             features_preset_id = source["court_preset_id"] or None
-            boxes = list(iter_person_boxes(proxy, sample_fps=SAMPLE_FPS))
+            detections = list(iter_detections(proxy, sample_fps=SAMPLE_FPS))
+            # Every person and ball box, for every mount: later player
+            # selection reads this instead of re-running YOLO. The
+            # reuse_features branch above never reaches it, so a re-segment
+            # leaves the file from the full detect untouched.
+            write_boxes(src_dir / "boxes.jsonl",
+                        [(i * STEP_MS, d) for i, d in enumerate(detections)])
+            boxes = [persons_as_boxes(d) for d in detections]
             frames = build_features(boxes, quad, grid, STEP_MS)
             write_features(features_path, frames)
 

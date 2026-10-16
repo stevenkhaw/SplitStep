@@ -125,6 +125,51 @@ def test_detect_segments_from_cached_features(library, conn, dropped_video, monk
     assert rallies[0]["det_start_ms"] == rallies[0]["start_ms"]
 
 
+def test_detect_writes_boxes_jsonl(library, conn, dropped_video, monkeypatch):
+    from splitstep.detect.boxes import BALL, PERSON, Detection, read_boxes
+    from splitstep.detect.features import read_features
+    from splitstep.detect.vision import build_features, persons_as_boxes
+
+    handle_ingest(library, {"path": str(dropped_video)})
+    session_id = list_sessions(conn)[0]["id"]
+    source = list_sources(conn, session_id)[0]
+
+    person = Detection(PERSON, 0.8, 0.4, 0.2, 0.6, 0.9)
+    far = Detection(PERSON, 0.5, 0.45, 0.3, 0.5, 0.45)
+    faint = Detection(PERSON, 0.15, 0.0, 0.0, 0.1, 0.3)
+    ball = Detection(BALL, 0.4, 0.5, 0.5, 0.51, 0.51)
+    stream = [[person, far, faint, ball], [], [person]]
+    monkeypatch.setattr(handlers, "iter_detections", lambda *a, **k: iter(stream))
+    monkeypatch.setattr(handlers, "_audio_grid", lambda *a, **k: [])
+
+    handle_detect(library, {"source_id": source["id"]})
+
+    src_dir = library.source_dir(session_id, 1)
+    got = read_boxes(src_dir / "boxes.jsonl")
+    assert [t for t, _ in got] == [0, handlers.STEP_MS, 2 * handlers.STEP_MS]
+    assert [len(d) for _, d in got] == [4, 0, 1]
+
+    # features.jsonl is what the old person-only path built from the same persons.
+    expected = build_features(
+        [persons_as_boxes(d) for d in stream], handlers.DEFAULT_QUAD, [], handlers.STEP_MS)
+    assert read_features(src_dir / "features.jsonl") == expected
+
+
+def test_reuse_features_leaves_boxes_jsonl_alone(library, conn, dropped_video):
+    handle_ingest(library, {"path": str(dropped_video)})
+    session_id = list_sessions(conn)[0]["id"]
+    source = list_sources(conn, session_id)[0]
+    src_dir = library.source_dir(session_id, 1)
+    write_features(src_dir / "features.jsonl", [
+        FeatureFrame(i * 200, 2, Player(0.5, 0.9, 0.30, 2.5), Player(0.5, 0.4, 0.10, 2.5),
+                     hits=1, hit_reg=0.9) for i in range(40)])
+    (src_dir / "boxes.jsonl").write_text("sentinel")
+
+    handle_detect(library, {"source_id": source["id"], "reuse_features": True})
+
+    assert (src_dir / "boxes.jsonl").read_text() == "sentinel"
+
+
 # -- court presets: _quad_for -------------------------------------------------
 
 def test_quad_for_returns_default_quad_when_no_preset_is_assigned(
@@ -1020,7 +1065,7 @@ def _detect_ready_source(library, conn, dropped_video, name="IMG_4000.MOV"):
 
 
 def _detect_explodes(monkeypatch, exc: Exception):
-    """Fail at iter_person_boxes, where the real one failed.
+    """Fail at iter_detections, where the real one failed.
 
     _audio_grid is stubbed rather than left to run: the point of the test is
     the status after a raise, and a real ffmpeg audio pass on the fixture
@@ -1028,7 +1073,7 @@ def _detect_explodes(monkeypatch, exc: Exception):
     """
     monkeypatch.setattr("splitstep.jobs.handlers._audio_grid", lambda *a, **k: [])
     monkeypatch.setattr(
-        "splitstep.jobs.handlers.iter_person_boxes",
+        "splitstep.jobs.handlers.iter_detections",
         lambda *a, **k: (_ for _ in ()).throw(exc),
     )
 
