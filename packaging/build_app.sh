@@ -7,6 +7,21 @@ cd "$(dirname "$0")/.."
 PY=~/miniconda3/envs/splitstep/bin
 CARGO=~/.cargo/bin
 
+# Neither build tool comes with the repo's environment, and both were missing
+# on the first fresh Mac this ran on. Checked up front because the first one
+# to be needed is otherwise reached minutes in, after the web bundles, and the
+# second only after the twelve-minute freeze.
+if [ ! -x "$PY/pyinstaller" ]; then
+  echo "FATAL: no PyInstaller in the splitstep env. Install it with:" >&2
+  echo "       $PY/pip install -e '.[build]'" >&2
+  exit 1
+fi
+if ! "$CARGO/cargo" tauri --version >/dev/null 2>&1; then
+  echo "FATAL: no tauri-cli for $CARGO/cargo. Install it with:" >&2
+  echo "       $CARGO/cargo install tauri-cli --version '^2' --locked" >&2
+  exit 1
+fi
+
 echo "==> third-party assets"
 ./packaging/fetch_assets.sh
 

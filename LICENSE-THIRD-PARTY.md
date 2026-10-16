@@ -13,7 +13,7 @@ this repository.
 
 | Component | Version | Licence | Notes |
 |---|---|---|---|
-| FFmpeg (`ffmpeg`, `ffprobe`) | 9.0.1-tessus | **GPL-3.0-or-later** | Static macOS builds from [evermeet.cx](https://evermeet.cx/ffmpeg/), configured `--enable-gpl --enable-version3`. See the source obligation below. |
+| FFmpeg (`ffmpeg`, `ffprobe`) | 9.0.2-https://www.martin-riedl.de | **GPL-3.0-or-later** | Static arm64 macOS builds from [Martin Riedl](https://ffmpeg.martin-riedl.de/), configured `--enable-gpl --enable-version3`. See the source obligation below. |
 | Ultralytics (YOLO11) | 8.4.x | **AGPL-3.0** | The detector. This is the strongest copyleft in the tree and the reason SplitStep is AGPL. |
 | `yolo11n.pt` | — | **AGPL-3.0** | Ultralytics' pretrained weights, under the same terms as the library. |
 | PyTorch / torchvision | 2.13 / 0.28 | BSD-3-Clause, Apache-2.0 | Pulled in by Ultralytics. |
@@ -51,9 +51,12 @@ GPL-3.0 requires that anyone given the binary can get its corresponding
 source. SplitStep ships FFmpeg binaries it did not build, so the obligation is
 passed along rather than absorbed:
 
-- The exact build is `ffmpeg version 9.0.1-tessus`, published at
-  <https://evermeet.cx/ffmpeg/>, which links the source and the configure line
-  for each release.
+- The exact build is `ffmpeg version 9.0.2-https://www.martin-riedl.de`,
+  release `1789931890_9.0.2` for macOS arm64, published at
+  <https://ffmpeg.martin-riedl.de/>, which lists the configure line and the
+  library versions for each release. `packaging/fetch_assets.sh` pins it by
+  URL and SHA256. (Builds before 2026-10-16 shipped evermeet.cx's
+  `9.0.1-tessus`, x86_64; evermeet's download API has since been withdrawn.)
 - FFmpeg's own source for that version is at <https://ffmpeg.org/download.html>
   and <https://git.ffmpeg.org/ffmpeg.git>.
 

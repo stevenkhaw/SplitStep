@@ -15,15 +15,59 @@ cd "$(dirname "$0")"
 PYTHON_BIN="${PYTHON_BIN:-$HOME/miniconda3/envs/splitstep/bin/python}"
 mkdir -p vendor && cd vendor
 
-# evermeet.cx publishes static macOS builds. -display_rotation needs 7.0+;
-# make_proxy passes it on every transcode, so an older build breaks rotation
-# silently rather than loudly.
+# Martin Riedl publishes static arm64 macOS builds. The release is pinned by
+# its versioned URL and each zip by its SHA256, rather than following a
+# "latest" redirect: the previous provider's getrelease API (evermeet.cx)
+# started answering HTTP 410 one day with no warning, and an unpinned URL
+# would just as quietly have handed a different build to the next fresh Mac.
+# Bumping the release means changing all three values below together.
+# evermeet's builds were also x86_64, so the arm64-only app ran its video
+# work under Rosetta -- and on a Mac without Rosetta installed, not at all.
+#
+# -display_rotation needs 7.0+; make_proxy passes it on every transcode, so an
+# older build breaks rotation silently rather than loudly.
+RELEASE="https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2"
+sha256_for() {
+  case "$1" in
+    ffmpeg)  echo c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924 ;;
+    ffprobe) echo fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6 ;;
+  esac
+}
 for tool in ffmpeg ffprobe; do
   if [ ! -x "$tool" ]; then
     echo "fetching $tool"
-    curl -fL "https://evermeet.cx/ffmpeg/getrelease/$tool/zip" -o "$tool.zip"
-    unzip -oq "$tool.zip" && rm "$tool.zip"
+    curl -fL "$RELEASE/$tool.zip" -o "$tool.zip"
+    got=$(shasum -a 256 "$tool.zip" | cut -d' ' -f1)
+    if [ "$got" != "$(sha256_for "$tool")" ]; then
+      echo "FATAL: $tool.zip sha256 is $got, expected $(sha256_for "$tool")" >&2
+      rm -f "$tool.zip"
+      exit 1
+    fi
+    unzip -oq "$tool.zip" "$tool" && rm "$tool.zip"
     chmod +x "$tool"
+  fi
+done
+
+# Checked every run, not only after a fetch, because a binary already sitting
+# in vendor/ is exactly how the x86_64 copies survived onto a new machine.
+# Two ways a binary can be wrong and still run on the build Mac:
+#  - not arm64: it works under Rosetta, so nothing here notices, and the app
+#    then fails on any Mac that never installed it;
+#  - linked against anything outside the OS (a Homebrew dylib, say): it works
+#    wherever that dylib happens to exist, which is this machine and nowhere
+#    the .dmg is going.
+for tool in ffmpeg ffprobe; do
+  archs=$(lipo -archs "$tool")
+  if [ "$archs" != "arm64" ]; then
+    echo "FATAL: vendor/$tool is '$archs', not arm64 -- delete it and re-run" >&2
+    exit 1
+  fi
+  foreign=$(otool -L "$tool" | tail -n +2 | awk '{print $1}' \
+    | grep -v -e '^/usr/lib/' -e '^/System/' || true)
+  if [ -n "$foreign" ]; then
+    echo "FATAL: vendor/$tool links libraries outside the OS:" >&2
+    echo "$foreign" | sed 's/^/       /' >&2
+    exit 1
   fi
 done
 

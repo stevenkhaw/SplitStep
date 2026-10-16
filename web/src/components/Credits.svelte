@@ -3,7 +3,7 @@
 </script>
 
 <!-- Two licence obligations ship with the app: Ultralytics is AGPL-3.0 and
-     the evermeet.cx ffmpeg builds are GPL. The public repository satisfies
+     the bundled ffmpeg builds (Martin Riedl's) are GPL. The public repository satisfies
      the source obligation; this names them somewhere a user can find them,
      which is the part a repo link alone does not do. -->
 <div class="mt-3 border-t border-line pt-3">

@@ -105,6 +105,14 @@ Tauri v2 shell and `packaging/` freezes `splitstep serve` with PyInstaller;
 the window loads `http://127.0.0.1:<port>`, so the UI is still served by
 Python and `/media` range requests behave identically to the browser tier.
 
+Two build tools ship with neither the conda env nor the repo; install them
+once per Mac (`build_app.sh` stops with this hint if either is missing):
+
+```bash
+~/miniconda3/envs/splitstep/bin/pip install -e '.[build]'          # PyInstaller 6.22.2
+~/.cargo/bin/cargo install tauri-cli --version "^2" --locked     # cargo tauri
+```
+
 ```bash
 ./packaging/build_app.sh                       # assets -> web -> icon -> freeze -> .dmg
 cd src-tauri && ~/.cargo/bin/cargo test        # the shell's own tests
@@ -119,7 +127,11 @@ silent failure already shipped once: the freeze must contain as many `.sql`
 migrations as the source tree, it must contain the overlay font, and every
 Rust source must be older than the built executable.
 
-The output is `SplitStep_<version>_aarch64.dmg`. **Apple Silicon only**;
+The output is
+`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/SplitStep_<version>_aarch64.dmg`.
+The bundled ffmpeg/ffprobe are static arm64 builds from
+[Martin Riedl](https://ffmpeg.martin-riedl.de/), fetched by
+`packaging/fetch_assets.sh` at a pinned release and checked against its SHA256. **Apple Silicon only**;
 Intel Macs are not supported. The bundle is ad-hoc signed
 (`bundle.macOS.signingIdentity: "-"`), not notarized, so macOS blocks the
 first launch and the way through is System Settings → Privacy & Security →

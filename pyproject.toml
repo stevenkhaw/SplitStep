@@ -26,6 +26,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
+# Only packaging/build_app.sh needs this. Pinned exactly, to the version in
+# packaging/requirements-frozen.txt, because a freeze is the artifact a friend
+# runs and a PyInstaller minor has changed what its hooks collect before.
+# tauri-cli is the other build tool and is not a Python package -- see the
+# Mac app section of README.md.
+build = ["pyinstaller==6.22.2"]
 
 [project.scripts]
 splitstep = "splitstep.cli:main"

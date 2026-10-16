@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 921 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 1147 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -50,9 +50,13 @@ UI iteration wants two terminals — `splitstep serve` for API/media, `npm run d
 for Vite on :5173 (it proxies `/api` and `/media` to :8420). Anything else:
 `npm run build` once, then `serve` alone.
 
-The Mac app (`cargo` lives at `~/.cargo/bin`, not on the default PATH):
+The Mac app (`cargo` lives at `~/.cargo/bin`, not on the default PATH). Its
+two build tools come with neither the conda env nor the repo, so a fresh Mac
+installs them once; `build_app.sh` refuses to start without either:
 
 ```bash
+~/miniconda3/envs/splitstep/bin/pip install -e '.[build]'          # PyInstaller 6.22.2
+~/.cargo/bin/cargo install tauri-cli --version "^2" --locked     # cargo tauri
 ./packaging/build_app.sh          # assets -> web -> icon -> freeze -> .dmg (~12 min, ~10 GB)
 cd src-tauri && ~/.cargo/bin/cargo test        # the shell's own tests
 cd src-tauri && ~/.cargo/bin/cargo tauri dev   # shell + launcher, no freeze needed
@@ -63,7 +67,15 @@ guards, each standing where a silent failure already shipped once: the freeze
 must contain as many `.sql` migrations as the source tree, it must contain the
 overlay font, and every Rust source must be older than the built executable.
 Bundling needs ~2.5 GB of headroom beyond the output or `bundle_dmg.sh` fails
-with an unhelpful error.
+with an unhelpful error. The `.dmg` lands in
+`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`.
+
+`packaging/fetch_assets.sh` fetches the bundled ffmpeg/ffprobe — Martin
+Riedl's static arm64 builds, pinned by versioned URL and SHA256 — and fails if
+either binary in `packaging/vendor/` is not arm64 or links anything outside
+`/usr/lib` and `/System`. That check runs on every build, not only after a
+fetch: x86_64 copies already sitting in `vendor/` run fine under Rosetta on
+the build Mac and are exactly how the app once depended on it.
 
 `pytest` runs with `filterwarnings = ["error"]`; a new warning fails the suite.
 ruff line-length is 100. ffmpeg must be on PATH. YOLO is never run in tests —
@@ -527,9 +539,12 @@ four had to be retargeted during the migration and would again.
 - **The clip profile pins colour, and `make_clip` refuses a source that
   disagrees.** `tv / bt2020nc / arib-std-b67 / bt2020` — HLG, what an iPhone
   records and what every existing clip carries. Strict equality, untagged
-  included, and no override: this ffmpeg has neither libzimg nor libplacebo,
-  so there is no correct tonemap in either direction and a relabel would make
-  a file look right while being wrong. `probe.color_tag` is the one place
+  included, and no override. Homebrew's ffmpeg (9.0.2, what the CLI and the
+  tests run) has neither libzimg nor libplacebo, so there is no correct
+  tonemap there in either direction, and a relabel would make a file look
+  right while being wrong. The app's bundled build does carry libzimg, but a
+  conversion only one of the two ffmpegs can perform would cut one span to
+  different pixels depending on which machine cut it. `probe.color_tag` is the one place
   ffprobe's two spellings of "missing" collapse to `None`, and `concat`'s
   pre-flight shares it so the two layers cannot disagree. Synthetic test
   sources must be tagged via the `hlg_setparams` fixture — with a lavfi input
@@ -745,8 +760,9 @@ plus `/reels/:slug` build and preview them. 4K clip export shipped —
 `splitstep clips export`, the `clip` handler, and `clips_dir` are live.
 Numbered renders shipped too: a reel can render with a burned-in "3/20"
 counter and a per-item note (migration 012), composited as a PIL-rendered
-PNG via ffmpeg's `overlay` — never `drawtext`, which this ffmpeg build
-lacks — into per-clip intermediates at the library's locked colour profile,
+PNG via ffmpeg's `overlay` — never `drawtext`, which Homebrew's ffmpeg
+lacks (the bundled build has it, but the CLI and the app must burn the same
+frame, and `overlay` exists in both) — into per-clip intermediates at the library's locked colour profile,
 which the existing guarded concat then joins; the plain render is untouched
 and stays the fast default.
 

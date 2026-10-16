@@ -271,9 +271,12 @@ def clip_frame(width: int, height: int, sar: float = 1.0, rotation_deg: int = 0)
 # no error anywhere.
 #
 # Pinned to what the library already contains rather than converted to
-# anything: this ffmpeg has neither libzimg nor libplacebo, so no correct
-# tonemap exists here in either direction, and writing bt709 tags onto HLG
-# pixels would make the file look right while being wrong. A source that
+# anything: Homebrew's ffmpeg (what the CLI and the tests run) has neither
+# libzimg nor libplacebo, so no correct tonemap exists there in either
+# direction, and writing bt709 tags onto HLG pixels would make the file look
+# right while being wrong. The ffmpeg bundled into the app since 9.0.2 does
+# carry libzimg, but a conversion only one of the two could perform would cut
+# the same span to different pixels depending on which machine cut it. A source that
 # does not match is refused instead -- see _require_locked_color.
 CLIP_COLOR_RANGE = "tv"
 CLIP_COLOR_SPACE = "bt2020nc"
@@ -296,10 +299,12 @@ def _require_locked_color(
     be a relabel without a conversion, which produces a file that looks
     correct while being wrong. Harder to find later than an honest mismatch.
 
-    Refused rather than converted because this ffmpeg cannot convert:
+    Refused rather than converted because Homebrew's ffmpeg cannot convert:
     measured on 9.0.1 with neither libzimg nor libplacebo, `zscale` is
     absent so no linear-light stage exists to feed `tonemap`, and the
-    built-in `colorspace` filter takes HLG neither in nor out. There is
+    built-in `colorspace` filter takes HLG neither in nor out. Still true of
+    Homebrew's 9.0.2; the app's bundled build has `zscale`, but a clip must
+    come out the same whichever of the two cut it. There is
     deliberately no override -- an override is a way to write a permanently
     wrong clip, and the clip is the artifact that has to stay
     concat-compatible for years.
