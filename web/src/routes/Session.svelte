@@ -434,7 +434,13 @@
     <QuadEditor
       sessionId={id}
       sources={readySources}
+      rallies={detail.rallies}
       onassigned={() => api.getSession(id).then((d) => (detail = d))}
+      onresegmented={() =>
+        api.getSession(id).then((d) => {
+          detail = d
+          rallyRevision += 1
+        })}
     />
   {/if}
 

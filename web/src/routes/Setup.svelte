@@ -114,6 +114,10 @@
 
   function rotate(dir: 1 | -1) {
     rotation = (rotation + dir * 90 + 360) % 360
+    // Corners placed on the old frame would stay in that frame: they still
+    // pass the server's order check, then map every player to the wrong
+    // half of the court. Back to unplaced, so Start waits for a redraw.
+    corners = null
   }
 
   function seek(ms: number) {

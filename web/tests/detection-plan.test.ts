@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   NO_CURVE_NOTE,
+  choicesFollowUp,
   cutAtPhrase,
   detectionActionLabel,
   detectionActionNote,
@@ -477,5 +478,35 @@ describe('planDetection: a changed mount, format or court', () => {
   it('names fence mode, not a region, in the re-detect confirm', () => {
     expect(redetectConfirmMessage('fence')).toContain('for fence mode')
     expect(redetectConfirmMessage()).toContain('with the new play region')
+  })
+})
+
+describe('choicesFollowUp', () => {
+  it('offers the fence re-cut after corners are saved over cached boxes', () => {
+    const plan = choicesFollowUp(
+      detected({ scorer_now: 'fence', detected_scorer: null, has_boxes: true }),
+    )
+    expect(plan.action).toBe('resegment')
+    expect(plan.scorerSwitch).toBe('fence')
+  })
+
+  it('offers the priced full run when fence has no boxes to re-score', () => {
+    const plan = choicesFollowUp(
+      detected({ scorer_now: 'fence', detected_scorer: 'pair', has_boxes: false }),
+    )
+    expect(plan.action).toBe('redetect')
+  })
+
+  it('never plans a threshold re-cut -- this editor has no slider', () => {
+    // segment_threshold null would make planDetection fail open on any draft
+    // threshold; with none, an unchanged scorer owes nothing.
+    expect(choicesFollowUp(detected({ segment_threshold: null })).action).toBe('none')
+    expect(
+      choicesFollowUp(detected({ scorer_now: 'fence', detected_scorer: 'fence' })).action,
+    ).toBe('none')
+  })
+
+  it('is nothing for no source', () => {
+    expect(choicesFollowUp(undefined).action).toBe('none')
   })
 })

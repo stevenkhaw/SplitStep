@@ -3,7 +3,15 @@
   import { untrack } from 'svelte'
   import { api } from '../lib/api'
   import { CORNER_LABELS, DEFAULT_CORNER_POINTS, needsCorners, parseCorners } from '../lib/mount'
-  import { redetectConfirmMessage } from '../lib/resegment'
+  import {
+    choicesFollowUp,
+    detectionActionLabel,
+    detectionActionNote,
+    editedBoundaryCount,
+    redetectConfirmMessage,
+    resegmentConfirmMessage,
+    splitCount,
+  } from '../lib/resegment'
   import {
     DEFAULT_QUAD_POINTS,
     assignedPresetLabel,
@@ -12,7 +20,7 @@
     defaultPresetName,
   } from '../lib/quad'
   import { DEFAULT_SCRUB_MS, clamp, formatTs, lastSafeFrameMs } from '../lib/time'
-  import type { Mount, PlayFormat, Preset, Source } from '../lib/types'
+  import type { Mount, PlayFormat, Preset, Rally, Source } from '../lib/types'
   import MountFormatPicker from './MountFormatPicker.svelte'
   import QuadCanvas from './QuadCanvas.svelte'
 
@@ -20,9 +28,15 @@
     sessionId: string
     sources: Source[]
     onassigned: () => void
+    // For the re-run offered after a mount/format/corners save: the rallies
+    // name what a re-cut discards, and `onresegmented` lets the session
+    // remount the modes over the new rallies, exactly as DetectionPanel's
+    // own re-cut does. Optional so a caller with no rallies still renders.
+    rallies?: Rally[]
+    onresegmented?: () => void
   }
 
-  let { sessionId, sources, onassigned }: Props = $props()
+  let { sessionId, sources, onassigned, rallies = [], onresegmented }: Props = $props()
 
   // A one-time snapshot, not a reactive read -- same reasoning as
   // DetectionPanel's threshold seed: this panel owns which source it is
@@ -82,6 +96,13 @@
   const cornersMode = $derived(needsCorners(mount, format))
   // Only meaningful outside corners mode, where the region editor below
   // owns the main button and the answers need a Save of their own.
+  // True after a mount/format/corners save, until the offered run is taken
+  // or the source switched. The action itself is read from the source as
+  // the session refetches it, so the card appears once the server says
+  // what is owed -- not from a guess made before the save landed.
+  let offerChoicesRun = $state(false)
+  const followUp = $derived(choicesFollowUp(source))
+
   const choicesDirty = $derived(
     !!source && (mount !== (source.mount ?? '') || format !== (source.play_format ?? '')),
   )
@@ -132,6 +153,7 @@
     status = null
     error = null
     offerDetect = false
+    offerChoicesRun = false
     mount = next?.mount ?? ''
     format = next?.play_format ?? ''
     corners = parseCorners(next?.court_corners)
@@ -213,12 +235,50 @@
         // must not throw away corners it may want back.
         ...(cornersMode && corners ? { court_corners: corners } : {}),
       })
-      // No re-run offered here, unlike a region assignment: what the change
-      // costs depends on what is cached (a fence re-cut from saved boxes is
-      // instant, without them it is the full run), and the Detection panel
-      // is the one place that prices it.
-      status = `Saved. The Detection panel for source ${source.idx} shows what the rallies need now.`
+      // The re-run is offered right here, in both app modes: DetectionPanel
+      // is dev-only, so pointing at it told a friend-mode reviewer to look
+      // at nothing. What it costs (a fence re-cut from saved boxes is
+      // instant, without them the full run) is `followUp`'s call, read off
+      // the refetched source.
+      status = 'Saved.'
+      offerChoicesRun = true
       onassigned()
+    } catch (e) {
+      error = e
+    } finally {
+      busy = false
+    }
+  }
+
+  /** The action `followUp` plans, behind the same confirms DetectionPanel
+   *  uses -- both name what is lost, because both cost the hand edits. */
+  async function runFollowUp() {
+    if (!source || busy || followUp.action === 'none') return
+    const plan = followUp
+    if (plan.action === 'redetect') {
+      const why = plan.scorerSwitch === 'fence' && !plan.regionChanged ? 'fence' : 'region'
+      if (!window.confirm(redetectConfirmMessage(why))) return
+    } else {
+      // Always asked, even with nothing hand-edited: unlike the panel there
+      // is no loss warning on screen here, so the dialog is the only place
+      // the cost is stated.
+      const edited = editedBoundaryCount(rallies, source.id)
+      const splits = splitCount(rallies, source.id)
+      if (!window.confirm(resegmentConfirmMessage(edited, splits))) return
+    }
+    busy = true
+    error = null
+    try {
+      if (plan.action === 'redetect') {
+        // No threshold: the scorer resolves its own (see choicesFollowUp).
+        await api.detectSource(source.id)
+        status = 'Detection queued — the jobs badge above tracks it.'
+      } else {
+        const res = await api.resegment(source.id)
+        status = `Re-cut: ${res.count ?? 0} rallies.`
+        ;(onresegmented ?? onassigned)()
+      }
+      offerChoicesRun = false
     } catch (e) {
       error = e
     } finally {
@@ -294,6 +354,24 @@
             </button>
           {/if}
         </div>
+
+        <!-- The re-run a mount/format/corners save made necessary, in the
+             same filled card as "Run detection with this region" below and
+             for the same reason: as a sentence pointing elsewhere it was
+             missed, and here the elsewhere did not exist in friend mode. -->
+        {#if offerChoicesRun && followUp.action !== 'none'}
+          <div data-role="choices-follow-up" class="mt-3 rounded-lg border border-line bg-surface-2 p-3">
+            <p class="text-body text-fg">{detectionActionNote(followUp)}</p>
+            <button
+              class="mt-3 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
+                     hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+              onclick={runFollowUp}
+              disabled={busy}
+            >
+              {busy ? 'working…' : detectionActionLabel(followUp.action, followUp.scorerSwitch)}
+            </button>
+          </div>
+        {/if}
       {/if}
 
       {#if source && cornersMode}

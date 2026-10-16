@@ -334,5 +334,19 @@ describe('Setup wizard', () => {
         expect(y).toBeLessThanOrEqual(1)
       }
     })
+
+    it('forgets placed corners when the frame is rotated under them', async () => {
+      // Corners in the old frame still pass the server's order check and
+      // then mis-map every player, so a rotation sends Start back to waiting.
+      mockApi.setupDefaults.mockResolvedValue({ mount: 'fence', play_format: 'singles' })
+      await open()
+      const start = () =>
+        target.querySelector('button[aria-label="start detection"]') as HTMLButtonElement
+      dragFirstCorner('near-left corner')
+      expect(start().disabled).toBe(false)
+      click('rotate clockwise')
+      expect(start().disabled).toBe(true)
+    })
   })
 })
+

@@ -498,3 +498,21 @@ export const NO_CURVE_NOTE =
   'No score curve yet — this video has not been detected. The threshold scale ' +
   'depends on the camera profile detection works out from the features, so the ' +
   'first run picks it.'
+
+/**
+ * What a source owes after its mount, format or corners were saved from the
+ * session page's corners editor -- the plan QuadEditor offers in place, in
+ * both app modes.
+ *
+ * QuadEditor has to answer this itself because DetectionPanel is dev-only:
+ * pointing a friend-mode reviewer at it pointed them at nothing, with no
+ * way to start the re-run they had just made necessary. It is
+ * `planDetection` with no draft threshold, deliberately: this editor has no
+ * slider, and a scorer switch must be cut at the new scorer's own threshold
+ * anyway (the recorded one is on the old scale). With no draft threshold a
+ * threshold change can never be planned, so what remains is exactly the
+ * switch and the region -- the two things a save here can owe.
+ */
+export function choicesFollowUp(source: Source | undefined): DetectionPlan {
+  return planDetection(source, { region: source?.court_preset_points, threshold: null })
+}

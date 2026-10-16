@@ -10,6 +10,7 @@ const mockApi = {
   setChoices: vi.fn(),
   setup: vi.fn(),
   detectSource: vi.fn(),
+  resegment: vi.fn(),
   frameUrl: () => 'about:blank',
 }
 
@@ -67,6 +68,8 @@ describe('QuadEditor on a processed fence source', () => {
     vi.clearAllMocks()
     mockApi.listPresets.mockResolvedValue([])
     mockApi.setChoices.mockResolvedValue({ ok: true })
+    mockApi.resegment.mockResolvedValue({ count: 12 })
+    mockApi.detectSource.mockResolvedValue({ job_id: 'j1', already_running: false })
     target = document.createElement('div')
     document.body.appendChild(target)
     rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(FAKE_RECT)
@@ -80,10 +83,13 @@ describe('QuadEditor on a processed fence source', () => {
     instance = undefined
   })
 
+  let onresegmented: ReturnType<typeof vi.fn>
+
   function open(s: Source = source()) {
+    onresegmented = vi.fn()
     instance = mount(QuadEditor, {
       target,
-      props: { sessionId: 's1', sources: [s], onassigned },
+      props: { sessionId: 's1', sources: [s], onassigned, onresegmented, rallies: [] },
     })
     flushSync()
     const details = target.querySelector('details')
@@ -166,5 +172,60 @@ describe('QuadEditor on a processed fence source', () => {
     button('Save')!.click()
     await settle()
     expect(mockApi.setChoices).toHaveBeenCalledWith('src1', { mount: 'ground', play_format: 'singles' })
+  })
+
+  // -- the re-run, offered here because DetectionPanel is dev-only -----------
+
+  const STORED = '[[0.1,0.9],[0.9,0.9],[0.7,0.4],[0.3,0.4]]'
+  /** What the session hands back after the save: fence wanted, not yet cut. */
+  const owed = (has_boxes: boolean) =>
+    source({
+      mount: 'fence', play_format: 'singles', court_corners: STORED,
+      scorer_now: 'fence', detected_scorer: null, has_boxes,
+    })
+
+  it('offers the fence re-cut after Save corners and runs it behind a confirm', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    open(owed(true))
+    expect(target.querySelector('[data-role="choices-follow-up"]')).toBeNull()
+    button('Save corners')!.click()
+    await settle()
+    // Never a pointer to a panel friend mode does not render.
+    expect(target.textContent).not.toMatch(/Detection panel/)
+    const run = button('Re-segment with fence mode · instant')
+    expect(run).not.toBeNull()
+    run!.click()
+    await settle()
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/Re-segmenting discards/)
+    expect(mockApi.resegment).toHaveBeenCalledWith('src1')
+    expect(onresegmented).toHaveBeenCalledTimes(1)
+    expect(target.querySelector('[data-role="choices-follow-up"]')).toBeNull()
+    confirmSpy.mockRestore()
+  })
+
+  it('prices the full run when there are no boxes, and stops on a declined confirm', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    open(owed(false))
+    button('Save corners')!.click()
+    await settle()
+    button('Run detection · ~15 min')!.click()
+    await settle()
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/for fence mode/)
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/manual boundary edits/)
+    expect(mockApi.detectSource).not.toHaveBeenCalled()
+
+    confirmSpy.mockReturnValue(true)
+    button('Run detection · ~15 min')!.click()
+    await settle()
+    expect(mockApi.detectSource).toHaveBeenCalledWith('src1')
+    confirmSpy.mockRestore()
+  })
+
+  it('offers nothing when the save owes nothing', async () => {
+    open(source({ mount: 'fence', play_format: 'singles', court_corners: STORED,
+                  scorer_now: 'fence', detected_scorer: 'fence', has_boxes: true }))
+    button('Save corners')!.click()
+    await settle()
+    expect(target.querySelector('[data-role="choices-follow-up"]')).toBeNull()
   })
 })
