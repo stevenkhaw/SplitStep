@@ -186,12 +186,36 @@ def cmd_config_set_library(args) -> int:
     return 0
 
 
+def _parse_corners(text: str) -> list[list[float]]:
+    """`x,y;x,y;x,y;x,y` -> points. Shape only; validate_corners judges them."""
+    try:
+        return [[float(c) for c in pair.split(",")] for pair in text.split(";")]
+    except ValueError as exc:
+        raise ValueError(
+            "corners look like x,y;x,y;x,y;x,y (near-left, near-right, far-right, far-left)"
+        ) from exc
+
+
 def cmd_setup(args) -> int:
     lib = _library(args)
     conn = connect(lib.db_path)
     migrate(conn)
+    # An omitted flag keeps what the source has; only a given one writes.
+    choices: dict = {}
+    if args.mount is not None:
+        choices["mount"] = args.mount
+    if args.format is not None:
+        choices["play_format"] = args.format
+    if args.corners is not None:
+        try:
+            choices["court_corners"] = _parse_corners(args.corners)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     preset_id = args.preset
-    if preset_id is None:
+    if preset_id is None and "court_corners" in choices:
+        pass  # queue_setup derives the play region from the corners
+    elif preset_id is None:
         # Fetch the source to check both existence and assigned preset.
         # Distinguish missing source from source-exists-but-no-preset so we
         # report the right problem to the user.
@@ -213,7 +237,7 @@ def cmd_setup(args) -> int:
     # exit non-zero forever.
     since = datetime.now(UTC).isoformat()
     try:
-        job_id = queue_setup(conn, args.source_id, args.rotation, preset_id)
+        job_id = queue_setup(conn, args.source_id, args.rotation, preset_id, **choices)
     except (ValueError, LookupError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -950,6 +974,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("source_id")
     p.add_argument("--rotation", type=int, required=True, help="0, 90, 180 or 270 (clockwise)")
     p.add_argument("--preset", help="court preset id; defaults to the one already assigned")
+    p.add_argument("--mount", choices=["", "fence", "ground"],
+                   help="camera mount; '' clears it, omitted keeps it")
+    p.add_argument("--format", choices=["", "singles", "doubles", "drills"],
+                   help="play format; '' clears it, omitted keeps it")
+    p.add_argument("--corners", help="court corners x,y;x,y;x,y;x,y in proxy space "
+                   "(near-left, near-right, far-right, far-left)")
     p.add_argument("--now", action="store_true", help="run the jobs inline instead of queueing")
     p.set_defaults(func=cmd_setup)
 

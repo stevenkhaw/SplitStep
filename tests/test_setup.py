@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from splitstep.db.presets import create_preset
@@ -113,3 +115,110 @@ def test_queue_setup_unknown_preset_leaves_source_unchanged_and_queues_nothing(c
     assert row["court_preset_id"] == original_preset
     new_job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     assert new_job_count == original_job_count
+
+
+# -- mount, format and court corners ----------------------------------------
+
+CORNERS = [(0.2, 0.6), (0.9, 0.6), (0.6, 0.45), (0.45, 0.45)]
+CROSSED = [(0.9, 0.6), (0.2, 0.6), (0.6, 0.45), (0.45, 0.45)]
+FENCE_SENTENCE = "Fence + Singles needs the four court corners — draw them on the court lines."
+
+
+def _jobs(conn):
+    return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+
+def test_queue_setup_refuses_fence_singles_without_corners(conn):
+    source_id, preset_id = _source(conn), _preset(conn)
+    with pytest.raises(ValueError) as exc:
+        queue_setup(conn, source_id, 90, preset_id, mount="fence", play_format="singles")
+    assert str(exc.value) == FENCE_SENTENCE
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] != 90 and row["mount"] == "" and row["court_preset_id"] is None
+    assert _jobs(conn) == 0
+
+
+def test_queue_setup_refuses_crossed_corners(conn):
+    from splitstep.detect.court import validate_corners
+
+    source_id, preset_id = _source(conn), _preset(conn)
+    with pytest.raises(ValueError) as exc:
+        validate_corners(CROSSED)
+    sentence = str(exc.value)
+    with pytest.raises(ValueError) as got:
+        queue_setup(conn, source_id, 0, preset_id, mount="fence", play_format="singles",
+                    court_corners=CROSSED)
+    assert str(got.value) == sentence
+    assert _jobs(conn) == 0
+
+
+def test_queue_setup_stores_choices_and_enqueues(conn):
+    source_id, preset_id = _source(conn), _preset(conn)
+    job_id = queue_setup(conn, source_id, 0, preset_id, mount="fence", play_format="singles",
+                         court_corners=CORNERS)
+    row = get_source(conn, source_id)
+    assert (row["mount"], row["play_format"]) == ("fence", "singles")
+    assert json.loads(row["court_corners"]) == [list(p) for p in CORNERS]
+    assert conn.execute("SELECT type FROM jobs WHERE id=?", (job_id,)).fetchone()[0] == (
+        "build_proxy")
+
+
+def test_queue_setup_keeps_stored_choices_when_omitted(conn):
+    source_id, preset_id = _source(conn), _preset(conn)
+    queue_setup(conn, source_id, 0, preset_id, mount="fence", play_format="singles",
+                court_corners=CORNERS)
+    queue_setup(conn, source_id, 180, preset_id)
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == 180
+    assert (row["mount"], row["play_format"]) == ("fence", "singles")
+    assert row["court_corners"] is not None
+    # An explicit '' does write.
+    queue_setup(conn, source_id, 180, preset_id, mount="", play_format="", court_corners=None)
+    row = get_source(conn, source_id)
+    assert (row["mount"], row["play_format"], row["court_corners"]) == ("", "", None)
+
+
+def test_queue_setup_derives_the_region_from_corners(conn):
+    from splitstep.db.presets import get_preset
+
+    source_id = _source(conn)
+    queue_setup(conn, source_id, 0, None, mount="fence", play_format="doubles",
+                court_corners=CORNERS)
+    preset = get_preset(conn, get_source(conn, source_id)["court_preset_id"])
+    pts = json.loads(preset["quad"])
+    assert any(not (0.0 <= c <= 1.0) for p in pts for c in p)
+
+
+def test_queue_setup_without_preset_or_corners_is_refused(conn):
+    with pytest.raises(ValueError):
+        queue_setup(conn, _source(conn), 0, None)
+
+
+def test_apply_choices_writes_without_a_job_or_preset(conn):
+    from splitstep.setup import apply_choices
+
+    source_id, preset_id = _source(conn, "ready"), _preset(conn)
+    queue_setup(conn, source_id, 0, preset_id)
+    set_source_status(conn, source_id, "ready")
+    before = _jobs(conn)
+    apply_choices(conn, source_id, mount="fence", play_format="singles", court_corners=CORNERS)
+    row = get_source(conn, source_id)
+    assert row["mount"] == "fence" and row["court_preset_id"] == preset_id
+    assert _jobs(conn) == before
+    # Format alone, judged against the stored corners.
+    apply_choices(conn, source_id, play_format="doubles")
+    assert get_source(conn, source_id)["court_corners"] is not None
+
+
+def test_apply_choices_refuses_fence_singles_without_corners_and_a_busy_source(conn):
+    from splitstep.setup import apply_choices
+
+    source_id = _source(conn, "ready")
+    with pytest.raises(ValueError) as exc:
+        apply_choices(conn, source_id, mount="fence", play_format="singles")
+    assert str(exc.value) == FENCE_SENTENCE
+    set_source_status(conn, source_id, "detecting")
+    with pytest.raises(RuntimeError):
+        apply_choices(conn, source_id, mount="ground")
+    with pytest.raises(LookupError):
+        apply_choices(conn, "nope")

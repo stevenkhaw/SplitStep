@@ -1117,3 +1117,71 @@ def test_source_json_reports_boxes_and_the_scorer_its_choices_select(
 
     _fence_source(library, conn, seeded, boxes=True)
     assert client.get(f"/api/sources/{seeded['source_id']}").json()["has_boxes"] is True
+
+
+_FENCE_CORNERS = [[0.2, 0.6], [0.9, 0.6], [0.6, 0.45], [0.45, 0.45]]
+_FENCE_SENTENCE = "Fence + Singles needs the four court corners — draw them on the court lines."
+
+
+def test_setup_accepts_choices_and_derives_a_region(client, registered_source):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "mount": "fence", "play_format": "singles",
+              "court_corners": _FENCE_CORNERS},
+    )
+    assert r.status_code == 200
+    src = client.get(f"/api/sources/{registered_source.id}").json()
+    assert src["mount"] == "fence" and src["court_preset_id"]
+
+
+def test_setup_refuses_fence_singles_without_corners(client, registered_source, a_preset):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": a_preset, "mount": "fence",
+              "play_format": "singles"},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == _FENCE_SENTENCE
+
+
+def test_setup_refuses_crossed_corners(client, registered_source, a_preset):
+    crossed = [_FENCE_CORNERS[1], _FENCE_CORNERS[0], *_FENCE_CORNERS[2:]]
+    r = client.post(
+        f"/api/sources/{registered_source.id}/setup",
+        json={"rotation_deg": 0, "preset_id": a_preset, "mount": "fence",
+              "play_format": "singles", "court_corners": crossed},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]
+
+
+def test_setup_defaults_route(client, registered_source, conn):
+    assert client.get("/api/setup-defaults").json() == {"mount": "", "play_format": ""}
+    conn.execute("UPDATE sources SET mount='ground', play_format='drills' WHERE id=?",
+                 (registered_source.id,))
+    conn.commit()
+    assert client.get("/api/setup-defaults").json() == {"mount": "ground",
+                                                        "play_format": "drills"}
+
+
+def test_choices_route_writes_without_a_job(client, registered_source, conn):
+    r = client.post(
+        f"/api/sources/{registered_source.id}/choices",
+        json={"mount": "fence", "play_format": "singles", "court_corners": _FENCE_CORNERS},
+    )
+    assert r.status_code == 200
+    row = conn.execute("SELECT * FROM sources WHERE id=?", (registered_source.id,)).fetchone()
+    assert row["mount"] == "fence" and row["court_preset_id"] is None
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    # Omitted keys keep; a null for corners clears (and then fence+singles is refused).
+    r = client.post(f"/api/sources/{registered_source.id}/choices",
+                    json={"court_corners": None})
+    assert r.status_code == 400 and r.json()["detail"] == _FENCE_SENTENCE
+
+
+def test_choices_route_maps_404_and_409(client, registered_source, conn):
+    assert client.post("/api/sources/nope/choices", json={}).status_code == 404
+    conn.execute("UPDATE sources SET status='detecting' WHERE id=?", (registered_source.id,))
+    conn.commit()
+    r = client.post(f"/api/sources/{registered_source.id}/choices", json={"mount": "ground"})
+    assert r.status_code == 409

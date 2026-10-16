@@ -1171,11 +1171,8 @@ def test_detect_records_scorer(library, conn, ground_features):
     assert row["segment_threshold"] == 0.25
 
 
-def test_detect_fails_a_fence_source_without_boxes_with_a_sentence(
-    library, conn, ground_features
-):
+def _fence_source(conn, library, corners, ground_features):
     from splitstep.db.sessions import set_source_setup
-    from splitstep.detect.scorer import FenceUnavailable
 
     session_id = find_or_create_session_for_date(conn, "2026-08-18")
     source_id, idx = add_source(
@@ -1183,10 +1180,47 @@ def test_detect_fails_a_fence_source_without_boxes_with_a_sentence(
         width=1920, height=1080, fps=30.0, original_name="IMG_2373.MOV",
     )
     set_source_setup(conn, source_id, 0, None, mount="fence", play_format="singles",
-                     court_corners=[(0.2, 0.6), (0.9, 0.6), (0.6, 0.45), (0.45, 0.45)])
-    write_features(library.source_dir(session_id, idx) / "features.jsonl", ground_features)
+                     court_corners=corners)
+    src_dir = library.source_dir(session_id, idx)
+    write_features(src_dir / "features.jsonl", ground_features)
+    return source_id, src_dir
 
-    with pytest.raises(FenceUnavailable, match="re-run detection to use fence mode"):
-        HANDLERS["detect"](library, {"source_id": source_id, "reuse_features": True})
-    assert get_source(conn, source_id)["status"] == "failed"
-    assert get_source(conn, source_id)["detected_scorer"] is None
+
+def test_detect_without_corners_refuses_a_fence_source_before_any_work(
+    library, conn, ground_features, monkeypatch
+):
+    from splitstep.detect.scorer import FenceUnavailable
+
+    source_id, src_dir = _fence_source(conn, library, None, ground_features)
+    conn.execute("UPDATE sources SET status='ready' WHERE id=?", (source_id,))
+    conn.commit()
+    before = (src_dir / "features.jsonl").read_bytes()
+
+    def boom(*a, **k):
+        raise AssertionError("YOLO must not start")
+
+    monkeypatch.setattr(handlers, "iter_detections", boom)
+    with pytest.raises(FenceUnavailable, match="court corners"):
+        HANDLERS["detect"](library, {"source_id": source_id})
+    assert (src_dir / "features.jsonl").read_bytes() == before
+    assert get_source(conn, source_id)["status"] == "ready"
+
+
+def test_detect_ignores_reuse_for_a_fence_source_without_boxes(
+    library, conn, ground_features, monkeypatch
+):
+    from splitstep.detect.boxes import PERSON, Detection
+
+    corners = [(0.2, 0.6), (0.9, 0.6), (0.6, 0.45), (0.45, 0.45)]
+    source_id, src_dir = _fence_source(conn, library, corners, ground_features)
+    person = Detection(PERSON, 0.8, 0.4, 0.2, 0.6, 0.9)
+    monkeypatch.setattr(handlers, "iter_detections", lambda *a, **k: iter([[person]] * 3))
+    monkeypatch.setattr(handlers, "_audio_grid", lambda *a, **k: [])
+    monkeypatch.setattr(handlers, "_audio_source", lambda *a, **k: src_dir / "x")
+
+    HANDLERS["detect"](library, {"source_id": source_id, "reuse_features": True})
+
+    # The full detect ran (boxes written) rather than failing on the missing
+    # file and marking the source failed.
+    assert (src_dir / "boxes.jsonl").exists()
+    assert get_source(conn, source_id)["status"] == "ready"

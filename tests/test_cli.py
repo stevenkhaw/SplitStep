@@ -358,6 +358,42 @@ def test_setup_command_queues_a_build(library, registered_source, a_preset, caps
     assert "queued build_proxy" in capsys.readouterr().out
 
 
+def test_cli_setup_accepts_mount_format_corners(library, registered_source, capsys, conn):
+    code = main([
+        "--library", str(library.root), "setup", registered_source.id, "--rotation", "0",
+        "--mount", "fence", "--format", "singles",
+        "--corners", "0.2,0.6;0.9,0.6;0.6,0.45;0.45,0.45",
+    ])
+    assert code == 0
+    row = conn.execute("SELECT * FROM sources WHERE id=?", (registered_source.id,)).fetchone()
+    assert (row["mount"], row["play_format"]) == ("fence", "singles")
+    assert json.loads(row["court_corners"])[1] == [0.9, 0.6]
+    assert row["court_preset_id"]
+    # A re-run without the flags keeps the wizard's choices.
+    code = main(["--library", str(library.root), "setup", registered_source.id,
+                 "--rotation", "90"])
+    assert code == 0
+    row = conn.execute("SELECT * FROM sources WHERE id=?", (registered_source.id,)).fetchone()
+    assert row["mount"] == "fence" and row["court_corners"]
+
+
+def test_cli_setup_refuses_fence_singles_without_corners(
+    library, registered_source, a_preset, capsys
+):
+    code = main(["--library", str(library.root), "setup", registered_source.id,
+                 "--rotation", "0", "--preset", a_preset,
+                 "--mount", "fence", "--format", "singles"])
+    assert code == 1
+    assert "Fence + Singles needs the four court corners" in capsys.readouterr().err
+
+
+def test_cli_setup_refuses_malformed_corners(library, registered_source, a_preset, capsys):
+    code = main(["--library", str(library.root), "setup", registered_source.id,
+                 "--rotation", "0", "--preset", a_preset, "--corners", "a,b;c"])
+    assert code == 1
+    assert "x,y;x,y;x,y;x,y" in capsys.readouterr().err
+
+
 def test_setup_command_rejects_a_bad_rotation(library, registered_source, a_preset, capsys):
     code = main([
         "--library", str(library.root), "setup", registered_source.id,

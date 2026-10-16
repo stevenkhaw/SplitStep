@@ -386,6 +386,33 @@ def set_source_setup(
     conn.commit()
 
 
+def set_source_choices(
+    conn: sqlite3.Connection,
+    source_id: str,
+    *,
+    mount: str,
+    play_format: str,
+    court_corners: list[tuple[float, float]] | None,
+) -> None:
+    """Write mount, format and corners alone: no rotation, no preset.
+
+    The processed-source editor's writer. Unlike set_source_setup it has no
+    defaults, so a caller cannot clear a column by omitting it.
+    """
+    if mount and mount not in MOUNTS:
+        raise ValueError(f"unknown mount {mount!r}; expected one of {MOUNTS} or ''")
+    if play_format and play_format not in PLAY_FORMATS:
+        raise ValueError(
+            f"unknown play format {play_format!r}; expected one of {PLAY_FORMATS} or ''"
+        )
+    corners = None if court_corners is None else json.dumps([list(p) for p in court_corners])
+    conn.execute(
+        "UPDATE sources SET mount = ?, play_format = ?, court_corners = ? WHERE id = ?",
+        (mount, play_format, corners, source_id),
+    )
+    conn.commit()
+
+
 def set_source_scorer(conn: sqlite3.Connection, source_id: str, scorer: str) -> None:
     """Record which scorer cut the source's current rallies (migration 018)."""
     if scorer not in SCORERS:

@@ -61,6 +61,7 @@ from splitstep.db.reels import (
 from splitstep.db.sessions import (
     get_session,
     get_source,
+    latest_setup_choices,
     list_sessions,
     list_sources,
     refresh_session_review_status,
@@ -90,7 +91,7 @@ from splitstep.reels import (
     resolve_items,
 )
 from splitstep.score import AnchorState, anchor_from_dict, rules_from_dict, rules_to_dict
-from splitstep.setup import queue_setup
+from splitstep.setup import apply_choices, queue_setup
 from splitstep.watcher import VIDEO_SUFFIXES, is_ingestible_name
 
 from .media import range_response
@@ -316,7 +317,19 @@ class PresetCreateBody(BaseModel):
 
 class SetupBody(BaseModel):
     rotation_deg: int
-    preset_id: str
+    # None with court_corners given: the server derives the play region.
+    preset_id: str | None = None
+    # Omitted means "keep what the source has"; '' (mount, format) or null
+    # (corners) is the explicit "not set" and does write.
+    mount: str | None = None
+    play_format: str | None = None
+    court_corners: list[list[float]] | None = None
+
+
+class ChoicesBody(BaseModel):
+    mount: str | None = None
+    play_format: str | None = None
+    court_corners: list[list[float]] | None = None
 
 
 class ExportBody(BaseModel):
@@ -1332,7 +1345,10 @@ def api_setup(source_id: str, body: SetupBody, request: Request):
     already running is a conflict the caller can retry (409).
     """
     try:
-        job_id = queue_setup(_conn(request), source_id, body.rotation_deg, body.preset_id)
+        job_id = queue_setup(
+            _conn(request), source_id, body.rotation_deg, body.preset_id,
+            **_choice_kwargs(body),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
@@ -1340,6 +1356,47 @@ def api_setup(source_id: str, body: SetupBody, request: Request):
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"job_id": job_id}
+
+
+def _choice_kwargs(body) -> dict:
+    """Only the choices the client actually sent.
+
+    A JSON null for mount or format is an omission (keep); corners are the
+    one field where null is a real answer, so it is told apart by
+    model_fields_set rather than by value.
+    """
+    out: dict = {}
+    if body.mount is not None:
+        out["mount"] = body.mount
+    if body.play_format is not None:
+        out["play_format"] = body.play_format
+    if "court_corners" in body.model_fields_set:
+        out["court_corners"] = body.court_corners
+    return out
+
+
+@router.post("/api/sources/{source_id}/choices")
+def api_source_choices(source_id: str, body: ChoicesBody, request: Request):
+    """Change mount, format and corners without rebuilding anything.
+
+    Same status mapping as /setup, and the same validate_choices behind it.
+    Enqueues no job: the Detection panel prices the re-run, not this route.
+    """
+    try:
+        apply_choices(_conn(request), source_id, **_choice_kwargs(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.get("/api/setup-defaults")
+def api_setup_defaults(request: Request):
+    """Mount and format to pre-select in the wizard for the next source."""
+    return latest_setup_choices(_conn(request))
 
 
 @router.get("/api/library/stats")

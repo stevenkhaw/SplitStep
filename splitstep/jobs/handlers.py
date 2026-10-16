@@ -33,7 +33,7 @@ from splitstep.detect.audio import detect_hits, extract_pcm, hits_to_grid
 from splitstep.detect.boxes import write_boxes
 from splitstep.detect.features import write_features
 from splitstep.detect.geometry import Quad
-from splitstep.detect.scorer import segment_source
+from splitstep.detect.scorer import FenceUnavailable, resolve_scorer, segment_source
 from splitstep.detect.vision import build_features, iter_detections, persons_as_boxes
 from splitstep.jobs.worker import Handler, no_progress
 from splitstep.media.clips import clip_relpath
@@ -326,8 +326,26 @@ def handle_detect(library: Library, payload: dict,
     # docstring exists to remove. Three sources sat that way for fifteen
     # hours after a frozen build died on a missing matplotlib, with the jobs
     # badge the only surface that knew anything had failed.
+    # Before the try, so a refusal leaves the status alone: the source is
+    # exactly as ready (or not) as it was, and nothing was started. Judged
+    # ahead of any YOLO work and before features.jsonl is rewritten -- without
+    # it a fence source with no corners burns fifteen minutes of GPU, then
+    # fails in segment_source and is marked failed with features replaced.
+    fence = resolve_scorer(source["mount"], source["play_format"]) == "fence"
+    if fence and not source["court_corners"]:
+        raise FenceUnavailable(
+            "Fence mode needs this source's court; draw the court corners, "
+            "then re-segment."
+        )
+    # A source detected before boxes.jsonl existed cannot be re-segmented by
+    # the fence scorer from cached features; reuse would only fail, so run the
+    # full detect that writes the boxes.
+    reuse = payload.get("reuse_features") and features_path.exists()
+    if reuse and fence and not (src_dir / "boxes.jsonl").exists():
+        reuse = False
+
     try:
-        if payload.get("reuse_features") and features_path.exists():
+        if reuse:
             # The features on disk were shaped by whatever region built them,
             # which is what the column already says. The source's *current*
             # court_preset_id may well be newer -- that divergence is exactly
