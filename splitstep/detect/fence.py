@@ -145,7 +145,13 @@ def _speeds(track, t_s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _centred(x: np.ndarray, w: int) -> np.ndarray:
-    return np.convolve(x, np.ones(w) / w, "same")
+    # np.convolve's "same" mode returns max(len(x), w) elements, so a source
+    # shorter than the window (under 8 s at the widest) would come back the
+    # wrong length. Slicing "full" at the offset "same" uses gives exactly
+    # len(x) elements and the same values wherever the window fits, so the
+    # 2026-10-12 measurements are unchanged.
+    lo = (w - 1) // 2
+    return np.convolve(x, np.ones(w) / w, "full")[lo:lo + len(x)]
 
 
 def _trailing(x: np.ndarray, w: int) -> np.ndarray:
@@ -375,7 +381,7 @@ def fence_segment(
     step = _frame_ms(t)
 
     w = max(1, round(model.smooth_s * 1000 / step))
-    smooth = np.convolve(p, np.ones(w) / w, "same")
+    smooth = _centred(p, w)
     on = smooth >= th
 
     # Runs of frames over threshold, as [start_ms, end_ms, conf]; a frame

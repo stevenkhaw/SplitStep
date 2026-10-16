@@ -182,3 +182,22 @@ def test_predict_survives_zero_std():
                 weights=(1.0,) * len(FEATURE_NAMES))
     p = m.predict(np.ones((3, len(FEATURE_NAMES))) * 1e6)
     assert np.isfinite(p).all() and (p <= 1).all()
+
+
+@pytest.mark.parametrize("n", [1, 3, 30])
+def test_short_source_gives_rows_and_no_crash(fixture, model, n):
+    # A source shorter than the widest window (40 frames, 8 s) is an ordinary
+    # accidental recording; it must give one finite row per frame, not a
+    # numpy shape error.
+    frames, hits, court = fixture
+    x, _ = fence_features(frames[:n], hits[:n], court)
+    assert x.shape == (n, len(FEATURE_NAMES))
+    assert np.isfinite(x).all()
+    probs = fence_probs(frames[:n], hits[:n], court, model)
+    assert probs.shape == (n,)
+    assert isinstance(fence_segment([t for t, _ in frames[:n]], probs, model), list)
+
+
+def test_segment_shorter_than_smoothing_window():
+    # Three frames against a 1 s (5-frame) smoothing window.
+    assert fence_segment([0, 200, 400], np.ones(3), _synthetic_model()) == []
