@@ -345,17 +345,65 @@ def set_source_dimensions(conn: sqlite3.Connection, source_id: str, width: int, 
     conn.commit()
 
 
-def set_source_setup(
-    conn: sqlite3.Connection, source_id: str, rotation_deg: int, preset_id: str
-) -> None:
-    """Update rotation and preset in a single write, validating rotation first.
+MOUNTS = ("fence", "ground")
+PLAY_FORMATS = ("singles", "doubles", "drills")
+SCORERS = ("fence", "subject", "pair")
 
-    If validation fails, no columns are written. If the write succeeds but a
-    caller later fails to enqueue the job, the source stays updated: re-running
-    setup detects and recovers that window (the job is idempotent).
+
+def set_source_setup(
+    conn: sqlite3.Connection,
+    source_id: str,
+    rotation_deg: int,
+    preset_id: str | None,
+    *,
+    mount: str = "",
+    play_format: str = "",
+    court_corners: list[tuple[float, float]] | None = None,
+) -> None:
+    """Update rotation, preset, mount, format and corners in a single write.
+
+    Everything is validated before the UPDATE, so a bad value writes nothing.
+    ``''`` is "not set" for mount and format (migration 018). Omitting the new
+    keywords therefore *clears* them: this is the wizard's whole-form save, not
+    a patch. If the write succeeds but a caller later fails to enqueue the job,
+    the source stays updated: re-running setup detects and recovers that window
+    (the job is idempotent).
     """
+    rotation = _check_rotation(rotation_deg)
+    if mount and mount not in MOUNTS:
+        raise ValueError(f"unknown mount {mount!r}; expected one of {MOUNTS} or ''")
+    if play_format and play_format not in PLAY_FORMATS:
+        raise ValueError(
+            f"unknown play format {play_format!r}; expected one of {PLAY_FORMATS} or ''"
+        )
+    corners = None if court_corners is None else json.dumps([list(p) for p in court_corners])
     conn.execute(
-        "UPDATE sources SET rotation_deg = ?, court_preset_id = ? WHERE id = ?",
-        (_check_rotation(rotation_deg), preset_id, source_id),
+        "UPDATE sources SET rotation_deg = ?, court_preset_id = ?, mount = ?,"
+        " play_format = ?, court_corners = ? WHERE id = ?",
+        (rotation, preset_id, mount, play_format, corners, source_id),
     )
     conn.commit()
+
+
+def set_source_scorer(conn: sqlite3.Connection, source_id: str, scorer: str) -> None:
+    """Record which scorer cut the source's current rallies (migration 018)."""
+    if scorer not in SCORERS:
+        raise ValueError(f"unknown scorer {scorer!r}; expected one of {SCORERS}")
+    conn.execute("UPDATE sources SET detected_scorer = ? WHERE id = ?", (scorer, source_id))
+    conn.commit()
+
+
+def latest_setup_choices(conn: sqlite3.Connection) -> dict[str, str]:
+    """The mount and format to pre-select for the next source.
+
+    Each is taken independently from the newest source (by recorded_at) that
+    has a non-empty value, so a newer source left at "Not set" for one choice
+    does not erase an older source's answer to it.
+    """
+    out = {}
+    for col in ("mount", "play_format"):
+        row = conn.execute(
+            f"SELECT {col} FROM sources WHERE {col} != '' ORDER BY recorded_at DESC LIMIT 1"
+        ).fetchone()
+        out[col] = row[0] if row else ""
+    return out
