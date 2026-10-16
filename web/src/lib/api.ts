@@ -22,6 +22,7 @@ import type {
   SpanRef,
 } from './types'
 import type { AnchorState, ScoreRules } from './score'
+import type { Mount, PlayFormat } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -283,11 +284,30 @@ export const api = {
   reelUrl: (slug: string) => `/media/reels/${slug}.mp4`,
 
   getSource: (id: string) => req<Source>(`/api/sources/${id}`),
-  setup: (id: string, rotation_deg: number, preset_id: string) =>
+  // `extra` keys left out mean "keep" server-side; an explicit '' writes Not
+  // set, so only pass what the reviewer actually answered. `preset_id` may be
+  // null when `court_corners` is given: the server derives the region.
+  setup: (
+    id: string,
+    rotation_deg: number,
+    preset_id: string | null,
+    extra: { mount?: Mount; play_format?: PlayFormat; court_corners?: [number, number][] } = {},
+  ) =>
     req<{ job_id: string }>(`/api/sources/${id}/setup`, {
       method: 'POST',
-      body: JSON.stringify({ rotation_deg, preset_id }),
+      body: JSON.stringify({ rotation_deg, preset_id, ...extra }),
     }),
+  // Writes the answers with no job. An explicit `court_corners: null` clears
+  // them; a key left out keeps what is stored.
+  setChoices: (
+    id: string,
+    choices: { mount?: Mount; play_format?: PlayFormat; court_corners?: [number, number][] | null },
+  ) =>
+    req<unknown>(`/api/sources/${id}/choices`, {
+      method: 'POST',
+      body: JSON.stringify(choices),
+    }),
+  setupDefaults: () => req<{ mount: Mount; play_format: PlayFormat }>('/api/setup-defaults'),
   previewUrl: (sessionId: string, idx: number, atMs: number, rot: number) =>
     `/media/${sessionId}/${idx}/preview.jpg?at_ms=${Math.round(atMs)}&rot=${rot}`, // Round to int: server parses as int and caches one JPEG per distinct value
 }

@@ -69,7 +69,27 @@ export interface Source {
   // `undefined` gets. See `sameRegion` in lib/resegment.ts.
   court_preset_points?: [number, number][] | null
   features_preset_points?: [number, number][] | null
+  // Fence mode (migration after 017). `mount`/`play_format` are the
+  // reviewer's answers, '' = Not set; `court_corners` is a JSON string of
+  // four [x, y] points, as stored. `detected_scorer` is which scorer built
+  // the current rallies (null = unknown, a source detected before it was
+  // recorded), `has_boxes` whether cached person boxes exist so a fence
+  // re-cut needs no GPU, and `scorer_now` what the server would pick today.
+  // Optional for the reason `court_preset_points` is: an older server omits them.
+  mount?: Mount
+  play_format?: PlayFormat
+  court_corners?: string | null
+  detected_scorer?: Scorer | null
+  has_boxes?: boolean
+  scorer_now?: ScorerChoice
 }
+
+export type Mount = '' | 'fence' | 'ground'
+export type PlayFormat = '' | 'singles' | 'doubles' | 'drills'
+/** What actually ran on a source. */
+export type Scorer = 'fence' | 'subject' | 'pair'
+/** What the server would dispatch: `auto` picks subject or pair by viewpoint. */
+export type ScorerChoice = 'fence' | 'subject' | 'auto'
 
 export interface Rally {
   id: string
