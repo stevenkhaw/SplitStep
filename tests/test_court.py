@@ -160,6 +160,17 @@ def test_validate_rejects_far_below_near():
         validate_corners([fr, fl, nl, nr])
 
 
+@pytest.mark.parametrize("shift", [1, 3])
+def test_validate_rejects_quarter_turn_shift(shift):
+    # Clicking the right corners in the right direction but starting one
+    # corner late (or early) keeps the winding and the edge averages in
+    # order; accepted, it maps a sideline onto the baseline and every player
+    # at t=87000 to "outside".
+    pts = json.loads(CORNERS.read_text())
+    with pytest.raises(ValueError, match="far edge"):
+        validate_corners(pts[shift:] + pts[:shift])
+
+
 def test_validate_rejects_left_right_swapped():
     nl, nr, fr, fl = json.loads(CORNERS.read_text())
     with pytest.raises(ValueError, match="left and right"):

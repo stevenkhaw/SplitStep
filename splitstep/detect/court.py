@@ -116,12 +116,18 @@ def validate_corners(points) -> tuple[tuple[float, float], ...]:
             "The court corners cross over each other or fold inward; " + _ORDER_HINT + "."
         )
 
-    near_y = (out[0][1] + out[1][1]) / 2
-    far_y = (out[2][1] + out[3][1]) / 2
-    if not far_y < near_y:
+    # Both near corners below both far corners, not the edges' averages: a
+    # quarter-turn shift of the clicks (starting at near-right) keeps the
+    # winding and keeps the averages in order, and solves to a map that lays
+    # a sideline along the baseline -- every player reads "outside" and
+    # nothing says why. A court seen from behind its own baseline always has
+    # its near corners lower in the frame than its far ones.
+    if not min(out[0][1], out[1][1]) > max(out[2][1], out[3][1]):
         raise ValueError(
             "The far edge of the court (far-right, far-left) must sit above the near "
-            "edge (near-left, near-right) in the frame; " + _ORDER_HINT + "."
+            "edge (near-left, near-right) in the frame, both corners of it; "
+            + _ORDER_HINT
+            + "."
         )
     if turns[0] > 0:
         raise ValueError(
