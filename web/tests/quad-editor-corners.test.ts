@@ -184,23 +184,34 @@ describe('QuadEditor on a processed fence source', () => {
       scorer_now: 'fence', detected_scorer: null, has_boxes,
     })
 
-  it('offers the fence re-cut after Save corners and runs it behind a confirm', async () => {
+  it('offers the fence re-cut to a source that owes it, with no save in this mount', async () => {
+    // The reviewer who saved yesterday and came back: friend mode has no
+    // DetectionPanel, so this card is the only way to the run.
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     open(owed(true))
-    expect(target.querySelector('[data-role="choices-follow-up"]')).toBeNull()
-    button('Save corners')!.click()
-    await settle()
-    // Never a pointer to a panel friend mode does not render.
-    expect(target.textContent).not.toMatch(/Detection panel/)
     const run = button('Re-segment with fence mode · instant')
     expect(run).not.toBeNull()
+    // Outside the collapse: visible with the panel shut.
+    expect(target.querySelector('details')!.contains(run)).toBe(false)
     run!.click()
     await settle()
     expect(confirmSpy.mock.calls[0][0]).toMatch(/Re-segmenting discards/)
     expect(mockApi.resegment).toHaveBeenCalledWith('src1')
     expect(onresegmented).toHaveBeenCalledTimes(1)
-    expect(target.querySelector('[data-role="choices-follow-up"]')).toBeNull()
+    // The button gives way to what the run said, so it is not offered twice.
+    expect(button('Re-segment with fence mode · instant')).toBeNull()
+    expect(target.textContent).toMatch(/Re-cut: 12 rallies/)
     confirmSpy.mockRestore()
+  })
+
+  it('never points at the Detection panel, and drops "Saved." on the next edit', async () => {
+    open(owed(true))
+    button('Save corners')!.click()
+    await settle()
+    expect(target.textContent).toMatch(/Saved\./)
+    expect(target.textContent).not.toMatch(/Detection panel/)
+    click('format Doubles')
+    expect(target.textContent).not.toMatch(/Saved\./)
   })
 
   it('prices the full run when there are no boxes, and stops on a declined confirm', async () => {

@@ -94,15 +94,24 @@
     untrack(() => parseCorners(sources[0]?.court_corners)),
   )
   const cornersMode = $derived(needsCorners(mount, format))
+  // Every source that owes a re-run, read off the sources as served -- not
+  // a flag set by a save in this mount. DetectionPanel is dev-only, so in
+  // friend mode this is the one surface offering the run, and it has to be
+  // there for a reviewer who saved yesterday and came back today. Outside
+  // the collapse for the same reason: a closed panel would hide it.
+  const owed = $derived(
+    sources
+      .map((s) => ({ source: s, plan: choicesFollowUp(s) }))
+      .filter((o) => o.plan.action !== 'none'),
+  )
+  // What the run this mount started said back, per source id. Replaces the
+  // button for that source so a queued fifteen-minute detect -- still owed
+  // until it lands -- is not offered a second time. Component state, so a
+  // remount (navigation, reload) forgets it along with every status line.
+  let ran = $state<Record<string, string>>({})
+
   // Only meaningful outside corners mode, where the region editor below
   // owns the main button and the answers need a Save of their own.
-  // True after a mount/format/corners save, until the offered run is taken
-  // or the source switched. The action itself is read from the source as
-  // the session refetches it, so the card appears once the server says
-  // what is owed -- not from a guess made before the save landed.
-  let offerChoicesRun = $state(false)
-  const followUp = $derived(choicesFollowUp(source))
-
   const choicesDirty = $derived(
     !!source && (mount !== (source.mount ?? '') || format !== (source.play_format ?? '')),
   )
@@ -153,7 +162,6 @@
     status = null
     error = null
     offerDetect = false
-    offerChoicesRun = false
     mount = next?.mount ?? ''
     format = next?.play_format ?? ''
     corners = parseCorners(next?.court_corners)
@@ -235,13 +243,10 @@
         // must not throw away corners it may want back.
         ...(cornersMode && corners ? { court_corners: corners } : {}),
       })
-      // The re-run is offered right here, in both app modes: DetectionPanel
-      // is dev-only, so pointing at it told a friend-mode reviewer to look
-      // at nothing. What it costs (a fence re-cut from saved boxes is
-      // instant, without them the full run) is `followUp`'s call, read off
-      // the refetched source.
+      // No pointer to the Detection panel: it is dev-only. What the change
+      // owes appears in the card above this panel once the refetch lands,
+      // in both modes (`owed`).
       status = 'Saved.'
-      offerChoicesRun = true
       onassigned()
     } catch (e) {
       error = e
@@ -250,11 +255,11 @@
     }
   }
 
-  /** The action `followUp` plans, behind the same confirms DetectionPanel
-   *  uses -- both name what is lost, because both cost the hand edits. */
-  async function runFollowUp() {
-    if (!source || busy || followUp.action === 'none') return
-    const plan = followUp
+  /** The action `choicesFollowUp` plans for `target`, behind the same
+   *  confirms DetectionPanel uses -- both name what is lost, because both
+   *  cost the hand edits. */
+  async function runFollowUp(target: Source, plan: ReturnType<typeof choicesFollowUp>) {
+    if (busy || plan.action === 'none') return
     if (plan.action === 'redetect') {
       const why = plan.scorerSwitch === 'fence' && !plan.regionChanged ? 'fence' : 'region'
       if (!window.confirm(redetectConfirmMessage(why))) return
@@ -262,29 +267,31 @@
       // Always asked, even with nothing hand-edited: unlike the panel there
       // is no loss warning on screen here, so the dialog is the only place
       // the cost is stated.
-      const edited = editedBoundaryCount(rallies, source.id)
-      const splits = splitCount(rallies, source.id)
+      const edited = editedBoundaryCount(rallies, target.id)
+      const splits = splitCount(rallies, target.id)
       if (!window.confirm(resegmentConfirmMessage(edited, splits))) return
     }
     busy = true
-    error = null
+    runError = null
     try {
       if (plan.action === 'redetect') {
         // No threshold: the scorer resolves its own (see choicesFollowUp).
-        await api.detectSource(source.id)
-        status = 'Detection queued — the jobs badge above tracks it.'
+        await api.detectSource(target.id)
+        ran = { ...ran, [target.id]: 'Detection queued — the jobs badge above tracks it.' }
       } else {
-        const res = await api.resegment(source.id)
-        status = `Re-cut: ${res.count ?? 0} rallies.`
+        const res = await api.resegment(target.id)
+        ran = { ...ran, [target.id]: `Re-cut: ${res.count ?? 0} rallies.` }
         ;(onresegmented ?? onassigned)()
       }
-      offerChoicesRun = false
     } catch (e) {
-      error = e
+      runError = e
     } finally {
       busy = false
     }
   }
+  // Apart from `error`, which belongs to the editor inside the collapse and
+  // would be hidden with it.
+  let runError = $state<unknown>(null)
 
   async function assignExisting(preset: Preset) {
     if (!source || busy) return
@@ -310,6 +317,40 @@
     }
   }
 </script>
+
+<!-- The re-run each source owes, in the same filled card as "Run detection
+     with this region" and for the same reason: as a sentence pointing
+     elsewhere it was missed, and here the elsewhere does not exist in
+     friend mode. The source whose region was just assigned is left to that
+     card inside the panel, so one change is never offered twice in one
+     place. -->
+{#each owed as o (o.source.id)}
+  {#if !(offerDetect && o.source.id === sourceId)}
+    <div
+      data-role="choices-follow-up"
+      class="mt-6 rounded-lg border border-fg bg-surface p-3"
+    >
+      <p class="text-body text-fg">
+        Source {o.source.idx}: {detectionActionNote(o.plan)}
+      </p>
+      {#if ran[o.source.id]}
+        <p class="mt-2 font-data text-caption text-fg">{ran[o.source.id]}</p>
+      {:else}
+        <button
+          class="mt-3 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
+                 hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
+          onclick={() => runFollowUp(o.source, o.plan)}
+          disabled={busy}
+        >
+          {busy ? 'working…' : detectionActionLabel(o.plan.action, o.plan.scorerSwitch)}
+        </button>
+      {/if}
+    </div>
+  {/if}
+{/each}
+{#if runError}
+  <p class="mt-2 font-data text-data text-danger">{describeApiError(runError, 'source').message}</p>
+{/if}
 
 <details bind:open class="mt-6 rounded-lg border border-line">
   <summary class="cursor-pointer select-none p-4 text-body font-semibold">Camera and court</summary>
@@ -339,8 +380,14 @@
           <MountFormatPicker
             {mount}
             {format}
-            onmount={(m) => (mount = m)}
-            onformat={(f) => (format = f)}
+            onmount={(m) => {
+              mount = m
+              status = null
+            }}
+            onformat={(f) => {
+              format = f
+              status = null
+            }}
             disabled={busy}
           />
           {#if !cornersMode && choicesDirty}
@@ -354,24 +401,6 @@
             </button>
           {/if}
         </div>
-
-        <!-- The re-run a mount/format/corners save made necessary, in the
-             same filled card as "Run detection with this region" below and
-             for the same reason: as a sentence pointing elsewhere it was
-             missed, and here the elsewhere did not exist in friend mode. -->
-        {#if offerChoicesRun && followUp.action !== 'none'}
-          <div data-role="choices-follow-up" class="mt-3 rounded-lg border border-line bg-surface-2 p-3">
-            <p class="text-body text-fg">{detectionActionNote(followUp)}</p>
-            <button
-              class="mt-3 rounded-lg bg-fg px-4 py-2 text-body font-semibold text-bg
-                     hover:bg-fg/90 disabled:opacity-40 motion-safe:transition-colors"
-              onclick={runFollowUp}
-              disabled={busy}
-            >
-              {busy ? 'working…' : detectionActionLabel(followUp.action, followUp.scorerSwitch)}
-            </button>
-          </div>
-        {/if}
       {/if}
 
       {#if source && cornersMode}
@@ -386,7 +415,11 @@
           fps={source.fps}
           points={corners ?? DEFAULT_CORNER_POINTS}
           labels={CORNER_LABELS}
-          onpoints={(p) => (corners = p)}
+          onpoints={(p) => {
+            corners = p
+            // "Saved." describes the corners that were sent, not these.
+            status = null
+          }}
           onseek={seek}
           alt="source {source.idx} at {formatTs(frameMs)}"
         />
