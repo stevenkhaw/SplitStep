@@ -86,10 +86,17 @@ describe('detectionOwed', () => {
     expect(owed('auto', 'subject')).toBe('none')
     expect(owed('auto', null)).toBe('none')
   })
-  it('ground over pair features is a re-cut; unknown is not a change', () => {
+  it('auto over a fence run is a re-cut: auto never produces fence', () => {
+    // Fence + singles switched to doubles, drills, Not set, or off Fence.
+    expect(owed('auto', 'fence', true)).toBe('resegment')
+    expect(owed('auto', 'fence', false)).toBe('resegment')
+  })
+  it('ground over pair features is a re-cut', () => {
     expect(owed('subject', 'pair')).toBe('resegment')
     expect(owed('subject', 'subject')).toBe('none')
-    expect(owed('subject', null)).toBe('none')
+  })
+  it('ground over unknown is a re-cut: no pre-018 source has mount ground', () => {
+    expect(owed('subject', null)).toBe('resegment')
   })
   it('ground over a fence run is a re-cut, features are always cached', () => {
     expect(owed('subject', 'fence')).toBe('resegment')

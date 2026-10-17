@@ -461,6 +461,32 @@ describe('planDetection: a changed mount, format or court', () => {
     expect(detectionActionNote(plan)).toContain('subject profile')
   })
 
+  it('re-cuts a fence-cut source switched off fence singles, with no fence-scale threshold', () => {
+    // Fence + Singles cut at the fence model's 0.25, then the format moved to
+    // Doubles: auto now, and 0.25 on the pair scale is a number nobody chose.
+    // A non-null switch is what makes the panel seed (and drop) its slider to
+    // null, so the re-cut sends no threshold and the new scorer resolves its own.
+    const src = detected({
+      scorer_now: 'auto', detected_scorer: 'fence', has_boxes: true, segment_threshold: 0.25,
+    })
+    expect(scorerSwitch(src)).toBe('auto')
+    const plan = planDetection(src, { region: SAME_CORNERS, threshold: null })
+    expect(plan.action).toBe('resegment')
+    expect(plan.thresholdChanged).toBe(false)
+    expect(plan.scorerSwitch).toBe('auto')
+    expect(detectionActionLabel(plan.action, plan.scorerSwitch)).toBe('Re-segment · instant')
+    expect(detectionActionNote(plan)).toContain('cached features')
+  })
+
+  it('re-cuts a switch to Ground over an unknown scorer', () => {
+    const plan = planDetection(
+      detected({ scorer_now: 'subject', detected_scorer: null }),
+      { region: SAME_CORNERS, threshold: null },
+    )
+    expect(plan.action).toBe('resegment')
+    expect(plan.scorerSwitch).toBe('subject')
+  })
+
   it('owes nothing when the scorer already matches, or the server did not say', () => {
     expect(
       planDetection(fenceNow({ detected_scorer: 'fence' }), {

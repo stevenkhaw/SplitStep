@@ -49,21 +49,30 @@ export type DetectionOwed = 'none' | 'resegment' | 'redetect'
  * What a source must re-run for its rallies to match its current answers.
  *
  * `auto` is satisfied by `pair`, `subject` or unknown: auto is what produced
- * those, so there is nothing to redo. Unknown (`null`/absent) is never a
- * change -- the `sameRegion` rule: an unproven claim across an old library is
- * how a warning gets trained away.
+ * those, so there is nothing to redo, and unknown is not a change -- the
+ * `sameRegion` rule: an unproven claim across an old library is how a
+ * warning gets trained away. `auto` over a `fence` run is the exception, and
+ * a real switch: auto never produces fence, so a fence-cut source moved to
+ * Fence + Doubles/Drills/Not set (or off Fence altogether) still shows the
+ * fence model's rallies, and the panel's "using the general detector" note
+ * would be false about the list beside it. Every full detect writes
+ * features.jsonl whatever the mount, so that is a re-cut, never a re-detect.
+ *
+ * `subject` over unknown is a re-cut too, the one place unknown counts. No
+ * source predating migration 018 has mount = ground -- the column did not
+ * exist -- so a `subject` wanted over a NULL detected_scorer follows the
+ * reviewer's own change, not an old library's silence.
  */
 export function detectionOwed(
   source: Pick<Source, 'scorer_now' | 'detected_scorer' | 'has_boxes'>,
 ): DetectionOwed {
   const wanted = source.scorer_now
   const detected = source.detected_scorer ?? null
-  if (wanted === undefined || wanted === 'auto') return 'none'
+  if (wanted === undefined) return 'none'
   if (wanted === detected) return 'none'
+  if (wanted === 'auto') return detected === 'fence' ? 'resegment' : 'none'
   if (wanted === 'fence') return source.has_boxes ? 'resegment' : 'redetect'
-  // wanted subject. Every full detect writes features.jsonl whatever the
-  // mount, so subject scoring always reuses cached features: a re-cut at most.
-  if (detected === null) return 'none'
+  // wanted subject. Features are always cached (above), so a re-cut at most.
   return 'resegment'
 }
 
