@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 1277 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 1291 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -256,13 +256,26 @@ another within 15 s merges into it, so a missed first serve and the second
 serve are one clip.
 
 **Measured result, and its limit.** Held-out on 2026-10-12's first 16
-minutes (38 truth rows, 15 first-serve faults, 3 double faults): raw 36/38,
-every non-fault row caught, 52% of clip time is play (play is 25% of those
-minutes), median end error +1.7 s. Folded: 20/23, 61%. The threshold 0.25 was **picked in-sample**:
-0.23-0.29 all clear the bar, 0.2 gives folded 22/23 but raw play 49%, and
-above 0.29 the first non-fault row goes missing. At 0.25 the raw report shows
-every real point caught, so folded's 20/23 is most likely the folded-truth
-quirk above rather than missed points.
+minutes (38 truth rows, 15 first-serve faults, 3 double faults). Raw: points
+caught 36/38, every non-fault row among them; clip time that is play 52%
+(play is 25% of those minutes); median end error +1.7 s. Folded: points
+caught 20/23; clip time that is play 61%. The threshold 0.25 was **picked
+in-sample**: 0.23-0.29 all clear the bar, 0.2 gives folded 22/23 but raw
+play 49%, and above 0.29 the first non-fault row goes missing.
+
+*Correction (2026-10-16, final branch review).* This paragraph used to say
+folded's 20/23 was "most likely the folded-truth quirk" — a fault-plus-serve
+span counting its idle gap — rather than missed points. Two of the three are
+not. Listing the folded misses beside the raw ones shows 0:33 and 5:13 are
+exactly the two first-serve faults raw also missed: the detector never saw
+those tosses, so the app's clip for each point starts at the second serve,
+and Goal 3 (a clip starts at the first serve's toss) is **not met** for them.
+Only 10:09 is the measurement quirk, and a different one from the one
+claimed: that fault ends 22 s before its second serve, past the app's 15 s
+fold window, so the app cuts the second serve alone — while `fold_faults`
+in `detect/truth.py` folds with **no window at all**, scoring that clip
+against a 38 s point it covers a third of. The two folds disagree on any gap
+over 15 s; read a folded miss against the raw line before calling it either.
 
 **Fence mode is fitted on ONE session**: one opponent, one evening's light,
 one clip position on one fence. Held-out blocks prove it is not memorising
