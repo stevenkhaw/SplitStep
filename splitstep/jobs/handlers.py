@@ -57,6 +57,7 @@ from splitstep.reels import (
     resolve_items,
 )
 from splitstep.score import rules_from_dict, score_before, scoreboard_rows
+from splitstep.setup import FENCE_NEEDS_CORNERS
 
 log = logging.getLogger(__name__)
 
@@ -333,10 +334,10 @@ def handle_detect(library: Library, payload: dict,
     # fails in segment_source and is marked failed with features replaced.
     fence = resolve_scorer(source["mount"], source["play_format"]) == "fence"
     if fence and not source["court_corners"]:
-        raise FenceUnavailable(
-            "Fence mode needs this source's court; draw the court corners, "
-            "then re-segment."
-        )
+        # setup's sentence, imported: one condition, one sentence. The cure
+        # is corners and then this same detect -- not a re-segment, which
+        # the earlier wording sent the reviewer to.
+        raise FenceUnavailable(FENCE_NEEDS_CORNERS)
     # A source detected before boxes.jsonl existed cannot be re-segmented by
     # the fence scorer from cached features; reuse would only fail, so run the
     # full detect that writes the boxes.

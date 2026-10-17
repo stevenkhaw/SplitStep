@@ -22,6 +22,7 @@ from splitstep.detect.geometry import Quad
 from splitstep.jobs import handlers
 from splitstep.jobs.handlers import HANDLERS, handle_build_proxy, handle_detect, handle_ingest
 from splitstep.media.probe import ProbeError, probe
+from splitstep.setup import FENCE_NEEDS_CORNERS
 from splitstep.watcher import scan_inbox
 
 
@@ -1200,8 +1201,10 @@ def test_detect_without_corners_refuses_a_fence_source_before_any_work(
         raise AssertionError("YOLO must not start")
 
     monkeypatch.setattr(handlers, "iter_detections", boom)
-    with pytest.raises(FenceUnavailable, match="court corners"):
+    with pytest.raises(FenceUnavailable) as refused:
         HANDLERS["detect"](library, {"source_id": source_id})
+    # setup's sentence, not a second wording of the same condition.
+    assert str(refused.value) == FENCE_NEEDS_CORNERS
     assert (src_dir / "features.jsonl").read_bytes() == before
     assert get_source(conn, source_id)["status"] == "ready"
 
