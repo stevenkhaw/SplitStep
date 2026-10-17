@@ -47,41 +47,80 @@ class TruthReport:
 
 
 def _parse_time(text: str) -> int:
+    # Every field is checked, not just split: these files are hand-typed, and
+    # `int()` alone reads `1:75` as 2:15 and `0:-5` as a time, both of which
+    # would land a point somewhere nobody watched.
     parts = text.strip().split(":")
-    if len(parts) not in (2, 3):
-        raise ValueError(f"bad time {text!r}")
+    if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts):
+        raise ValueError(f"bad time {text!r} (want m:ss or h:mm:ss)")
     nums = [int(p) for p in parts]
     if len(nums) == 2:
         nums.insert(0, 0)
     h, m, s = nums
+    if s >= 60 or (len(parts) == 3 and m >= 60):
+        raise ValueError(f"bad time {text!r}: a field past 59")
     return ((h * 60 + m) * 60 + s) * 1000
 
 
 def load_truth(path: Path) -> Truth:
+    """Read a hand-listed truth file, refusing anything a typo could produce.
+
+    Every row problem raises `ValueError("<path>:<line>: <what>")`, because
+    the alternative was worse than a crash: an inverted row was counted as a
+    missed point, an overlapping pair counted the shared time twice in "clip
+    time that is play", a zero-length row divided by zero in `evaluate`, and
+    a row outside `# covers` was scored against time the file does not claim.
+    Each of those reads as a detector result, not a typo. Rows must be in
+    order and may touch (a fault ending the second the next serve starts)
+    but never overlap.
+    """
     path = Path(path)
     with open(path, newline="") as f:
-        first = f.readline()
-        m = _COVERS.match(first.strip())
-        if not m:
-            # Time outside the covered range is neither play nor idle; without
-            # the range there is no way to know what the file does not claim.
-            raise ValueError(f"{path}: first line must be '# covers m:ss-m:ss'")
+        lines = f.read().splitlines()
+    first = lines[0] if lines else ""
+    m = _COVERS.match(first.strip())
+    if not m:
+        # Time outside the covered range is neither play nor idle; without
+        # the range there is no way to know what the file does not claim.
+        raise ValueError(f"{path}: first line must be '# covers m:ss-m:ss'")
+    try:
+        covers = (_parse_time(m.group(1)), _parse_time(m.group(2)))
+    except ValueError as e:
+        raise ValueError(f"{path}:1: {e}") from None
+    if covers[1] <= covers[0]:
+        raise ValueError(f"{path}:1: covers ends at or before it starts")
+
+    reader = csv.reader(lines[1:], delimiter="\t")
+    header = next(reader, [])
+    if "in" not in header or "out" not in header:
+        raise ValueError(f"{path}:2: header must name 'in' and 'out' columns")
+
+    points: list[TruthPoint] = []
+    # Line numbers from the file, not the reader: csv's own `line_num` counts
+    # from wherever it was handed the stream, which is the off-by-one a
+    # hand-editor hunting for a typo does not need.
+    for lineno, cells in enumerate(reader, start=3):
+        r = dict(zip(header, cells, strict=False))
+        if not (r.get("in") or "").strip():
+            continue
+        where = f"{path}:{lineno}"
         try:
-            covers = (_parse_time(m.group(1)), _parse_time(m.group(2)))
-        except ValueError as e:
-            raise ValueError(f"{path}: {e}") from None
-        rows = csv.DictReader(f, delimiter="\t")
-        points = tuple(
-            TruthPoint(
-                _parse_time(r["in"]),
-                _parse_time(r["out"]),
-                (r.get("note") or "").strip(),
-                (r.get("server") or "").strip(),
+            a, b = _parse_time(r["in"]), _parse_time(r.get("out") or "")
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"{where}: {e}") from None
+        if b <= a:
+            raise ValueError(f"{where}: out {r['out']} is not after in {r['in']}")
+        if a < covers[0] or b > covers[1]:
+            raise ValueError(f"{where}: {r['in']}-{r['out']} is outside '# covers'")
+        if points and a < points[-1].end_ms:
+            raise ValueError(
+                f"{where}: starts at {r['in']}, before the previous row ends "
+                "(rows must be sorted by in and must not overlap)"
             )
-            for r in rows
-            if (r.get("in") or "").strip()
+        points.append(
+            TruthPoint(a, b, (r.get("note") or "").strip(), (r.get("server") or "").strip())
         )
-    return Truth(covers=covers, points=points)
+    return Truth(covers=covers, points=tuple(points))
 
 
 def fold_faults(truth: Truth) -> Truth:
