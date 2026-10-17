@@ -184,6 +184,22 @@ def reports(
     return evaluate(raw, truth), evaluate(cut, fold_faults(truth))
 
 
+def legend(threshold: float) -> str:
+    """The one line that says what "raw" and "folded" mean beside the numbers.
+
+    Printed after the reports because the two lines score different clips
+    against different truth (see `reports`), and an unlabelled pair invites
+    reading the flattering one as the other. The threshold comes from the
+    model that cut the clips, never a literal, so a re-fit cannot leave this
+    line naming a number nothing used.
+    """
+    return (
+        "raw = clips before the fault fold vs every listed row; "
+        "folded = the app's clips vs points with faults folded in; "
+        f"threshold {threshold:g} (picked in-sample)"
+    )
+
+
 def held_out(
     sets: Sequence[TrainingSet], *, block_ms: int = 240_000, l2: float = 1.0,
     threshold: float | None = None,

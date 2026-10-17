@@ -868,9 +868,10 @@ def cmd_fence_train(args) -> int:
               file=sys.stderr)
         return 1
     sets = [fence_train.training_set(f.boxes, f.features, f.truth, f.corners) for f in files]
+    model = fence_train.fit(sets)
     for name, (raw, folded) in fence_train.held_out(sets).items():
         _print_reports(name, raw, folded, " (held-out)")
-    model = fence_train.fit(sets)
+    print(fence_train.legend(model.threshold))
     out = Path(args.out)
     model.save(out)
     print(f"wrote {out} (trained on {', '.join(model.trained_on)}, "

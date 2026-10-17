@@ -65,6 +65,12 @@ def test_training_set_keeps_covered_frames_and_raw_labels(sets):
 
 
 def test_held_out_meets_the_spec_bar(reports):
+    """The spec's bar, read on the raw line.
+
+    raw = clips before the fault fold vs every listed row; folded = the app's
+    clips vs points with faults folded in -- `fence_train.legend`, which
+    `splitstep fence train` prints under the same two lines.
+    """
     raw, folded = reports[NAME]
     truth = load_truth(FIXTURES / "truth" / f"{NAME}.tsv")
     faults = {p.start_ms for p in truth.points if p.note.startswith(FAULT)}
@@ -75,7 +81,8 @@ def test_held_out_meets_the_spec_bar(reports):
     assert raw.total == 38
     assert raw.caught >= 34
     assert raw.play_share >= 0.50
-    assert raw.median_end_err_s <= 2.0
+    # abs: clips ending five seconds early are as wrong as five late.
+    assert abs(raw.median_end_err_s) <= 2.0
     # The folded side is reported, not barred, but it must be the 23 points.
     assert folded.total == 23
 
@@ -142,7 +149,9 @@ def test_cli_fence_train_prints_held_out_and_writes_the_model(tmp_path, capsys):
     assert lines[0].startswith(f"{NAME} raw: points caught ")
     assert lines[0].endswith("(held-out)")
     assert lines[1].startswith(f"{NAME} folded: points caught ")
-    assert FenceModel.load(out).trained_on == (NAME,)
+    model = FenceModel.load(out)
+    assert lines[2] == fence_train.legend(model.threshold)
+    assert model.trained_on == (NAME,)
 
 
 @pytest.fixture
@@ -196,3 +205,9 @@ def test_cli_fence_score_against_an_unseen_truth_is_not_in_sample(fence_source, 
     assert "2026-11-01_source01 raw: points caught " in out
     assert "in-sample" not in out
 
+
+def test_legend_names_both_lines_and_the_models_threshold():
+    line = fence_train.legend(0.31)
+    assert "raw = clips before the fault fold" in line
+    assert "folded = the app's clips" in line
+    assert "threshold 0.31" in line
