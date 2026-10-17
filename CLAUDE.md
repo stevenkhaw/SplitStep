@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 1273 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 1277 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
