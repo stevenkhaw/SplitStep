@@ -371,10 +371,16 @@ def test_cli_setup_accepts_mount_format_corners(library, registered_source, caps
     assert row["court_preset_id"]
     # A re-run without the flags keeps the wizard's choices.
     code = main(["--library", str(library.root), "setup", registered_source.id,
-                 "--rotation", "90"])
+                 "--rotation", "0"])
     assert code == 0
     row = conn.execute("SELECT * FROM sources WHERE id=?", (registered_source.id,)).fetchone()
     assert row["mount"] == "fence" and row["court_corners"]
+    # A re-rotation without new corners is refused: the old ones were drawn in
+    # the old frame.
+    code = main(["--library", str(library.root), "setup", registered_source.id,
+                 "--rotation", "90"])
+    assert code == 1
+    assert "needs the four court corners" in capsys.readouterr().err
 
 
 def test_cli_setup_refuses_fence_singles_without_corners(

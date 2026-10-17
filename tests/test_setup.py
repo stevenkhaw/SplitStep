@@ -167,9 +167,9 @@ def test_queue_setup_keeps_stored_choices_when_omitted(conn):
     source_id, preset_id = _source(conn), _preset(conn)
     queue_setup(conn, source_id, 0, preset_id, mount="fence", play_format="singles",
                 court_corners=CORNERS)
-    queue_setup(conn, source_id, 180, preset_id)
+    # Same rotation: a rotation change would (rightly) clear the corners.
+    queue_setup(conn, source_id, 0, preset_id)
     row = get_source(conn, source_id)
-    assert row["rotation_deg"] == 180
     assert (row["mount"], row["play_format"]) == ("fence", "singles")
     assert row["court_corners"] is not None
     # An explicit '' does write.
@@ -252,3 +252,53 @@ def test_a_redrawn_court_forgets_the_detected_scorer_but_a_resave_does_not(conn)
     set_source_status(conn, source_id, "ready")
     queue_setup(conn, source_id, 0, preset_id, court_corners=CORNERS)
     assert detected() is None
+
+
+# -- a rotation change and the stored corners --------------------------------
+
+
+def _with_corners(conn, mount, play_format):
+    source_id, preset_id = _source(conn), _preset(conn)
+    queue_setup(conn, source_id, 0, preset_id, mount=mount, play_format=play_format,
+                court_corners=CORNERS)
+    set_source_status(conn, source_id, "needs_setup")
+    conn.execute("UPDATE sources SET detected_scorer = 'fence' WHERE id = ?", (source_id,))
+    conn.commit()
+    return source_id, preset_id
+
+
+def test_rotating_a_fence_source_without_new_corners_is_refused(conn):
+    source_id, preset_id = _with_corners(conn, "fence", "singles")
+    before, jobs = dict(get_source(conn, source_id)), _jobs(conn)
+    with pytest.raises(ValueError) as exc:
+        queue_setup(conn, source_id, 90, preset_id)
+    assert str(exc.value) == FENCE_SENTENCE
+    assert dict(get_source(conn, source_id)) == before
+    assert _jobs(conn) == jobs
+
+
+def test_rotating_a_non_fence_source_clears_corners_and_queues(conn):
+    source_id, preset_id = _with_corners(conn, "", "")
+    jobs = _jobs(conn)
+    queue_setup(conn, source_id, 90, preset_id)
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == 90 and row["court_corners"] is None
+    assert row["detected_scorer"] is None
+    assert _jobs(conn) == jobs + 1
+
+
+def test_rotating_with_explicit_corners_stores_them(conn):
+    source_id, preset_id = _with_corners(conn, "fence", "singles")
+    fresh = [(0.25, 0.62), (0.85, 0.62), (0.6, 0.46), (0.45, 0.46)]
+    queue_setup(conn, source_id, 90, preset_id, court_corners=fresh)
+    row = get_source(conn, source_id)
+    assert row["rotation_deg"] == 90
+    assert json.loads(row["court_corners"]) == [list(p) for p in fresh]
+
+
+def test_the_same_rotation_keeps_corners(conn):
+    source_id, preset_id = _with_corners(conn, "fence", "singles")
+    queue_setup(conn, source_id, 0, preset_id)
+    row = get_source(conn, source_id)
+    assert json.loads(row["court_corners"]) == [list(p) for p in CORNERS]
+    assert row["detected_scorer"] == "fence"

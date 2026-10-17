@@ -131,6 +131,17 @@ def queue_setup(
     # rotation_filter is the single source of truth; it is also called by set_source_setup,
     # so using it here doesn't duplicate the rule.
     rotation_filter(rotation_deg)
+    if rotation_deg != source["rotation_deg"] and court_corners is KEEP:
+        # Corners are clicks on the proxy as it was oriented when they were
+        # drawn. Re-rotating the source and keeping them leaves four points
+        # that still pass every order/convexity check but sit in the old
+        # frame, so the homography maps every player to the wrong place with
+        # no error anywhere. Clearing them here (and judging the choices on
+        # the cleared value) makes a fence+singles source refuse with the
+        # needs-corners sentence until they are redrawn. An explicit value
+        # in the same call wins: the wizard sends rotation and fresh corners
+        # together.
+        court_corners = None
     mount, play_format, corners = validate_choices(source, mount, play_format, court_corners)
     derived_quad = None
     if preset_id is None:

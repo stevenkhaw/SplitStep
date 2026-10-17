@@ -216,9 +216,14 @@ otherwise burns fifteen minutes or marks a ready source failed.
 homography to court metres (`detect/court.py`), which decides near, far and
 outside. The play-region quad answers a different question (which boxes exist
 at all) and the two must not be conflated. Validation refuses crossed,
-out-of-order and quarter-turn corners: order-valid corners drawn in the
-pre-rotation frame pass every geometric check and silently mis-map every
-player, so rotating a source clears them. Moving corners sets
+out-of-order and quarter-turn corners: a quarter-turn *shift of the click
+order* (right corners, wrong starting corner) is refused, while corners drawn
+in a frame that has since been rotated pass every geometric check and
+silently mis-map every player. So `queue_setup` clears the stored corners (and
+`detected_scorer`) when `rotation_deg` changes and the caller passed none
+(an explicit value in the same call wins; the wizard sends both), and a
+fence+singles source then refuses with the needs-corners sentence until they
+are redrawn; the editor also discards its unsaved corners on rotate. Moving corners sets
 `detected_scorer = NULL` (compared by value, like `sameRegion`), which is what
 makes `detectionOwed` offer the re-cut; there is no "corners built under"
 column because one comparison is not worth a migration. `POST
