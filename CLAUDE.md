@@ -17,7 +17,7 @@ Python lives in the `splitstep` conda env; it is not the shell's default env, so
 invoke its interpreter by path (or `conda activate splitstep` first):
 
 ```bash
-~/miniconda3/envs/splitstep/bin/pytest -q                              # 1147 tests
+~/miniconda3/envs/splitstep/bin/pytest -q                              # 1273 tests
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py -q        # one file
 ~/miniconda3/envs/splitstep/bin/pytest tests/test_segment.py::test_x   # one test
 ~/miniconda3/envs/splitstep/bin/ruff check splitstep tests
@@ -171,6 +171,102 @@ Read `docs/superpowers/plans/2026-08-20-camera-viewpoint-validation.md` before
 tuning anything here — including its 2026-08-21 correction, where one clip's
 hand label turned out to be wrong. Do not re-fit against audio-impact clusters:
 that ground truth is the venue's activity, not the player's.
+
+### Fence mode is a third scorer, chosen by the reviewer's answers
+
+Every session from 2026-10-12 on is filmed from one place: a phone clipped
+to the fence, centred behind the near baseline at 5-6 ft. `pair` and
+`subject` both guess the viewpoint from the footage and then weigh hand-picked
+terms that were never fitted to this camera; on 2026-10-12 the detector
+caught 34/38 points at threshold 0.40 but only 28% of the clip time was play
+and the median clip ended 9.7 s after the point did, because "far" was the
+second-largest box in a quad admitting 4-7 people (bags, a net-post
+bystander, the next courts). Reviewing it was abandoned: 76 of 133 clips
+rejected.
+
+So the choice is now made from the reviewer's answers first. Each source has
+`mount` and `play_format` (migration 018; `''` is "not set"), and
+`splitstep/detect/scorer.py::segment_source` is the one dispatcher every
+caller goes through: the detect handler, `POST /resegment`, `GET /scores`,
+`splitstep segment`, `labels score`. Fence mount + singles runs the fence
+scorer; ground mount forces `subject`; everything else is `auto`, which is
+`params_for_frames` + `segment()` byte-for-byte as before, so a library that
+predates the migration cuts the same rallies. Fence + doubles, drills or
+not-set also falls back to `auto`, with a visible "not tuned" note: the model
+was fitted on singles and has never seen anything else, and silently running
+it on doubles would claim coverage nobody measured.
+`tests/fixtures/scorer_cases.json` (all 12 mount x format cells) pins the
+table for both the Python dispatcher and its web mirror in `web/src/lib/`.
+
+**`boxes.jsonl` keeps every person and ball box** (classes 0 and 32, conf >=
+0.1) beside `features.jsonl`. The legacy features only ever see persons at
+>= 0.25, which is how a threshold sweep stays identical for old sources; the
+fence scorer needs the low-confidence boxes and the ball. Fence features are
+computed at *segment time* from boxes + audio hits + the court corners, not
+at detect time, so editing corners is a re-segment (seconds, no GPU) whenever
+`boxes.jsonl` exists, and a full re-detect only for a source that has none.
+`handle_detect` pre-checks before the YOLO stage: fence + singles without
+corners raises `FenceUnavailable` before any GPU work and before
+`features.jsonl` is rewritten, and `--reuse-features` is ignored (full
+detect) when the scorer is fence and `boxes.jsonl` is missing. Either one
+otherwise burns fifteen minutes or marks a ready source failed.
+
+**Court corners are stored apart from the play region.** Four points
+(near-left, near-right, far-right, far-left, in proxy space) are mapped by a
+homography to court metres (`detect/court.py`), which decides near, far and
+outside. The play-region quad answers a different question (which boxes exist
+at all) and the two must not be conflated. Validation refuses crossed,
+out-of-order and quarter-turn corners: order-valid corners drawn in the
+pre-rotation frame pass every geometric check and silently mis-map every
+player, so rotating a source clears them. Moving corners sets
+`detected_scorer = NULL` (compared by value, like `sameRegion`), which is what
+makes `detectionOwed` offer the re-cut; there is no "corners built under"
+column because one comparison is not worth a migration. `POST
+/api/sources/{id}/choices` writes mount/format/corners without enqueueing
+anything and never reassigns the play region (a derived region would change
+`court_preset_id` and make the panel price a 15-minute re-detect for a source
+whose scorer reads corners). Only `queue_setup` derives a play-region preset
+from the corners (`region_from_corners`; its points may lie outside [0,1], so
+it writes the `court_presets` row directly and the client clips it to draw).
+`queue_setup` keeps stored choices when a caller omits them; only an explicit
+value, `''` included, writes.
+
+**The truth files and the two reports.** `tests/fixtures/truth/*.tsv` is a
+hand-listed set of points; the first line is `# covers m:ss-m:ss`, because a
+partial listing is only truth inside the span it covers. `splitstep fence
+train` fits the model with 4-minute blocks held out and reports **held-out**
+figures; that is the bar. `splitstep fence score` scores the committed model,
+and when it was trained on that file the result is **in-sample** and says so;
+do not quote it as validation. Each command prints two reports and they answer
+different questions. The *raw* report scores the clips *before* the fault fold
+against the raw truth rows; the *folded* report scores the app's actual cut
+against truth with faults folded into the next point. Folding deliberately
+puts the fault-to-second-serve gap inside one clip (Steven's choice), which
+raw rows count as idle, so the folded play share is flattered by a few points
+and the raw one is the honest coverage measure. Both lines are labelled;
+never read one as the other.
+
+Faults fold into the point that follows: a clip of at most 6 s followed by
+another within 15 s merges into it, so a missed first serve and the second
+serve are one clip.
+
+**Measured result, and its limit.** Held-out on 2026-10-12's first 16
+minutes (38 truth rows, 15 first-serve faults, 3 double faults): raw 36/38,
+every non-fault row caught, 52% of clip time is play (play is 25% of those
+minutes), median end error +1.7 s. Folded: 20/23, 61%. The threshold 0.25 was **picked in-sample**:
+0.23-0.29 all clear the bar, 0.2 gives folded 22/23 but raw play 49%, and
+above 0.29 the first non-fault row goes missing. At 0.25 the raw report shows
+every real point caught, so folded's 20/23 is most likely the folded-truth
+quirk above rather than missed points.
+
+**Fence mode is fitted on ONE session**: one opponent, one evening's light,
+one clip position on one fence. Held-out blocks prove it is not memorising
+minutes; they do not prove it carries. The next labelled fence session is the
+first real test. Do not change a fence constant, the threshold or the feature
+set without a new truth file, and score any such change held-out.
+`packaging/build_app.sh` refuses a freeze with no `fence_model.json`, for the
+reason migrations are guarded: it is read by path at runtime and its absence
+would break every fence source.
 
 ### Play region
 

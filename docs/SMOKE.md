@@ -265,3 +265,28 @@ phase's. If the cuts are wrong here, that is not the app being broken.
 - [ ] Every interactive element shows a visible focus ring with the mouse
       untouched
 - [ ] The Dock icon is the split ball, and is legible in a Finder list view
+
+## Fence mode (2026-10-16)
+
+Exercised by hand, against a scratch library (a copy of the real db, not the
+real library on the drive):
+
+- [x] Controller hand check: set 2026-10-12 to **Fence + Singles** and saved
+      corners in the QuadEditor. **Run detection · ~15 min** was offered
+      immediately, in both the QuadEditor's card and the Detection panel
+      (2026-10-12 has no `boxes.jsonl`, so this is a full detect, not a
+      re-segment)
+
+Only tests stand behind these. Do not read them as verified:
+
+- [ ] The actual fence re-detect on real footage, end to end (YOLO writing
+      `boxes.jsonl`, then fence scoring). The held-out numbers in CLAUDE.md
+      come from the committed box fixture, not from a run in the app
+- [ ] The friend-mode card: corners saved, re-cut offered inside QuadEditor
+      with the manual-edits-lost confirm
+- [ ] The Setup wizard's fence flow on a new source: mount/format, corners,
+      derived play region, then the build
+- [ ] `build_app.sh`'s `fence_model.json` guard against a real freeze
+- [ ] `splitstep fence score ae5e11fc8cee4dd19e6c88bb8240428f` after that
+      re-detect: in-sample, since 2026-10-12 trained the model. Steven's own
+      review of the cuts is the real Validation 2
